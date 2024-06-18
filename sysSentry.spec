@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 1
+Release: 2
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -93,6 +93,9 @@ install config/plugins/cpu_sentry.ini %{buildroot}/etc/sysSentry/plugins/cpu_sen
 install src/c/catcli/catlib/build/cat-cli %{buildroot}%{_bindir}/cat-cli
 install src/c/catcli/catlib/build/plugin/cpu_patrol/libcpu_patrol.so %{buildroot}%{_libdir}
 
+chrpath -d %{buildroot}%{_bindir}/cat-cli
+chrpath -d %{buildroot}%{_libdir}/libcpu_patrol.so
+
 pushd src/python
 python3 setup.py install -O1 --root=$RPM_BUILD_ROOT --record=SENTRY_FILES
 popd
@@ -164,6 +167,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/syssentry/cpu_*
 
 %changelog
+* Tue Jun 18 2024 shixuantong <shixuantong1@huawei.com> - 1.0.2-2
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:delete rpath setting
+
 * Tue Jun 11 2024 shixuantong <shixuantong1@huawei.com> - 1.0.2-1
 - Type:enhancement
 - CVE:NA
