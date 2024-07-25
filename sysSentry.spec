@@ -4,13 +4,15 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 2
+Release: 3
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
 BuildRoot: %{_builddir}/%{name}-root
 
 Patch1:    fix-version-in-setup.py.patch
+Patch2:    Fix-the-problem-that-function-cpu_report_result-is-c.patch
+Patch3:    fix-error-handling.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -167,6 +169,13 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/syssentry/cpu_*
 
 %changelog
+* Thu Jul 25 2024 shixuantong <shixuantong1@huawei.com> - 1.0.2-3
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:Fix the problem that function cpu_report_result() is called more than once
+       fix error handling
+
 * Tue Jun 18 2024 shixuantong <shixuantong1@huawei.com> - 1.0.2-2
 - Type:bugfix
 - CVE:NA
