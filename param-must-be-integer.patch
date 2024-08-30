@@ -1,0 +1,23 @@
+From 34febf57060060d1f8262941af49e3beeb1f7f5d Mon Sep 17 00:00:00 2001
+From: jwolf <523083921@qq.com>
+Date: Fri, 30 Aug 2024 16:59:56 +0800
+Subject: [PATCH] param must be integer
+
+---
+ src/c/catcli/catlib/cli_param_checker.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/c/catcli/catlib/cli_param_checker.c b/src/c/catcli/catlib/cli_param_checker.c
+index 5b38402..71edf17 100644
+--- a/src/c/catcli/catlib/cli_param_checker.c
++++ b/src/c/catcli/catlib/cli_param_checker.c
+@@ -17,6 +17,7 @@ void checkset_cpu_usage_percentage(char *getopt_optarg, catcli_request_body *p_r
+     if (cpu_utility <= 0 || cpu_utility > CPU_USAGE_PERCENTAGE_MAX || strchr(getopt_optarg, '.') != NULL) {
+         strncpy(errs->patrol_module_err,
+             "\"cpu_utility \" must be an integer greater in the range (0,100],correct \"-u, --cpu_utility\"\n", MAX_ERR_LEN);
++    	p_request_body->cpu_utility = 0;
+     } else {
+     	p_request_body->cpu_utility = (int)cpu_utility;
+     }
+-- 
+Gitee
