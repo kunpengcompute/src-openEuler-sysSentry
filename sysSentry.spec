@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 6
+Release: 7
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -17,6 +17,7 @@ Patch4:    fix-result-when-process-output-is-None.patch
 Patch5:    cpu_utility-and-cpu_patrol-must-be-an-integer.patch
 Patch6:    setting-parameters-must-be-integer.patch
 Patch7:    param-must-be-integer.patch
+Patch8:    add-deleted-code-to-plugin-rasdaemon.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -173,6 +174,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/syssentry/cpu_*
 
 %changelog
+* Sat Aug 31 2024 zhuofeng <zhuofeng2@huawei.com> - 1.0.2-7
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:add deleted code to plugin rasdaemon
+
 * Fri Aug 30 2024 shixuantong <shixuantong1@huawei.com> - 1.0.2-6
 - Type:bugfix
 - CVE:NA
