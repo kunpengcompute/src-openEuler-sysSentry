@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 7
+Release: 8
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -48,7 +48,8 @@ This package provides developer tools for the libxalarm.
 %package -n cpu_sentry
 Summary:        CPU fault inspection program
 Requires:       procps-ng
-Recommends:       sysSentry = %{version}-%{release}
+Recommends:     sysSentry = %{version}-%{release}
+Recommends:     ipmitool
 
 %description -n cpu_sentry
 This package provides CPU fault detection
@@ -174,6 +175,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/syssentry/cpu_*
 
 %changelog
+* Sat Aug 31 2024 shixuantong <shixuantong1@huawei.com> - 1.0.2-8
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:add ipmitool to Recommends for cpu_sentry
+
 * Sat Aug 31 2024 zhuofeng <zhuofeng2@huawei.com> - 1.0.2-7
 - Type:bugfix
 - CVE:NA
