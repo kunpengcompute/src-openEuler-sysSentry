@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 9
+Release: 10
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -19,6 +19,7 @@ Patch6:    setting-parameters-must-be-integer.patch
 Patch7:    param-must-be-integer.patch
 Patch8:    add-deleted-code-to-plugin-rasdaemon.patch
 Patch9:    Remove-ANSI-escape-sequences.patch
+Patch10:   split-cpu_sentry-and-syssentry.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -176,6 +177,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/syssentry/cpu_*
 
 %changelog
+* Mon Sep 09 2024 caixiaomeng <caixiaomeng2@huawei.com> - 1.0.2-10
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:split cpu_sentry and syssentry
+
 * Mon Sep 02 2024 shixuantong <shixuantong1@huawei.com> - 1.0.2-9
 - Type:bugfix
 - CVE:NA
