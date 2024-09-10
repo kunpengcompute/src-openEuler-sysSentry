@@ -1,0 +1,155 @@
+From 3f6e4d12618597b5aab6b0633f1bda800526ea54 Mon Sep 17 00:00:00 2001
+From: gaoruoshu <gaoruoshu@huawei.com>
+Date: Wed, 14 Aug 2024 21:10:20 +0800
+Subject: [PATCH] split cpu_sentry and syssentry
+
+---
+ src/python/syssentry/cpu_alarm.py | 42 +++++++++++++++++++++++++
+ src/python/syssentry/syssentry.py | 52 ++++++-------------------------
+ 2 files changed, 52 insertions(+), 42 deletions(-)
+
+diff --git a/src/python/syssentry/cpu_alarm.py b/src/python/syssentry/cpu_alarm.py
+index d972c42..0b1642b 100644
+--- a/src/python/syssentry/cpu_alarm.py
++++ b/src/python/syssentry/cpu_alarm.py
+@@ -1,6 +1,7 @@
+ import re
+ import math
+ import logging
++import socket
+ from enum import Enum
+ 
+ from .utils import execute_command
+@@ -15,6 +16,12 @@ BINARY = 2
+ MIN_DATA_LEN = 0
+ MAX_DATA_LEN = 999
+ 
++PARAM_REP_LEN = 3
++PARAM_TYPE_LEN = 1
++PARAM_MODULE_LEN = 1
++PARAM_TRANS_TO_LEN = 2
++PARAM_DATA_LEN = 3
++
+ 
+ class Type(Enum):
+     CE = 0x00
+@@ -207,3 +214,38 @@ def check_fixed_param(data, expect):
+             raise ValueError("expected str param is not valid")
+         return data
+     raise NotImplementedError("unexpected param type")
++
++
++def cpu_alarm_recv(server_socket: socket.socket):
++    try:
++        client_socket, _ = server_socket.accept()
++        logging.debug("cpu alarm fd listen ok")
++
++        data = client_socket.recv(PARAM_REP_LEN)
++        check_fixed_param(data, "REP")
++
++        data = client_socket.recv(PARAM_TYPE_LEN)
++        _type = check_fixed_param(data, Type)
++
++        data = client_socket.recv(PARAM_MODULE_LEN)
++        module = check_fixed_param(data, Module)
++
++        data = client_socket.recv(PARAM_TRANS_TO_LEN)
++        trans_to = check_fixed_param(data, TransTo)
++
++        data = client_socket.recv(PARAM_DATA_LEN)
++        data_len = check_fixed_param(data, (MIN_DATA_LEN, MAX_DATA_LEN))
++
++        data = client_socket.recv(data_len)
++
++        command, event_type, socket_id, core_id = parser_cpu_alarm_info(data)
++    except socket.error:
++        logging.error("socket error")
++        return
++    except (ValueError, OSError, UnicodeError, TypeError, NotImplementedError):
++        logging.error("server recv cpu alarm msg failed!")
++        client_socket.close()
++        return
++
++    upload_bmc(_type, module, command, event_type, socket_id, core_id)
++
+diff --git a/src/python/syssentry/syssentry.py b/src/python/syssentry/syssentry.py
+index 3d5cb8d..f93956e 100644
+--- a/src/python/syssentry/syssentry.py
++++ b/src/python/syssentry/syssentry.py
+@@ -36,8 +36,15 @@ from .heartbeat import (heartbeat_timeout_chk, heartbeat_fd_create,
+ from .result import RESULT_MSG_HEAD_LEN, RESULT_MSG_MAGIC_LEN, RESULT_MAGIC
+ from .result import RESULT_LEVEL_ERR_MSG_DICT, ResultLevel
+ from .utils import get_current_time_string
+-from .cpu_alarm import (upload_bmc, check_fixed_param, parser_cpu_alarm_info,
+-                        Type, Module, TransTo, MIN_DATA_LEN, MAX_DATA_LEN)
++
++
++CPU_EXIST = True
++try:
++    from .cpu_alarm import cpu_alarm_recv
++except ImportError:
++    CPU_EXIST = False
++    logging.debug("Cannot find cpu sentry mod")
++
+ 
+ INSPECTOR = None
+ 
+@@ -76,45 +83,6 @@ PID_FILE_FLOCK = None
+ RESULT_SOCKET_PATH = "/var/run/sysSentry/result.sock"
+ 
+ CPU_ALARM_SOCKET_PATH = "/var/run/sysSentry/report.sock"
+-PARAM_REP_LEN = 3
+-PARAM_TYPE_LEN = 1
+-PARAM_MODULE_LEN = 1
+-PARAM_TRANS_TO_LEN = 2
+-PARAM_DATA_LEN = 3
+-
+-
+-def cpu_alarm_recv(server_socket: socket.socket):
+-    try:
+-        client_socket, _ = server_socket.accept()
+-        logging.debug("cpu alarm fd listen ok")
+-
+-        data = client_socket.recv(PARAM_REP_LEN)
+-        check_fixed_param(data, "REP")
+-
+-        data = client_socket.recv(PARAM_TYPE_LEN)
+-        _type = check_fixed_param(data, Type)
+-
+-        data = client_socket.recv(PARAM_MODULE_LEN)
+-        module = check_fixed_param(data, Module)
+-
+-        data = client_socket.recv(PARAM_TRANS_TO_LEN)
+-        trans_to = check_fixed_param(data, TransTo)
+-
+-        data = client_socket.recv(PARAM_DATA_LEN)
+-        data_len = check_fixed_param(data, (MIN_DATA_LEN, MAX_DATA_LEN))
+-
+-        data = client_socket.recv(data_len)
+-
+-        command, event_type, socket_id, core_id = parser_cpu_alarm_info(data)
+-    except socket.error:
+-        logging.error("socket error")
+-        return
+-    except (ValueError, OSError, UnicodeError, TypeError, NotImplementedError):
+-        logging.error("server recv cpu alarm msg failed!")
+-        client_socket.close()
+-        return
+-
+-    upload_bmc(_type, module, command, event_type, socket_id, core_id)
+ 
+ 
+ def msg_data_process(msg_data):
+@@ -480,7 +448,7 @@ def main_loop():
+                     server_result_recv(server_result_fd)
+                 elif event_fd == heartbeat_fd.fileno():
+                     heartbeat_recv(heartbeat_fd)
+-                elif event_fd == cpu_alarm_fd.fileno():
++                elif CPU_EXIST and event_fd == cpu_alarm_fd.fileno():
+                     cpu_alarm_recv(cpu_alarm_fd)
+                 else:
+                     continue
+-- 
+2.33.0
+
+
