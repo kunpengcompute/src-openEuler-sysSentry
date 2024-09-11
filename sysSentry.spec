@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 10
+Release: 11
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -20,6 +20,7 @@ Patch7:    param-must-be-integer.patch
 Patch8:    add-deleted-code-to-plugin-rasdaemon.patch
 Patch9:    Remove-ANSI-escape-sequences.patch
 Patch10:   split-cpu_sentry-and-syssentry.patch
+Patch11:   fix-configparser.InterpolationSyntaxError.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -177,6 +178,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/syssentry/cpu_*
 
 %changelog
+* Wed Sep 11 2024 shixuantong <shixuantong1@huawei.com> - 1.0.2-11
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix configparser.InterpolationSyntaxError
+
 * Mon Sep 09 2024 caixiaomeng <caixiaomeng2@huawei.com> - 1.0.2-10
 - Type:bugfix
 - CVE:NA
