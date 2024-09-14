@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 12
+Release: 13
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -22,6 +22,8 @@ Patch9:    Remove-ANSI-escape-sequences.patch
 Patch10:   split-cpu_sentry-and-syssentry.patch
 Patch11:   fix-configparser.InterpolationSyntaxError.patch
 Patch12:   fix-syssentry-fails-to-be-started-when-cpu_sentry-is.patch
+Patch13:   add-collect-module-to-sysSentry.patch
+Patch14:   feature-add-avg_block_io-plugin.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -57,6 +59,13 @@ Recommends:     ipmitool
 
 %description -n cpu_sentry
 This package provides CPU fault detection
+
+%package -n avg_block_io
+Summary:        Supports slow I/O detection
+Requires:       sysSentry = %{version}-%{release}
+
+%description -n avg_block_io
+This package provides Supports slow I/O detection based on EBPF
 
 %prep
 %autosetup -n %{name}-%{version} -p1
@@ -99,6 +108,10 @@ install -m 600 service/xalarmd.service %{buildroot}%{_unitdir}
 install -m 600 config/logrotate %{buildroot}%{_sysconfdir}/logrotate.d/sysSentry
 install -m 644 src/libso/xalarm/register_xalarm.h %{buildroot}%{_includedir}/xalarm/register_xalarm.h
 
+# sentryCollector
+install -m 600 config/collector.conf %{buildroot}%{_sysconfdir}/sysSentry
+install -m 600 service/sentryCollector.service %{buildroot}%{_unitdir}
+
 # cpu sentry
 install config/tasks/cpu_sentry.mod %{buildroot}/etc/sysSentry/tasks/
 install config/plugins/cpu_sentry.ini %{buildroot}/etc/sysSentry/plugins/cpu_sentry.ini
@@ -107,6 +120,10 @@ install src/c/catcli/catlib/build/plugin/cpu_patrol/libcpu_patrol.so %{buildroot
 
 chrpath -d %{buildroot}%{_bindir}/cat-cli
 chrpath -d %{buildroot}%{_libdir}/libcpu_patrol.so
+
+# avg_block_io
+install config/tasks/avg_block_io.mod %{buildroot}/etc/sysSentry/tasks/
+install config/plugins/avg_block_io.ini %{buildroot}/etc/sysSentry/plugins/avg_block_io.ini
 
 pushd src/python
 python3 setup.py install -O1 --root=$RPM_BUILD_ROOT --record=SENTRY_FILES
@@ -123,6 +140,8 @@ if [ "$1" = "0" ]; then
     systemctl disable xalarmd.service
     systemctl stop sysSentry.service
     systemctl disable sysSentry.service
+    systemctl stop sentryCollector.service
+    systemctl disable sentryCollector.service
 fi
 rm -rf /var/run/xalarm | :
 rm -rf /var/run/sysSentry | :
@@ -137,6 +156,8 @@ rm -rf %{buildroot}
 %defattr(0550,root,root)
 %attr(0550,root,root) %{python3_sitelib}/xalarm
 %attr(0550,root,root) %{python3_sitelib}/syssentry
+%attr(0550,root,root) %{python3_sitelib}/sentryCollector
+%attr(0550,root,root) %{python3_sitelib}/sentryPlugins/avg_block_io
 
 # sysSentry
 %attr(0500,root,root) %{_bindir}/sentryctl
@@ -162,6 +183,17 @@ rm -rf %{buildroot}
 %exclude %{python3_sitelib}/syssentry/cpu_*
 %exclude %{python3_sitelib}/syssentry/*/cpu_*
 
+# avg block io
+%exclude %{_sysconfdir}/sysSentry/tasks/avg_block_io.mod
+%exclude %{_sysconfdir}/sysSentry/plugins/avg_block_io.ini
+%exclude %{_bindir}/avg_block_io
+%exclude %{python3_sitelib}/sentryPlugins/*
+
+# sentryCollector
+%attr(0550,root,root) %{_bindir}/sentryCollector
+%attr(0600,root,root) %{_sysconfdir}/sysSentry/collector.conf
+%attr(0600,root,root) %{_unitdir}/sentryCollector.service
+
 %files -n libxalarm
 %attr(0550,root,root) %{_libdir}/libxalarm.so
 
@@ -178,7 +210,19 @@ rm -rf %{buildroot}
 %attr(0600,root,root) %{_sysconfdir}/sysSentry/plugins/cpu_sentry.ini
 %attr(0550,root,root) %{python3_sitelib}/syssentry/cpu_*
 
+%files -n avg_block_io
+%attr(0500,root,root) %{_bindir}/avg_block_io
+%attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/avg_block_io.mod
+%attr(0600,root,root) %{_sysconfdir}/sysSentry/plugins/avg_block_io.ini
+%attr(0550,root,root) %{python3_sitelib}/sentryPlugins/avg_block_io
+
 %changelog
+* Sat Sep 14 2024 zhuofeng <zhuofeng2@huawei.com> - 1.0.2-13
+- Type:requirement
+- CVE:NA
+- SUG:NA
+- DESC:add collect module and avg_block_io plugin to sysSentry
+
 * Sat Sep 14 2024 zhuofeng <zhuofeng2@huawei.com> - 1.0.2-12
 - Type:bugfix
 - CVE:NA
