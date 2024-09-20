@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 13
+Release: 14
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -24,6 +24,7 @@ Patch11:   fix-configparser.InterpolationSyntaxError.patch
 Patch12:   fix-syssentry-fails-to-be-started-when-cpu_sentry-is.patch
 Patch13:   add-collect-module-to-sysSentry.patch
 Patch14:   feature-add-avg_block_io-plugin.patch
+Patch15:   fix-some-about-collect-module-and-avg-block-io.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -217,6 +218,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryPlugins/avg_block_io
 
 %changelog
+* Fri Sep 20 2024 zhuofeng <zhuofeng2@huawei.com> - 1.0.2-14
+- Type:requirement
+- CVE:NA
+- SUG:NA
+- DESC:fix some about collect module and avg block io
+
 * Sat Sep 14 2024 zhuofeng <zhuofeng2@huawei.com> - 1.0.2-13
 - Type:requirement
 - CVE:NA
