@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 14
+Release: 15
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -25,6 +25,7 @@ Patch12:   fix-syssentry-fails-to-be-started-when-cpu_sentry-is.patch
 Patch13:   add-collect-module-to-sysSentry.patch
 Patch14:   feature-add-avg_block_io-plugin.patch
 Patch15:   fix-some-about-collect-module-and-avg-block-io.patch
+Patch16:   add-ai-threshold-slow-io-detection-plugin.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -67,6 +68,14 @@ Requires:       sysSentry = %{version}-%{release}
 
 %description -n avg_block_io
 This package provides Supports slow I/O detection based on EBPF
+
+%package -n ai_threshold_slow_io_detection
+Summary:        Supports slow I/O detection
+Requires:       python3-numpy
+Requires:       sysSentry = %{version}-%{release}
+
+%description -n ai_threshold_slow_io_detection
+This package provides Supports slow I/O detection based on AI
 
 %prep
 %autosetup -n %{name}-%{version} -p1
@@ -126,6 +135,10 @@ chrpath -d %{buildroot}%{_libdir}/libcpu_patrol.so
 install config/tasks/avg_block_io.mod %{buildroot}/etc/sysSentry/tasks/
 install config/plugins/avg_block_io.ini %{buildroot}/etc/sysSentry/plugins/avg_block_io.ini
 
+# ai_threshold_slow_io_detection
+install config/tasks/ai_threshold_slow_io_detection.mod %{buildroot}/etc/sysSentry/tasks/
+install config/plugins/ai_threshold_slow_io_detection.ini %{buildroot}/etc/sysSentry/plugins/ai_threshold_slow_io_detection.ini
+
 pushd src/python
 python3 setup.py install -O1 --root=$RPM_BUILD_ROOT --record=SENTRY_FILES
 popd
@@ -159,6 +172,7 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/syssentry
 %attr(0550,root,root) %{python3_sitelib}/sentryCollector
 %attr(0550,root,root) %{python3_sitelib}/sentryPlugins/avg_block_io
+%attr(0550,root,root) %{python3_sitelib}/sentryPlugins/ai_threshold_slow_io_detection
 
 # sysSentry
 %attr(0500,root,root) %{_bindir}/sentryctl
@@ -190,6 +204,12 @@ rm -rf %{buildroot}
 %exclude %{_bindir}/avg_block_io
 %exclude %{python3_sitelib}/sentryPlugins/*
 
+# ai_threshold_slow_io_detection
+%exclude %{_sysconfdir}/sysSentry/tasks/ai_threshold_slow_io_detection.mod
+%exclude %{_sysconfdir}/sysSentry/plugins/ai_threshold_slow_io_detection.ini
+%exclude %{_bindir}/ai_threshold_slow_io_detection
+%exclude %{python3_sitelib}/sentryPlugins/*
+
 # sentryCollector
 %attr(0550,root,root) %{_bindir}/sentryCollector
 %attr(0600,root,root) %{_sysconfdir}/sysSentry/collector.conf
@@ -217,7 +237,19 @@ rm -rf %{buildroot}
 %attr(0600,root,root) %{_sysconfdir}/sysSentry/plugins/avg_block_io.ini
 %attr(0550,root,root) %{python3_sitelib}/sentryPlugins/avg_block_io
 
+%files -n ai_threshold_slow_io_detection
+%attr(0500,root,root) %{_bindir}/ai_threshold_slow_io_detection
+%attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/ai_threshold_slow_io_detection.mod
+%attr(0600,root,root) %{_sysconfdir}/sysSentry/plugins/ai_threshold_slow_io_detection.ini
+%attr(0550,root,root) %{python3_sitelib}/sentryPlugins/ai_threshold_slow_io_detection
+
 %changelog
+* Mon Sep 23 2024 heyouzhi <heyouzhi@huawei.com> - 1.0.2-15
+- Type:requirement
+- CVE:NA
+- SUG:NA
+- DESC:add ai threshold slow io detection plugin
+
 * Fri Sep 20 2024 zhuofeng <zhuofeng2@huawei.com> - 1.0.2-14
 - Type:requirement
 - CVE:NA
