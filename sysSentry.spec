@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 14
+Release: 15
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -25,6 +25,7 @@ Patch12:   fix-syssentry-fails-to-be-started-when-cpu_sentry-is.patch
 Patch13:   optimize-the-handing-of-cat-cli-error-msg-in-cpu_sentry.patch
 Patch14:   over-threshold-should-be-warn-level-log-in-cat-cli.patch
 Patch15:   add-separator-to-err-info.patch
+Patch16:   remove-threshold-max-cpu-cores.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -182,6 +183,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/syssentry/cpu_*
 
 %changelog
+* Wed Sep 25 2024 shixuantong <shixuantong1@huawei.com> - 1.0.2-15
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:remove threshold:max cpu cores
+
 * Wed Sep 25 2024 shixuantong <shixuantong1@huawei.com> - 1.0.2-14
 - Type:bugfix
 - CVE:NA
