@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 16
+Release: 17
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -28,6 +28,7 @@ Patch15:   fix-some-about-collect-module-and-avg-block-io.patch
 Patch16:   add-ai-threshold-slow-io-detection-plugin.patch
 Patch17:   optimize-the-handing-of-cat-cli-error-msg-in-cpu_sentry.patch
 Patch18:   over-threshold-should-be-warn-level-log-in-cat-cli.patch
+Patch19:   fix-bug-step-2-about-collect-module-and-avg-block-io.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -246,6 +247,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryPlugins/ai_threshold_slow_io_detection
 
 %changelog
+* Wed Sep 25 2024 zhuofeng <zhuofeng2@huawei.com> - 1.0.2-17
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix bug step 2 about collect module and avg block io
+
 * Mon Sep 23 2024 shixuantong <shixuantong1@huawei.com> - 1.0.2-16
 - Type:bugfix
 - CVE:NA
