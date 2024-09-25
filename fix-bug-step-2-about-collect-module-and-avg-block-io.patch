@@ -1,0 +1,323 @@
+From e6eb39799b3ca15fb385c572863417ea26bdfa66 Mon Sep 17 00:00:00 2001
+From: zhuofeng <zhuofeng2@huawei.com>
+Date: Wed, 25 Sep 2024 11:03:29 +0800
+Subject: [PATCH] fix-bug-step-2-about-collect-module-and-avg-block-io
+
+---
+ src/python/sentryCollector/collect_config.py  | 11 ++-
+ src/python/sentryCollector/collect_io.py      | 25 ++---
+ src/python/sentryCollector/collect_plugin.py  |  6 +-
+ src/python/sentryCollector/collect_server.py  |  1 -
+ src/python/sentryCollector/collectd.py        |  4 +-
+ .../avg_block_io/avg_block_io.py              | 92 ++++++++++++++-----
+ 6 files changed, 96 insertions(+), 43 deletions(-)
+
+diff --git a/src/python/sentryCollector/collect_config.py b/src/python/sentryCollector/collect_config.py
+index b6cc75c..0fdd9f0 100644
+--- a/src/python/sentryCollector/collect_config.py
++++ b/src/python/sentryCollector/collect_config.py
+@@ -49,14 +49,14 @@ class CollectConfig:
+             self.config = configparser.ConfigParser()
+             self.config.read(self.filename)
+         except configparser.Error:
+-            logging.error("collectd configure file read failed")
++            logging.error("collect configure file read failed")
+             return
+         
+         try:
+             common_config = self.config[CONF_COMMON]
+-            modules_str = common_config[CONF_MODULES]
++            modules_str = common_config[CONF_MODULES].lower()
+             # remove space
+-            modules_list = modules_str.replace(" ", "").split(',')
++            modules_list = set(modules_str.replace(" ", "").split(','))
+         except KeyError as e:
+             logging.error("read config data failed, %s", e)
+             return
+@@ -98,7 +98,7 @@ class CollectConfig:
+                 CONF_IO, CONF_IO_MAX_SAVE, CONF_IO_MAX_SAVE_DEFAULT)
+             result_io_config[CONF_IO_MAX_SAVE] = CONF_IO_MAX_SAVE_DEFAULT
+         # disk
+-        disk = io_map_value.get(CONF_IO_DISK)
++        disk = io_map_value.get(CONF_IO_DISK).lower()
+         if disk:
+             disk_str = disk.replace(" ", "")
+             pattern = r'^[a-zA-Z0-9-_,]+$'
+@@ -106,12 +106,13 @@ class CollectConfig:
+                 logging.warning("module_name = %s section, field = %s is incorrect, use default %s", 
+                 CONF_IO, CONF_IO_DISK, CONF_IO_DISK_DEFAULT)
+                 disk_str = CONF_IO_DISK_DEFAULT
++            disk_str = ",".join(set(disk_str.split(',')))
+             result_io_config[CONF_IO_DISK] = disk_str
+         else:
+             logging.warning("module_name = %s section, field = %s is incorrect, use default %s", 
+                 CONF_IO, CONF_IO_DISK, CONF_IO_DISK_DEFAULT)
+             result_io_config[CONF_IO_DISK] = CONF_IO_DISK_DEFAULT
+-        logging.info("config get_io_config: %s", result_io_config)
++        logging.debug("config get_io_config: %s", result_io_config)
+         return result_io_config
+ 
+     def get_common_config(self):
+diff --git a/src/python/sentryCollector/collect_io.py b/src/python/sentryCollector/collect_io.py
+index 104b734..9c8dae7 100644
+--- a/src/python/sentryCollector/collect_io.py
++++ b/src/python/sentryCollector/collect_io.py
+@@ -177,10 +177,8 @@ class CollectIo():
+ 
+     def is_kernel_avaliable(self):
+         base_path = '/sys/kernel/debug/block'
++        all_disk = []
+         for disk_name in os.listdir(base_path):
+-            if not self.loop_all and disk_name not in self.disk_list:
+-                continue
+-
+             disk_path = os.path.join(base_path, disk_name)
+             blk_io_hierarchy_path = os.path.join(disk_path, 'blk_io_hierarchy')
+ 
+@@ -190,12 +188,18 @@ class CollectIo():
+ 
+             for file_name in os.listdir(blk_io_hierarchy_path):
+                 file_path = os.path.join(blk_io_hierarchy_path, file_name)
+-
+                 if file_name == 'stats':
+-                    stage_list = self.extract_first_column(file_path)
+-                    self.disk_map_stage[disk_name] = stage_list
+-                    self.window_value[disk_name] = {}
+-                    IO_GLOBAL_DATA[disk_name] = {}
++                    all_disk.append(disk_name)
++
++        for disk_name in self.disk_list:
++            if not self.loop_all and disk_name not in all_disk:
++                logging.warning("the %s disk not exist!", disk_name)
++                continue
++            stats_file = '/sys/kernel/debug/block/{}/blk_io_hierarchy/stats'.format(disk_name)
++            stage_list = self.extract_first_column(stats_file)
++            self.disk_map_stage[disk_name] = stage_list
++            self.window_value[disk_name] = {}
++            IO_GLOBAL_DATA[disk_name] = {}
+ 
+         return len(IO_GLOBAL_DATA) != 0
+ 
+@@ -203,7 +207,7 @@ class CollectIo():
+         logging.info("collect io thread start")
+         
+         if not self.is_kernel_avaliable() or len(self.disk_map_stage) == 0:
+-            logging.warning("no disks meet the requirements. collect io thread exits")
++            logging.warning("no disks meet the requirements. collect io thread exit")
+             return
+ 
+         for disk_name, stage_list in self.disk_map_stage.items():
+@@ -239,5 +243,4 @@ class CollectIo():
+ 
+     # set stop event, notify thread exit
+     def stop_thread(self):
+-        logging.debug("collect io thread is preparing to exit")
+-        self.stop_event.set() 
++        self.stop_event.set()
+diff --git a/src/python/sentryCollector/collect_plugin.py b/src/python/sentryCollector/collect_plugin.py
+index 9132473..1faa5e3 100644
+--- a/src/python/sentryCollector/collect_plugin.py
++++ b/src/python/sentryCollector/collect_plugin.py
+@@ -10,7 +10,7 @@
+ # See the Mulan PSL v2 for more details.
+ 
+ """
+-collcet plugin
++collect plugin
+ """
+ import json
+ import socket
+@@ -75,7 +75,7 @@ def client_send_and_recv(request_data, data_str_len, protocol):
+     try:
+         client_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+     except socket.error:
+-        print("collect_plugin: client creat socket error")
++        print("collect_plugin: client create socket error")
+         return None
+ 
+     try:
+@@ -128,7 +128,7 @@ def client_send_and_recv(request_data, data_str_len, protocol):
+ def validate_parameters(param, len_limit, char_limit):
+     ret = ResultMessage.RESULT_SUCCEED
+     if not param:
+-        print("parm is invalid")
++        print("param is invalid")
+         ret = ResultMessage.RESULT_NOT_PARAM
+         return [False, ret]
+ 
+diff --git a/src/python/sentryCollector/collect_server.py b/src/python/sentryCollector/collect_server.py
+index bab4e56..11d1af0 100644
+--- a/src/python/sentryCollector/collect_server.py
++++ b/src/python/sentryCollector/collect_server.py
+@@ -281,5 +281,4 @@ class CollectServer():
+                 pass
+ 
+     def stop_thread(self):
+-        logging.debug("collect listen thread is preparing to exit")
+         self.stop_event.set() 
+diff --git a/src/python/sentryCollector/collectd.py b/src/python/sentryCollector/collectd.py
+index 3a836df..d9d8862 100644
+--- a/src/python/sentryCollector/collectd.py
++++ b/src/python/sentryCollector/collectd.py
+@@ -79,7 +79,7 @@ def main():
+         for info in module_list:
+             class_name = Module_Map_Class.get(info)
+             if not class_name:
+-                logging.info("%s correspond to class is not exists", info)
++                logging.info("%s correspond to class is not exist", info)
+                 continue
+             cn = class_name(module_config)
+             collect_thread = threading.Thread(target=cn.main_loop)
+@@ -94,4 +94,4 @@ def main():
+     finally:
+         pass
+ 
+-    logging.info("All threads have finished. Main thread is exiting.")
+\ No newline at end of file
++    logging.info("all threads have finished. main thread exit.")
+\ No newline at end of file
+diff --git a/src/python/sentryPlugins/avg_block_io/avg_block_io.py b/src/python/sentryPlugins/avg_block_io/avg_block_io.py
+index 73f0b22..ac35be2 100644
+--- a/src/python/sentryPlugins/avg_block_io/avg_block_io.py
++++ b/src/python/sentryPlugins/avg_block_io/avg_block_io.py
+@@ -28,33 +28,53 @@ def log_invalid_keys(not_in_list, keys_name, config_list, default_list):
+ 
+ 
+ def read_config_common(config):
+-    """read config file, get [common] section value"""
+-    try:
+-        common_sec = config['common']
+-    except configparser.NoSectionError:
++    """read config file, get [common] section value"""    
++    if not config.has_section("common"):
+         report_alarm_fail("Cannot find common section in config file")
+ 
+     try:
+-        period_time = int(common_sec.get("period_time", 1))
+-        if not (1 <= period_time <= 300):
+-            raise ValueError("Invalid period_time")
+-    except ValueError:
+-        period_time = 1
+-        logging.warning("Invalid period_time, set to 1s")
++        disk_name = config.get("common", "disk")
++        disk = [] if disk_name == "default" else disk_name.split(",")
++    except configparser.NoOptionError:
++        disk = []
++        logging.warning("Unset disk, set to default")
+ 
+-    disk = common_sec.get('disk').split(",") if common_sec.get('disk') not in [None, 'default'] else []
+-    stage = common_sec.get('stage').split(",") if common_sec.get('stage') not in [None, 'default'] else []
++    try:
++        stage_name = config.get("common", "stage")
++        stage = [] if stage_name == "default" else stage_name.split(",")
++    except configparser.NoOptionError:
++        stage = []
++        logging.warning("Unset stage, set to read,write")
+ 
+     if len(disk) > 10:
+         logging.warning("Too many disks, record only max 10 disks")
+         disk = disk[:10]
+ 
+-    iotype = common_sec.get('iotype', 'read,write').split(",")
+-    iotype_list = [rw.lower() for rw in iotype if rw.lower() in ['read', 'write', 'flush', 'discard']]
+-    err_iotype =  [rw for rw in iotype if rw.lower() not in ['read', 'write', 'flush', 'discard']]
++    try:
++        iotype_name = config.get("common", "iotype").split(",")
++        iotype_list = [rw.lower() for rw in iotype_name if rw.lower() in ['read', 'write', 'flush', 'discard']]
++        err_iotype =  [rw.lower() for rw in iotype_name if rw.lower() not in ['read', 'write', 'flush', 'discard']]
++
++        if iotype_list in [None, []]:
++            iotype_list = ["read", "write"]
++    except configparser.NoOptionError:
++        iotype = ["read", "write"]
++        logging.warning("Unset iotype, set to default")
+ 
+     if err_iotype:
+         logging.warning("{} in common.iotype are not valid, set iotype={}".format(err_iotype, iotype_list))
++    
++    
++    try:
++        period_time = int(config.get("common", "period_time"))
++        if not (1 <= period_time <= 300):
++            raise ValueError("Invalid period_time")
++    except ValueError:
++        period_time = 1
++        logging.warning("Invalid period_time, set to 1s")
++    except configparser.NoOptionError:
++        period_time = 1
++        logging.warning("Unset period_time, use 1s as default")
+ 
+     return period_time, disk, stage, iotype_list
+ 
+@@ -68,11 +88,23 @@ def read_config_algorithm(config):
+         win_size = int(config.get("algorithm", "win_size"))
+         if not (1 <= win_size <= 300):
+             raise ValueError("Invalid win_size")
++    except ValueError:
++        win_size = 30
++        logging.warning("Invalid win_size, set to 30")
++    except configparser.NoOptionError:
++        win_size = 30
++        logging.warning("Unset win_size, use 30 as default")
++    
++    try:
+         win_threshold = int(config.get("algorithm", "win_threshold"))
+         if win_threshold < 1 or win_threshold > 300 or win_threshold > win_size:
+             raise ValueError("Invalid win_threshold")
+     except ValueError:
+-        report_alarm_fail("Invalid win_threshold or win_size")
++        win_threshold = 6
++        logging.warning("Invalid win_threshold, set to 6")
++    except configparser.NoOptionError:
++        win_threshold = 6
++        logging.warning("Unset win_threshold, use 6 as default")
+ 
+     return win_size, win_threshold
+ 
+@@ -80,6 +112,21 @@ def read_config_algorithm(config):
+ def read_config_lat_iodump(io_dic, config):
+     """read config file, get [latency] [iodump] section value"""
+     common_param = {}
++    lat_sec = None
++    if not config.has_section("latency"):
++        logging.warning("Cannot find algorithm section in config file")
++    else:
++        lat_sec = config["latency"]
++
++    iodump_sec = None
++    if not config.has_section("iodump"):
++        logging.warning("Cannot find iodump section in config file")
++    else:
++        lat_sec = config["iodump"]
++    
++    if not lat_sec and not iodump_sec:
++        return common_param
++
+     for io_type in io_dic["iotype_list"]:
+         common_param[io_type] = {}
+ 
+@@ -90,13 +137,16 @@ def read_config_lat_iodump(io_dic, config):
+         }
+         iodump_key = "{}_iodump_lim".format(io_type)
+ 
++        if iodump_sec and iodump_key in iodump_sec and iodump_sec[iodump_key].isdecimal():
++            common_param[io_type][iodump_key] = int(iodump_sec[iodump_key])
++
++        if not lat_sec:
++            continue
++
+         for key_suffix, key_template in latency_keys.items():
+-            if key_template in config["latency"] and config["latency"][key_template].isdecimal():
+-                common_param[io_type][key_template] = int(config["latency"][key_template])
++            if key_template in lat_sec and lat_sec[key_template].isdecimal():
++                common_param[io_type][key_template] = int(lat_sec[key_template])
+ 
+-        if iodump_key in config["iodump"] and config["iodump"][iodump_key].isdecimal():
+-            common_param[io_type][iodump_key] = int(config["iodump"][iodump_key])
+-   
+     return common_param
+ 
+ 
+-- 
+2.33.0
+
