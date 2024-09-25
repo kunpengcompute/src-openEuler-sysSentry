@@ -1,0 +1,25 @@
+From 9eab57b95c88efc7bfc36e845664c9d35166db8f Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Wed, 25 Sep 2024 10:38:46 +0800
+Subject: [PATCH] add separator to err info
+
+---
+ src/python/syssentry/cpu_sentry.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/python/syssentry/cpu_sentry.py b/src/python/syssentry/cpu_sentry.py
+index 582d4b3..2f18d14 100644
+--- a/src/python/syssentry/cpu_sentry.py
++++ b/src/python/syssentry/cpu_sentry.py
+@@ -127,7 +127,7 @@ class CpuSentry:
+                     ansi_escape = r'\x1b\[([0-9]+)(;[0-9]+)*([A-Za-z])'
+                     error_info = re.sub(ansi_escape, '', error_info)
+                 if len(send_error_msg) + len(error_info) < DETAILS_LOG_MSG_MAX_LEN:
+-                    send_error_msg += error_info
++                    send_error_msg += ";" + error_info
+             self.send_result["details"]["msg"] = send_error_msg
+         elif found_fault_cores_number == 0:
+             self.send_result["details"]["code"] = 0
+-- 
+2.27.0
+
