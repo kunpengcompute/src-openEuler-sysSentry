@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 16
+Release: 17
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -27,6 +27,7 @@ Patch14:   feature-add-avg_block_io-plugin.patch
 Patch15:   fix-some-about-collect-module-and-avg-block-io.patch
 Patch16:   add-ai-threshold-slow-io-detection-plugin.patch
 Patch17:   fix-bug-step-2-about-collect-module-and-avg-block-io.patch
+Patch18:   add-log-level-and-change-log-format.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -245,6 +246,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryPlugins/ai_threshold_slow_io_detection
 
 %changelog
+* Fri Sep 27 2024 zhuofeng <zhuofeng2@huawei.com> - 1.0.2-17
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:add log level and change log format
+
 * Wed Sep 25 2024 zhuofeng <zhuofeng2@huawei.com> - 1.0.2-16
 - Type:bugfix
 - CVE:NA
