@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 18
+Release: 19
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -29,12 +29,15 @@ Patch16:   add-ai-threshold-slow-io-detection-plugin.patch
 Patch17:   fix-bug-step-2-about-collect-module-and-avg-block-io.patch
 Patch18:   add-log-level-and-change-log-format.patch
 Patch19:   fix-ai_block_io-some-issues.patch
+Patch20:   add-ebpf-collector.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
 BuildRequires: json-c-devel
 BuildRequires: chrpath
+BuildRequires: elfutils-devel clang libbpf-devel llvm kernel-source
 Requires:      libxalarm = %{version}
+Requires:      libbpf
 
 %description
 sysSentry provides framework tools for system inspection.
@@ -99,6 +102,10 @@ make
 popd
 popd
 
+pushd src/c/ebpf_collector
+make
+popd
+
 %install
 # sysSentry
 mkdir -p %{buildroot}%{_bindir}
@@ -110,6 +117,8 @@ install -d -m 700 %{buildroot}/etc/sysSentry/tasks/
 install -d -m 700 %{buildroot}/etc/sysSentry/plugins/
 install -m 600 config/inspect.conf %{buildroot}%{_sysconfdir}/sysSentry
 install -m 600 service/sysSentry.service %{buildroot}%{_unitdir}
+install -m 755 src/c/ebpf_collector/ebpf_collector %{buildroot}%{_bindir}
+install -m 700 src/c/ebpf_collector/output/ebpf_collector.bpf.o %{buildroot}/usr/lib
 
 # xalarm
 sh build/build.sh -i %{buildroot}%{_libdir}
@@ -186,6 +195,8 @@ rm -rf %{buildroot}
 %attr(0750,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/plugins
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/inspect.conf
 %attr(0600,root,root) %{_unitdir}/sysSentry.service
+%attr(0755,root,root) %{_bindir}/ebpf_collector
+%attr(0700,root,root) /usr/lib/ebpf_collector.bpf.o
 
 # xalarm
 %attr(0550,root,root) %{_bindir}/xalarmd
@@ -247,6 +258,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryPlugins/ai_block_io
 
 %changelog
+* Mon Sep 30 2024 zhangnan <zhangnan134@huawei.com> - 1.0.2-19
+- Type:requirement
+- CVE:NA
+- SUG:NA
+- DESC:add ebpf collector
+
 * Mon Sep 30 2024 heyouzhi <heyouzhi@huawei.com> - 1.0.2-18
 - Type:bugfix
 - CVE:NA
