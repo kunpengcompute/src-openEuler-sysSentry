@@ -1,0 +1,3481 @@
+From f51f9f8b3f50ba440598e1b4eea9818591604d47 Mon Sep 17 00:00:00 2001
+From: zhangnan <zhangnan134@huawei.com>
+Date: Fri, 27 Sep 2024 11:36:41 +0800
+Subject: [PATCH] add ebpf collector
+
+---
+ src/c/ebpf_collector/Makefile                 |  101 ++
+ src/c/ebpf_collector/bpf_helpers.h            |  535 +++++++
+ src/c/ebpf_collector/bpf_load.c               |  709 +++++++++
+ src/c/ebpf_collector/ebpf_collector.bpf.c     | 1408 +++++++++++++++++
+ src/c/ebpf_collector/ebpf_collector.c         |  270 ++++
+ src/c/ebpf_collector/ebpf_collector.h         |   77 +
+ src/python/sentryCollector/collect_io.py      |  241 ++-
+ .../avg_block_io/avg_block_io.py              |    4 +-
+ 8 files changed, 3328 insertions(+), 17 deletions(-)
+ create mode 100644 src/c/ebpf_collector/Makefile
+ create mode 100644 src/c/ebpf_collector/bpf_helpers.h
+ create mode 100644 src/c/ebpf_collector/bpf_load.c
+ create mode 100644 src/c/ebpf_collector/ebpf_collector.bpf.c
+ create mode 100644 src/c/ebpf_collector/ebpf_collector.c
+ create mode 100644 src/c/ebpf_collector/ebpf_collector.h
+
+diff --git a/src/c/ebpf_collector/Makefile b/src/c/ebpf_collector/Makefile
+new file mode 100644
+index 0000000..210d95b
+--- /dev/null
++++ b/src/c/ebpf_collector/Makefile
+@@ -0,0 +1,101 @@
++# Copyright (c) Huawei Technologies Co., Ltd. 2024. All rights reserved.
++# Description: ebpf collector program
++ARCH ?= $(shell uname -m | sed 's/x86_64/x86/' \
++			 | sed 's/arm.*/arm/' \
++			 | sed 's/aarch64/arm64/' \
++			 | sed 's/ppc64le/powerpc/' \
++			 | sed 's/mips.*/mips/' \
++			 | sed 's/riscv64/riscv/' \
++			 | sed 's/loongarch64/loongarch/')
++
++KERNEL_VERSION ?= $(shell rpm -qa | grep "kernel-source-4.19" | cut -d' ' -f1 | sed 's/kernel-source-//')
++KERNEL_SRC := /usr/src/kernels/$(KERNEL_VERSION)
++KERNEL_PATH := /usr/src/linux-$(KERNEL_VERSION)
++GCC_ARCH ?= $(shell gcc -dumpmachine)
++GCC_VERSION ?= $(shell gcc -dumpversion)
++
++LINUX_INCLUDE := -I$(KERNEL_SRC)/include/
++LINUX_INCLUDE += -I$(KERNEL_SRC)/arch/$(ARCH)/include/
++LINUX_INCLUDE += -I$(KERNEL_SRC)/arch/$(ARCH)/include/generated
++LINUX_INCLUDE += -I$(KERNEL_SRC)/arch/$(ARCH)/include/uapi
++LINUX_INCLUDE += -I$(KERNEL_SRC)/arch/$(ARCH)/include/uapi/linux
++LINUX_INCLUDE += -I$(KERNEL_SRC)/arch/$(ARCH)/include/generated/uapi
++LINUX_INCLUDE += -I$(KERNEL_SRC)/include/uapi
++LINUX_INCLUDE += -I$(KERNEL_SRC)/include/generated/uapi
++LINUX_INCLUDE += -include $(KERNEL_SRC)/include/linux/kconfig.h
++LINUX_INCLUDE += -I$(KERNEL_PATH)/samples/bpf
++LINUX_INCLUDE += -I$(KERNEL_SRC)/tools/lib/
++LINUX_INCLUDE += -I/usr/src/kernels/$(KERNEL_VERSION)/samples/bpf
++LINUX_INCLUDE += -I$(KERNEL_SRC)/tools/perf/include/bpf
++LINUX_INCLUDE += -I/usr/include/libbpf/src/bpf
++LINUX_INCLUDE += -I/usr/src/kernels/$(KERNEL_VERSION)/include/uapi/linux/
++LINUX_INCLUDE += -I/usr/include/bpf/
++LINUX_INCLUDE += -I/usr/include/
++BPF_LOAD_INCLUDE := -I/usr/include
++BPF_LOAD_INCLUDE += -I$(KERNEL_SRC)/include/
++BPF_LOAD_INCLUDE += -I/usr/src/kernels/$(KERNEL_VERSION)/include/
++KBUILD_HOSTCFLAGS := -I$(KERNEL_PATH)/include/
++KBUILD_HOSTCFLAGS += -I$(KERNEL_PATH)/tools/lib/ -I$(KERNEL_PATH)/tools/include
++KBUILD_HOSTCFLAGS += -I$(KERNEL_PATH)/tools/perf
++NOSTDINC_FLAGS := -nostdinc
++EXTRA_CFLAGS := -isystem /usr/lib/gcc/$(GCC_ARCH)/$(GCC_VERSION)/include
++CFLAGS := -g -Wall -w
++
++CLANG_BPF_SYS_INCLUDES ?= $(shell $(CLANG) -v -E - </dev/null 2>&1 \
++	| sed -n '/<...> search starts here:/,/End of search list./{ s| \(/.*\)|-idirafter \1|p }')
++
++APPS = ebpf_collector
++
++CC = gcc
++LLC ?= llc
++CLANG ?= clang
++
++USER_CFLAGS = -I. -I/usr/src/kernels/$(KERNEL_VERSION)/include/uapi/linux/ -I/usr/src/kernel/include -Wall
++KERNEL_CFLAGS = -I. -I/usr/src/kernels/$(KERNEL_VERSION)/include/uapi/linux/ -Wall 
++LOADER_CFLAGS = -I. -I/usr/src/kernels/$(KERNEL_VERSION)/include/uapi/linux/ -I/usr/src/kernel/include
++CLANG_FLAGS = -O2 -emit-llvm -c
++LLC_FLAGS = -march=bpf -filetype=obj
++
++OUTPUT := output
++
++.PHONY: all
++all: $(APPS)
++
++.PHONY: clean
++clean:
++	$(call msg,CLEAN)
++	$(Q)rm -rf $(OUTPUT) $(APPS)
++
++$(OUTPUT):
++	$(call msg,MKDIR,$@)
++	$(Q)mkdir -p $@
++
++$(OUTPUT)/%.bpf.o: %.bpf.c
++	$(call msg,BPF,$@)
++	$(CLANG) $(NOSTDINC_FLAGS) $(EXTRA_CFLAGS) $(LINUX_INCLUDE) $(KBUILD_HOSTCFLAGS) \
++		-D__KERNEL__ -D__BPF_TRACING__ -Wno-unused-value -Wno-pointer-sign \
++		-D__TARGET_ARCH_$(ARCH) -Wno-compare-distinct-pointer-types \
++		-Wno-gnu-variable-sized-type-not-at-end \
++		-Wno-address-of-packed-member -Wno-tautological-compare \
++		-Wno-unknown-warning-option $(CLANG_ARCH_ARGS) \
++		-O2 -emit-llvm -c $< -o -| $(LLC) $(LLC_FLAGS) -o $@
++
++$(patsubst %,$(OUTPUT)/%.o,$(APPS)): %.o: %.bpf.o
++
++$(OUTPUT)/bpf_load.o: bpf_load.c | $(OUTPUT)
++	$(call msg,CC,$@)
++	$(CC) $(NOSTDINC_FLAGS) $(EXTRA_CFLAGS) $(CFLAGS) -I$(KERNEL_PATH)/samples/bpf -I$(KERNEL_PATH)/tools/perf $(BPF_LOAD_INCLUDE) \
++	-I$(KERNEL_PATH)/tools/lib/ -I$(KERNEL_PATH)/tools/include \
++	-c $(filter %.c,$^) -o  $@
++
++$(OUTPUT)/%.o: %.c | $(OUTPUT)
++	$(call msg,CC,$@)
++	$(CC) $(CFLAGS) $(INCLUDES) -I$(KERNEL_PATH)/samples/bpf -c $(filter %.c,$^) -o $@
++
++$(APPS): %: $(OUTPUT)/%.o $(OUTPUT)/bpf_load.o | $(OUTPUT)
++	$(call msg,BINARY,$@)
++	$(Q)$(CC) $(CFLAGS) $^ $(ALL_LDFLAGS) -I$(KERNEL_PATH)/samples/bpf -lelf -lbpf -lz -o $@
++
++.DELETE_ON_ERROR:
++
++.SECONDARY:
+diff --git a/src/c/ebpf_collector/bpf_helpers.h b/src/c/ebpf_collector/bpf_helpers.h
+new file mode 100644
+index 0000000..352965a
+--- /dev/null
++++ b/src/c/ebpf_collector/bpf_helpers.h
+@@ -0,0 +1,535 @@
++// SPDX-License-Identifier: GPL-2.0
++#ifndef __BPF_HELPERS__
++#define __BPF_HELPERS__
++
++#define __uint(name, val) int (*name)[val]
++#define __type(name, val) val *name
++
++/* helper macro to print out debug messages */
++#define bpf_printk(fmt, ...)				\
++({							\
++	char ____fmt[] = fmt;				\
++	bpf_trace_printk(____fmt, sizeof(____fmt),	\
++			 ##__VA_ARGS__);		\
++})
++
++#ifdef __clang__
++
++/* helper macro to place programs, maps, license in
++ * different sections in elf_bpf file. Section names
++ * are interpreted by elf_bpf loader
++ */
++#define SEC(NAME) __attribute__((section(NAME), used))
++
++/* helper functions called from eBPF programs written in C */
++static void *(*bpf_map_lookup_elem)(void *map, const void *key) =
++	(void *) BPF_FUNC_map_lookup_elem;
++static int (*bpf_map_update_elem)(void *map, const void *key, const void *value,
++				  unsigned long long flags) =
++	(void *) BPF_FUNC_map_update_elem;
++static int (*bpf_map_delete_elem)(void *map, const void *key) =
++	(void *) BPF_FUNC_map_delete_elem;
++static int (*bpf_map_push_elem)(void *map, const void *value,
++				unsigned long long flags) =
++	(void *) BPF_FUNC_map_push_elem;
++static int (*bpf_map_pop_elem)(void *map, void *value) =
++	(void *) BPF_FUNC_map_pop_elem;
++static int (*bpf_map_peek_elem)(void *map, void *value) =
++	(void *) BPF_FUNC_map_peek_elem;
++static int (*bpf_probe_read)(void *dst, int size, const void *unsafe_ptr) =
++	(void *) BPF_FUNC_probe_read;
++static unsigned long long (*bpf_ktime_get_ns)(void) =
++	(void *) BPF_FUNC_ktime_get_ns;
++static int (*bpf_trace_printk)(const char *fmt, int fmt_size, ...) =
++	(void *) BPF_FUNC_trace_printk;
++static void (*bpf_tail_call)(void *ctx, void *map, int index) =
++	(void *) BPF_FUNC_tail_call;
++static unsigned long long (*bpf_get_smp_processor_id)(void) =
++	(void *) BPF_FUNC_get_smp_processor_id;
++static unsigned long long (*bpf_get_current_pid_tgid)(void) =
++	(void *) BPF_FUNC_get_current_pid_tgid;
++static unsigned long long (*bpf_get_current_uid_gid)(void) =
++	(void *) BPF_FUNC_get_current_uid_gid;
++static int (*bpf_get_current_comm)(void *buf, int buf_size) =
++	(void *) BPF_FUNC_get_current_comm;
++static unsigned long long (*bpf_perf_event_read)(void *map,
++						 unsigned long long flags) =
++	(void *) BPF_FUNC_perf_event_read;
++static int (*bpf_clone_redirect)(void *ctx, int ifindex, int flags) =
++	(void *) BPF_FUNC_clone_redirect;
++static int (*bpf_redirect)(int ifindex, int flags) =
++	(void *) BPF_FUNC_redirect;
++static int (*bpf_redirect_map)(void *map, int key, int flags) =
++	(void *) BPF_FUNC_redirect_map;
++static int (*bpf_perf_event_output)(void *ctx, void *map,
++				    unsigned long long flags, void *data,
++				    int size) =
++	(void *) BPF_FUNC_perf_event_output;
++static int (*bpf_get_stackid)(void *ctx, void *map, int flags) =
++	(void *) BPF_FUNC_get_stackid;
++static int (*bpf_probe_write_user)(void *dst, const void *src, int size) =
++	(void *) BPF_FUNC_probe_write_user;
++static int (*bpf_current_task_under_cgroup)(void *map, int index) =
++	(void *) BPF_FUNC_current_task_under_cgroup;
++static int (*bpf_skb_get_tunnel_key)(void *ctx, void *key, int size, int flags) =
++	(void *) BPF_FUNC_skb_get_tunnel_key;
++static int (*bpf_skb_set_tunnel_key)(void *ctx, void *key, int size, int flags) =
++	(void *) BPF_FUNC_skb_set_tunnel_key;
++static int (*bpf_skb_get_tunnel_opt)(void *ctx, void *md, int size) =
++	(void *) BPF_FUNC_skb_get_tunnel_opt;
++static int (*bpf_skb_set_tunnel_opt)(void *ctx, void *md, int size) =
++	(void *) BPF_FUNC_skb_set_tunnel_opt;
++static unsigned long long (*bpf_get_prandom_u32)(void) =
++	(void *) BPF_FUNC_get_prandom_u32;
++static int (*bpf_xdp_adjust_head)(void *ctx, int offset) =
++	(void *) BPF_FUNC_xdp_adjust_head;
++static int (*bpf_xdp_adjust_meta)(void *ctx, int offset) =
++	(void *) BPF_FUNC_xdp_adjust_meta;
++static int (*bpf_get_socket_cookie)(void *ctx) =
++	(void *) BPF_FUNC_get_socket_cookie;
++static int (*bpf_setsockopt)(void *ctx, int level, int optname, void *optval,
++			     int optlen) =
++	(void *) BPF_FUNC_setsockopt;
++static int (*bpf_getsockopt)(void *ctx, int level, int optname, void *optval,
++			     int optlen) =
++	(void *) BPF_FUNC_getsockopt;
++static int (*bpf_sock_ops_cb_flags_set)(void *ctx, int flags) =
++	(void *) BPF_FUNC_sock_ops_cb_flags_set;
++static int (*bpf_sk_redirect_map)(void *ctx, void *map, int key, int flags) =
++	(void *) BPF_FUNC_sk_redirect_map;
++static int (*bpf_sk_redirect_hash)(void *ctx, void *map, void *key, int flags) =
++	(void *) BPF_FUNC_sk_redirect_hash;
++static int (*bpf_sock_map_update)(void *map, void *key, void *value,
++				  unsigned long long flags) =
++	(void *) BPF_FUNC_sock_map_update;
++static int (*bpf_sock_hash_update)(void *map, void *key, void *value,
++				   unsigned long long flags) =
++	(void *) BPF_FUNC_sock_hash_update;
++static int (*bpf_perf_event_read_value)(void *map, unsigned long long flags,
++					void *buf, unsigned int buf_size) =
++	(void *) BPF_FUNC_perf_event_read_value;
++static int (*bpf_perf_prog_read_value)(void *ctx, void *buf,
++				       unsigned int buf_size) =
++	(void *) BPF_FUNC_perf_prog_read_value;
++static int (*bpf_override_return)(void *ctx, unsigned long rc) =
++	(void *) BPF_FUNC_override_return;
++static int (*bpf_msg_redirect_map)(void *ctx, void *map, int key, int flags) =
++	(void *) BPF_FUNC_msg_redirect_map;
++static int (*bpf_msg_redirect_hash)(void *ctx,
++				    void *map, void *key, int flags) =
++	(void *) BPF_FUNC_msg_redirect_hash;
++static int (*bpf_msg_apply_bytes)(void *ctx, int len) =
++	(void *) BPF_FUNC_msg_apply_bytes;
++static int (*bpf_msg_cork_bytes)(void *ctx, int len) =
++	(void *) BPF_FUNC_msg_cork_bytes;
++static int (*bpf_msg_pull_data)(void *ctx, int start, int end, int flags) =
++	(void *) BPF_FUNC_msg_pull_data;
++static int (*bpf_msg_push_data)(void *ctx, int start, int end, int flags) =
++	(void *) BPF_FUNC_msg_push_data;
++static int (*bpf_msg_pop_data)(void *ctx, int start, int cut, int flags) =
++	(void *) BPF_FUNC_msg_pop_data;
++static int (*bpf_bind)(void *ctx, void *addr, int addr_len) =
++	(void *) BPF_FUNC_bind;
++static int (*bpf_xdp_adjust_tail)(void *ctx, int offset) =
++	(void *) BPF_FUNC_xdp_adjust_tail;
++static int (*bpf_skb_get_xfrm_state)(void *ctx, int index, void *state,
++				     int size, int flags) =
++	(void *) BPF_FUNC_skb_get_xfrm_state;
++static int (*bpf_sk_select_reuseport)(void *ctx, void *map, void *key, __u32 flags) =
++	(void *) BPF_FUNC_sk_select_reuseport;
++static int (*bpf_get_stack)(void *ctx, void *buf, int size, int flags) =
++	(void *) BPF_FUNC_get_stack;
++static int (*bpf_fib_lookup)(void *ctx, struct bpf_fib_lookup *params,
++			     int plen, __u32 flags) =
++	(void *) BPF_FUNC_fib_lookup;
++static int (*bpf_lwt_push_encap)(void *ctx, unsigned int type, void *hdr,
++				 unsigned int len) =
++	(void *) BPF_FUNC_lwt_push_encap;
++static int (*bpf_lwt_seg6_store_bytes)(void *ctx, unsigned int offset,
++				       void *from, unsigned int len) =
++	(void *) BPF_FUNC_lwt_seg6_store_bytes;
++static int (*bpf_lwt_seg6_action)(void *ctx, unsigned int action, void *param,
++				  unsigned int param_len) =
++	(void *) BPF_FUNC_lwt_seg6_action;
++static int (*bpf_lwt_seg6_adjust_srh)(void *ctx, unsigned int offset,
++				      unsigned int len) =
++	(void *) BPF_FUNC_lwt_seg6_adjust_srh;
++static int (*bpf_rc_repeat)(void *ctx) =
++	(void *) BPF_FUNC_rc_repeat;
++static int (*bpf_rc_keydown)(void *ctx, unsigned int protocol,
++			     unsigned long long scancode, unsigned int toggle) =
++	(void *) BPF_FUNC_rc_keydown;
++static unsigned long long (*bpf_get_current_cgroup_id)(void) =
++	(void *) BPF_FUNC_get_current_cgroup_id;
++static void *(*bpf_get_local_storage)(void *map, unsigned long long flags) =
++	(void *) BPF_FUNC_get_local_storage;
++static unsigned long long (*bpf_skb_cgroup_id)(void *ctx) =
++	(void *) BPF_FUNC_skb_cgroup_id;
++static unsigned long long (*bpf_skb_ancestor_cgroup_id)(void *ctx, int level) =
++	(void *) BPF_FUNC_skb_ancestor_cgroup_id;
++static struct bpf_sock *(*bpf_sk_lookup_tcp)(void *ctx,
++					     struct bpf_sock_tuple *tuple,
++					     int size, unsigned long long netns_id,
++					     unsigned long long flags) =
++	(void *) BPF_FUNC_sk_lookup_tcp;
++static struct bpf_sock *(*bpf_skc_lookup_tcp)(void *ctx,
++					     struct bpf_sock_tuple *tuple,
++					     int size, unsigned long long netns_id,
++					     unsigned long long flags) =
++	(void *) BPF_FUNC_skc_lookup_tcp;
++static struct bpf_sock *(*bpf_sk_lookup_udp)(void *ctx,
++					     struct bpf_sock_tuple *tuple,
++					     int size, unsigned long long netns_id,
++					     unsigned long long flags) =
++	(void *) BPF_FUNC_sk_lookup_udp;
++static int (*bpf_sk_release)(struct bpf_sock *sk) =
++	(void *) BPF_FUNC_sk_release;
++static int (*bpf_skb_vlan_push)(void *ctx, __be16 vlan_proto, __u16 vlan_tci) =
++	(void *) BPF_FUNC_skb_vlan_push;
++static int (*bpf_skb_vlan_pop)(void *ctx) =
++	(void *) BPF_FUNC_skb_vlan_pop;
++static int (*bpf_rc_pointer_rel)(void *ctx, int rel_x, int rel_y) =
++	(void *) BPF_FUNC_rc_pointer_rel;
++static void (*bpf_spin_lock)(struct bpf_spin_lock *lock) =
++	(void *) BPF_FUNC_spin_lock;
++static void (*bpf_spin_unlock)(struct bpf_spin_lock *lock) =
++	(void *) BPF_FUNC_spin_unlock;
++static struct bpf_sock *(*bpf_sk_fullsock)(struct bpf_sock *sk) =
++	(void *) BPF_FUNC_sk_fullsock;
++static struct bpf_tcp_sock *(*bpf_tcp_sock)(struct bpf_sock *sk) =
++	(void *) BPF_FUNC_tcp_sock;
++static struct bpf_sock *(*bpf_get_listener_sock)(struct bpf_sock *sk) =
++	(void *) BPF_FUNC_get_listener_sock;
++static int (*bpf_skb_ecn_set_ce)(void *ctx) =
++	(void *) BPF_FUNC_skb_ecn_set_ce;
++static int (*bpf_tcp_check_syncookie)(struct bpf_sock *sk,
++	    void *ip, int ip_len, void *tcp, int tcp_len) =
++	(void *) BPF_FUNC_tcp_check_syncookie;
++static int (*bpf_sysctl_get_name)(void *ctx, char *buf,
++				  unsigned long long buf_len,
++				  unsigned long long flags) =
++	(void *) BPF_FUNC_sysctl_get_name;
++static int (*bpf_sysctl_get_current_value)(void *ctx, char *buf,
++					   unsigned long long buf_len) =
++	(void *) BPF_FUNC_sysctl_get_current_value;
++static int (*bpf_sysctl_get_new_value)(void *ctx, char *buf,
++				       unsigned long long buf_len) =
++	(void *) BPF_FUNC_sysctl_get_new_value;
++static int (*bpf_sysctl_set_new_value)(void *ctx, const char *buf,
++				       unsigned long long buf_len) =
++	(void *) BPF_FUNC_sysctl_set_new_value;
++static int (*bpf_strtol)(const char *buf, unsigned long long buf_len,
++			 unsigned long long flags, long *res) =
++	(void *) BPF_FUNC_strtol;
++static int (*bpf_strtoul)(const char *buf, unsigned long long buf_len,
++			  unsigned long long flags, unsigned long *res) =
++	(void *) BPF_FUNC_strtoul;
++static void *(*bpf_sk_storage_get)(void *map, struct bpf_sock *sk,
++				   void *value, __u64 flags) =
++	(void *) BPF_FUNC_sk_storage_get;
++static int (*bpf_sk_storage_delete)(void *map, struct bpf_sock *sk) =
++	(void *)BPF_FUNC_sk_storage_delete;
++static int (*bpf_send_signal)(unsigned sig) = (void *)BPF_FUNC_send_signal;
++static long long (*bpf_tcp_gen_syncookie)(struct bpf_sock *sk, void *ip,
++					  int ip_len, void *tcp, int tcp_len) =
++	(void *) BPF_FUNC_tcp_gen_syncookie;
++
++/* llvm builtin functions that eBPF C program may use to
++ * emit BPF_LD_ABS and BPF_LD_IND instructions
++ */
++struct sk_buff;
++unsigned long long load_byte(void *skb,
++			     unsigned long long off) asm("llvm.bpf.load.byte");
++unsigned long long load_half(void *skb,
++			     unsigned long long off) asm("llvm.bpf.load.half");
++unsigned long long load_word(void *skb,
++			     unsigned long long off) asm("llvm.bpf.load.word");
++
++/* a helper structure used by eBPF C program
++ * to describe map attributes to elf_bpf loader
++ */
++struct bpf_map_def {
++	unsigned int type;
++	unsigned int key_size;
++	unsigned int value_size;
++	unsigned int max_entries;
++	unsigned int map_flags;
++	unsigned int inner_map_idx;
++	unsigned int numa_node;
++};
++
++#else
++
++#include <bpf-helpers.h>
++
++#endif
++
++#define BPF_ANNOTATE_KV_PAIR(name, type_key, type_val)		\
++	struct ____btf_map_##name {				\
++		type_key key;					\
++		type_val value;					\
++	};							\
++	struct ____btf_map_##name				\
++	__attribute__ ((section(".maps." #name), used))		\
++		____btf_map_##name = { }
++
++static int (*bpf_skb_load_bytes)(void *ctx, int off, void *to, int len) =
++	(void *) BPF_FUNC_skb_load_bytes;
++static int (*bpf_skb_load_bytes_relative)(void *ctx, int off, void *to, int len, __u32 start_header) =
++	(void *) BPF_FUNC_skb_load_bytes_relative;
++static int (*bpf_skb_store_bytes)(void *ctx, int off, void *from, int len, int flags) =
++	(void *) BPF_FUNC_skb_store_bytes;
++static int (*bpf_l3_csum_replace)(void *ctx, int off, int from, int to, int flags) =
++	(void *) BPF_FUNC_l3_csum_replace;
++static int (*bpf_l4_csum_replace)(void *ctx, int off, int from, int to, int flags) =
++	(void *) BPF_FUNC_l4_csum_replace;
++static int (*bpf_csum_diff)(void *from, int from_size, void *to, int to_size, int seed) =
++	(void *) BPF_FUNC_csum_diff;
++static int (*bpf_skb_under_cgroup)(void *ctx, void *map, int index) =
++	(void *) BPF_FUNC_skb_under_cgroup;
++static int (*bpf_skb_change_head)(void *, int len, int flags) =
++	(void *) BPF_FUNC_skb_change_head;
++static int (*bpf_skb_pull_data)(void *, int len) =
++	(void *) BPF_FUNC_skb_pull_data;
++static unsigned int (*bpf_get_cgroup_classid)(void *ctx) =
++	(void *) BPF_FUNC_get_cgroup_classid;
++static unsigned int (*bpf_get_route_realm)(void *ctx) =
++	(void *) BPF_FUNC_get_route_realm;
++static int (*bpf_skb_change_proto)(void *ctx, __be16 proto, __u64 flags) =
++	(void *) BPF_FUNC_skb_change_proto;
++static int (*bpf_skb_change_type)(void *ctx, __u32 type) =
++	(void *) BPF_FUNC_skb_change_type;
++static unsigned int (*bpf_get_hash_recalc)(void *ctx) =
++	(void *) BPF_FUNC_get_hash_recalc;
++static unsigned long long (*bpf_get_current_task)(void) =
++	(void *) BPF_FUNC_get_current_task;
++static int (*bpf_skb_change_tail)(void *ctx, __u32 len, __u64 flags) =
++	(void *) BPF_FUNC_skb_change_tail;
++static long long (*bpf_csum_update)(void *ctx, __u32 csum) =
++	(void *) BPF_FUNC_csum_update;
++static void (*bpf_set_hash_invalid)(void *ctx) =
++	(void *) BPF_FUNC_set_hash_invalid;
++static int (*bpf_get_numa_node_id)(void) =
++	(void *) BPF_FUNC_get_numa_node_id;
++static int (*bpf_probe_read_str)(void *ctx, __u32 size,
++				 const void *unsafe_ptr) =
++	(void *) BPF_FUNC_probe_read_str;
++static unsigned int (*bpf_get_socket_uid)(void *ctx) =
++	(void *) BPF_FUNC_get_socket_uid;
++static unsigned int (*bpf_set_hash)(void *ctx, __u32 hash) =
++	(void *) BPF_FUNC_set_hash;
++static int (*bpf_skb_adjust_room)(void *ctx, __s32 len_diff, __u32 mode,
++				  unsigned long long flags) =
++	(void *) BPF_FUNC_skb_adjust_room;
++
++/* Scan the ARCH passed in from ARCH env variable (see Makefile) */
++#if defined(__TARGET_ARCH_x86)
++	#define bpf_target_x86
++	#define bpf_target_defined
++#elif defined(__TARGET_ARCH_s390)
++	#define bpf_target_s390
++	#define bpf_target_defined
++#elif defined(__TARGET_ARCH_arm)
++	#define bpf_target_arm
++	#define bpf_target_defined
++#elif defined(__TARGET_ARCH_arm64)
++	#define bpf_target_arm64
++	#define bpf_target_defined
++#elif defined(__TARGET_ARCH_mips)
++	#define bpf_target_mips
++	#define bpf_target_defined
++#elif defined(__TARGET_ARCH_powerpc)
++	#define bpf_target_powerpc
++	#define bpf_target_defined
++#elif defined(__TARGET_ARCH_sparc)
++	#define bpf_target_sparc
++	#define bpf_target_defined
++#else
++	#undef bpf_target_defined
++#endif
++
++/* Fall back to what the compiler says */
++#ifndef bpf_target_defined
++#if defined(__x86_64__)
++	#define bpf_target_x86
++#elif defined(__s390__)
++	#define bpf_target_s390
++#elif defined(__arm__)
++	#define bpf_target_arm
++#elif defined(__aarch64__)
++	#define bpf_target_arm64
++#elif defined(__mips__)
++	#define bpf_target_mips
++#elif defined(__powerpc__)
++	#define bpf_target_powerpc
++#elif defined(__sparc__)
++	#define bpf_target_sparc
++#endif
++#endif
++
++#if defined(bpf_target_x86)
++
++#ifdef __KERNEL__
++#define PT_REGS_PARM1(x) ((x)->di)
++#define PT_REGS_PARM2(x) ((x)->si)
++#define PT_REGS_PARM3(x) ((x)->dx)
++#define PT_REGS_PARM4(x) ((x)->cx)
++#define PT_REGS_PARM5(x) ((x)->r8)
++#define PT_REGS_RET(x) ((x)->sp)
++#define PT_REGS_FP(x) ((x)->bp)
++#define PT_REGS_RC(x) ((x)->ax)
++#define PT_REGS_SP(x) ((x)->sp)
++#define PT_REGS_IP(x) ((x)->ip)
++#else
++#ifdef __i386__
++/* i386 kernel is built with -mregparm=3 */
++#define PT_REGS_PARM1(x) ((x)->eax)
++#define PT_REGS_PARM2(x) ((x)->edx)
++#define PT_REGS_PARM3(x) ((x)->ecx)
++#define PT_REGS_PARM4(x) 0
++#define PT_REGS_PARM5(x) 0
++#define PT_REGS_RET(x) ((x)->esp)
++#define PT_REGS_FP(x) ((x)->ebp)
++#define PT_REGS_RC(x) ((x)->eax)
++#define PT_REGS_SP(x) ((x)->esp)
++#define PT_REGS_IP(x) ((x)->eip)
++#else
++#define PT_REGS_PARM1(x) ((x)->rdi)
++#define PT_REGS_PARM2(x) ((x)->rsi)
++#define PT_REGS_PARM3(x) ((x)->rdx)
++#define PT_REGS_PARM4(x) ((x)->rcx)
++#define PT_REGS_PARM5(x) ((x)->r8)
++#define PT_REGS_RET(x) ((x)->rsp)
++#define PT_REGS_FP(x) ((x)->rbp)
++#define PT_REGS_RC(x) ((x)->rax)
++#define PT_REGS_SP(x) ((x)->rsp)
++#define PT_REGS_IP(x) ((x)->rip)
++#endif
++#endif
++
++#elif defined(bpf_target_s390)
++
++/* s390 provides user_pt_regs instead of struct pt_regs to userspace */
++struct pt_regs;
++#define PT_REGS_S390 const volatile user_pt_regs
++#define PT_REGS_PARM1(x) (((PT_REGS_S390 *)(x))->gprs[2])
++#define PT_REGS_PARM2(x) (((PT_REGS_S390 *)(x))->gprs[3])
++#define PT_REGS_PARM3(x) (((PT_REGS_S390 *)(x))->gprs[4])
++#define PT_REGS_PARM4(x) (((PT_REGS_S390 *)(x))->gprs[5])
++#define PT_REGS_PARM5(x) (((PT_REGS_S390 *)(x))->gprs[6])
++#define PT_REGS_RET(x) (((PT_REGS_S390 *)(x))->gprs[14])
++/* Works only with CONFIG_FRAME_POINTER */
++#define PT_REGS_FP(x) (((PT_REGS_S390 *)(x))->gprs[11])
++#define PT_REGS_RC(x) (((PT_REGS_S390 *)(x))->gprs[2])
++#define PT_REGS_SP(x) (((PT_REGS_S390 *)(x))->gprs[15])
++#define PT_REGS_IP(x) (((PT_REGS_S390 *)(x))->psw.addr)
++
++#elif defined(bpf_target_arm)
++
++#define PT_REGS_PARM1(x) ((x)->uregs[0])
++#define PT_REGS_PARM2(x) ((x)->uregs[1])
++#define PT_REGS_PARM3(x) ((x)->uregs[2])
++#define PT_REGS_PARM4(x) ((x)->uregs[3])
++#define PT_REGS_PARM5(x) ((x)->uregs[4])
++#define PT_REGS_RET(x) ((x)->uregs[14])
++#define PT_REGS_FP(x) ((x)->uregs[11]) /* Works only with CONFIG_FRAME_POINTER */
++#define PT_REGS_RC(x) ((x)->uregs[0])
++#define PT_REGS_SP(x) ((x)->uregs[13])
++#define PT_REGS_IP(x) ((x)->uregs[12])
++
++#elif defined(bpf_target_arm64)
++
++/* arm64 provides struct user_pt_regs instead of struct pt_regs to userspace */
++struct pt_regs;
++#define PT_REGS_ARM64 const volatile struct user_pt_regs
++#define PT_REGS_PARM1(x) (((PT_REGS_ARM64 *)(x))->regs[0])
++#define PT_REGS_PARM2(x) (((PT_REGS_ARM64 *)(x))->regs[1])
++#define PT_REGS_PARM3(x) (((PT_REGS_ARM64 *)(x))->regs[2])
++#define PT_REGS_PARM4(x) (((PT_REGS_ARM64 *)(x))->regs[3])
++#define PT_REGS_PARM5(x) (((PT_REGS_ARM64 *)(x))->regs[4])
++#define PT_REGS_RET(x) (((PT_REGS_ARM64 *)(x))->regs[30])
++/* Works only with CONFIG_FRAME_POINTER */
++#define PT_REGS_FP(x) (((PT_REGS_ARM64 *)(x))->regs[29])
++#define PT_REGS_RC(x) (((PT_REGS_ARM64 *)(x))->regs[0])
++#define PT_REGS_SP(x) (((PT_REGS_ARM64 *)(x))->sp)
++#define PT_REGS_IP(x) (((PT_REGS_ARM64 *)(x))->pc)
++
++#elif defined(bpf_target_mips)
++
++#define PT_REGS_PARM1(x) ((x)->regs[4])
++#define PT_REGS_PARM2(x) ((x)->regs[5])
++#define PT_REGS_PARM3(x) ((x)->regs[6])
++#define PT_REGS_PARM4(x) ((x)->regs[7])
++#define PT_REGS_PARM5(x) ((x)->regs[8])
++#define PT_REGS_RET(x) ((x)->regs[31])
++#define PT_REGS_FP(x) ((x)->regs[30]) /* Works only with CONFIG_FRAME_POINTER */
++#define PT_REGS_RC(x) ((x)->regs[1])
++#define PT_REGS_SP(x) ((x)->regs[29])
++#define PT_REGS_IP(x) ((x)->cp0_epc)
++
++#elif defined(bpf_target_powerpc)
++
++#define PT_REGS_PARM1(x) ((x)->gpr[3])
++#define PT_REGS_PARM2(x) ((x)->gpr[4])
++#define PT_REGS_PARM3(x) ((x)->gpr[5])
++#define PT_REGS_PARM4(x) ((x)->gpr[6])
++#define PT_REGS_PARM5(x) ((x)->gpr[7])
++#define PT_REGS_RC(x) ((x)->gpr[3])
++#define PT_REGS_SP(x) ((x)->sp)
++#define PT_REGS_IP(x) ((x)->nip)
++
++#elif defined(bpf_target_sparc)
++
++#define PT_REGS_PARM1(x) ((x)->u_regs[UREG_I0])
++#define PT_REGS_PARM2(x) ((x)->u_regs[UREG_I1])
++#define PT_REGS_PARM3(x) ((x)->u_regs[UREG_I2])
++#define PT_REGS_PARM4(x) ((x)->u_regs[UREG_I3])
++#define PT_REGS_PARM5(x) ((x)->u_regs[UREG_I4])
++#define PT_REGS_RET(x) ((x)->u_regs[UREG_I7])
++#define PT_REGS_RC(x) ((x)->u_regs[UREG_I0])
++#define PT_REGS_SP(x) ((x)->u_regs[UREG_FP])
++
++/* Should this also be a bpf_target check for the sparc case? */
++#if defined(__arch64__)
++#define PT_REGS_IP(x) ((x)->tpc)
++#else
++#define PT_REGS_IP(x) ((x)->pc)
++#endif
++
++#endif
++
++#if defined(bpf_target_powerpc)
++#define BPF_KPROBE_READ_RET_IP(ip, ctx)		({ (ip) = (ctx)->link; })
++#define BPF_KRETPROBE_READ_RET_IP		BPF_KPROBE_READ_RET_IP
++#elif defined(bpf_target_sparc)
++#define BPF_KPROBE_READ_RET_IP(ip, ctx)		({ (ip) = PT_REGS_RET(ctx); })
++#define BPF_KRETPROBE_READ_RET_IP		BPF_KPROBE_READ_RET_IP
++#else
++#define BPF_KPROBE_READ_RET_IP(ip, ctx)		({				\
++		bpf_probe_read(&(ip), sizeof(ip), (void *)PT_REGS_RET(ctx)); })
++#define BPF_KRETPROBE_READ_RET_IP(ip, ctx)	({				\
++		bpf_probe_read(&(ip), sizeof(ip),				\
++				(void *)(PT_REGS_FP(ctx) + sizeof(ip))); })
++#endif
++
++/*
++ * BPF_CORE_READ abstracts away bpf_probe_read() call and captures offset
++ * relocation for source address using __builtin_preserve_access_index()
++ * built-in, provided by Clang.
++ *
++ * __builtin_preserve_access_index() takes as an argument an expression of
++ * taking an address of a field within struct/union. It makes compiler emit
++ * a relocation, which records BTF type ID describing root struct/union and an
++ * accessor string which describes exact embedded field that was used to take
++ * an address. See detailed description of this relocation format and
++ * semantics in comments to struct bpf_offset_reloc in libbpf_internal.h.
++ *
++ * This relocation allows libbpf to adjust BPF instruction to use correct
++ * actual field offset, based on target kernel BTF type that matches original
++ * (local) BTF, used to record relocation.
++ */
++#define BPF_CORE_READ(dst, src)						\
++	bpf_probe_read((dst), sizeof(*(src)),				\
++		       __builtin_preserve_access_index(src))
++
++#endif
+diff --git a/src/c/ebpf_collector/bpf_load.c b/src/c/ebpf_collector/bpf_load.c
+new file mode 100644
+index 0000000..db33eb1
+--- /dev/null
++++ b/src/c/ebpf_collector/bpf_load.c
+@@ -0,0 +1,709 @@
++// SPDX-License-Identifier: GPL-2.0
++#include <stdio.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <fcntl.h>
++#include <libelf.h>
++#include <gelf.h>
++#include <errno.h>
++#include <unistd.h>
++#include <string.h>
++#include <stdbool.h>
++#include <stdlib.h>
++#include <linux/bpf.h>
++#include <linux/filter.h>
++#include <linux/perf_event.h>
++#include <linux/netlink.h>
++#include <linux/rtnetlink.h>
++#include <linux/types.h>
++#include <sys/types.h>
++#include <sys/socket.h>
++#include <sys/syscall.h>
++#include <sys/ioctl.h>
++#include <sys/mman.h>
++#include <poll.h>
++#include <ctype.h>
++#include <assert.h>
++#include <bpf/bpf.h>
++#include <bpf_load.h>
++#include <perf-sys.h>
++
++#define DEBUGFS "/sys/kernel/debug/tracing/"
++
++static char license[128];
++static int kern_version;
++static bool processed_sec[128];
++char bpf_log_buf[BPF_LOG_BUF_SIZE];
++int map_fd[MAX_MAPS];
++int prog_fd[MAX_PROGS];
++int event_fd[MAX_PROGS];
++int prog_cnt;
++int prog_array_fd = -1;
++
++struct bpf_map_data map_data[MAX_MAPS];
++int map_data_count = 0;
++
++static int populate_prog_array(const char *event, int prog_fd)
++{
++	int ind = atoi(event), err;
++
++	err = bpf_map_update_elem(prog_array_fd, &ind, &prog_fd, BPF_ANY);
++	if (err < 0) {
++		printf("failed to store prog_fd in prog_array\n");
++		return -1;
++	}
++	return 0;
++}
++
++static int write_kprobe_events(const char *val)
++{
++	int fd, ret, flags;
++
++	if (val == NULL)
++		return -1;
++	else if (val[0] == '\0')
++		flags = O_WRONLY | O_TRUNC;
++	else
++		flags = O_WRONLY | O_APPEND;
++
++	fd = open("/sys/kernel/debug/tracing/kprobe_events", flags);
++
++	ret = write(fd, val, strlen(val));
++	close(fd);
++
++	return ret;
++}
++
++static int load_and_attach(const char *event, struct bpf_insn *prog, int size)
++{
++	bool is_socket = strncmp(event, "socket", 6) == 0;
++	bool is_kprobe = strncmp(event, "kprobe/", 7) == 0;
++	bool is_kretprobe = strncmp(event, "kretprobe/", 10) == 0;
++	bool is_tracepoint = strncmp(event, "tracepoint/", 11) == 0;
++	bool is_raw_tracepoint = strncmp(event, "raw_tracepoint/", 15) == 0;
++	bool is_xdp = strncmp(event, "xdp", 3) == 0;
++	bool is_perf_event = strncmp(event, "perf_event", 10) == 0;
++	bool is_cgroup_skb = strncmp(event, "cgroup/skb", 10) == 0;
++	bool is_cgroup_sk = strncmp(event, "cgroup/sock", 11) == 0;
++	bool is_sockops = strncmp(event, "sockops", 7) == 0;
++	bool is_sk_skb = strncmp(event, "sk_skb", 6) == 0;
++	bool is_sk_msg = strncmp(event, "sk_msg", 6) == 0;
++	size_t insns_cnt = size / sizeof(struct bpf_insn);
++	enum bpf_prog_type prog_type;
++	char buf[256];
++	int fd, efd, err, id;
++	struct perf_event_attr attr = {};
++
++	attr.type = PERF_TYPE_TRACEPOINT;
++	attr.sample_type = PERF_SAMPLE_RAW;
++	attr.sample_period = 1;
++	attr.wakeup_events = 1;
++
++	if (is_socket) {
++		prog_type = BPF_PROG_TYPE_SOCKET_FILTER;
++	} else if (is_kprobe || is_kretprobe) {
++		prog_type = BPF_PROG_TYPE_KPROBE;
++	} else if (is_tracepoint) {
++		prog_type = BPF_PROG_TYPE_TRACEPOINT;
++	} else if (is_raw_tracepoint) {
++		prog_type = BPF_PROG_TYPE_RAW_TRACEPOINT;
++	} else if (is_xdp) {
++		prog_type = BPF_PROG_TYPE_XDP;
++	} else if (is_perf_event) {
++		prog_type = BPF_PROG_TYPE_PERF_EVENT;
++	} else if (is_cgroup_skb) {
++		prog_type = BPF_PROG_TYPE_CGROUP_SKB;
++	} else if (is_cgroup_sk) {
++		prog_type = BPF_PROG_TYPE_CGROUP_SOCK;
++	} else if (is_sockops) {
++		prog_type = BPF_PROG_TYPE_SOCK_OPS;
++	} else if (is_sk_skb) {
++		prog_type = BPF_PROG_TYPE_SK_SKB;
++	} else if (is_sk_msg) {
++		prog_type = BPF_PROG_TYPE_SK_MSG;
++	} else {
++		printf("Unknown event '%s'\n", event);
++		return -1;
++	}
++
++	if (prog_cnt == MAX_PROGS)
++		return -1;
++
++	fd = bpf_load_program(prog_type, prog, insns_cnt, license, kern_version,
++			      bpf_log_buf, BPF_LOG_BUF_SIZE);
++	if (fd < 0) {
++		printf("bpf_load_program() err=%d\n%s", errno, bpf_log_buf);
++		return -1;
++	}
++
++	prog_fd[prog_cnt++] = fd;
++
++	if (is_xdp || is_perf_event || is_cgroup_skb || is_cgroup_sk)
++		return 0;
++
++	if (is_socket || is_sockops || is_sk_skb || is_sk_msg) {
++		if (is_socket)
++			event += 6;
++		else
++			event += 7;
++		if (*event != '/')
++			return 0;
++		event++;
++		if (!isdigit(*event)) {
++			printf("invalid prog number\n");
++			return -1;
++		}
++		return populate_prog_array(event, fd);
++	}
++
++	if (is_raw_tracepoint) {
++		efd = bpf_raw_tracepoint_open(event + 15, fd);
++		if (efd < 0) {
++			printf("tracepoint %s %s\n", event + 15, strerror(errno));
++			return -1;
++		}
++		event_fd[prog_cnt - 1] = efd;
++		return 0;
++	}
++
++	if (is_kprobe || is_kretprobe) {
++		bool need_normal_check = true;
++		const char *event_prefix = "";
++
++		if (is_kprobe)
++			event += 7;
++		else
++			event += 10;
++
++		if (*event == 0) {
++			printf("event name cannot be empty\n");
++			return -1;
++		}
++
++		if (isdigit(*event))
++			return populate_prog_array(event, fd);
++
++#ifdef __x86_64__
++		if (strncmp(event, "sys_", 4) == 0) {
++			snprintf(buf, sizeof(buf), "%c:__x64_%s __x64_%s",
++				is_kprobe ? 'p' : 'r', event, event);
++			err = write_kprobe_events(buf);
++			if (err >= 0) {
++				need_normal_check = false;
++				event_prefix = "__x64_";
++			}
++		}
++#endif
++		if (need_normal_check) {
++               if (strcmp("wbt_wait", event) == 0 || strcmp("blk_mq_get_tag", event) == 0) {
++                   if (is_kprobe) {
++			        snprintf(buf, sizeof(buf), "%c:%s_1 %s",
++				        is_kprobe ? 'p' : 'r', event, event);
++                   }
++                   else {
++			        snprintf(buf, sizeof(buf), "%c:%s_2 %s",
++			    	    is_kprobe ? 'p' : 'r', event, event);
++                   }
++               }
++               else {
++			    snprintf(buf, sizeof(buf), "%c:%s %s",
++				    is_kprobe ? 'p' : 'r', event, event);
++               }
++			err = write_kprobe_events(buf);
++			if (err < 0) {
++				printf("failed to create kprobe '%s' error '%s'\n",
++				       event, strerror(errno));
++				return -1;
++			}
++		}
++
++		strcpy(buf, DEBUGFS);
++		strcat(buf, "events/kprobes/");
++		strcat(buf, event_prefix);
++		strcat(buf, event);
++
++               if (strcmp("wbt_wait", event) == 0 || strcmp("blk_mq_get_tag", event) == 0) {
++                   if (is_kprobe) {
++			        strcat(buf, "_1");
++                   }
++                   else {
++			        strcat(buf, "_2");
++                   }
++               }
++		strcat(buf, "/id");
++	} else if (is_tracepoint) {
++		event += 11;
++
++		if (*event == 0) {
++			printf("event name cannot be empty\n");
++			return -1;
++		}
++		strcpy(buf, DEBUGFS);
++		strcat(buf, "events/");
++		strcat(buf, event);
++		strcat(buf, "/id");
++	}
++
++	efd = open(buf, O_RDONLY, 0);
++	if (efd < 0) {
++		printf("failed to open event %s\n", event);
++		return -1;
++	}
++
++	err = read(efd, buf, sizeof(buf));
++	if (err < 0 || err >= sizeof(buf)) {
++		printf("read from '%s' failed '%s'\n", event, strerror(errno));
++		return -1;
++	}
++
++	close(efd);
++
++	buf[err] = 0;
++	id = atoi(buf);
++	attr.config = id;
++
++	efd = sys_perf_event_open(&attr, -1/*pid*/, 0/*cpu*/, -1/*group_fd*/, 0);
++	if (efd < 0) {
++		printf("event %d fd %d err %s\n", id, efd, strerror(errno));
++		return -1;
++	}
++	event_fd[prog_cnt - 1] = efd;
++	err = ioctl(efd, PERF_EVENT_IOC_ENABLE, 0);
++	if (err < 0) {
++		printf("ioctl PERF_EVENT_IOC_ENABLE failed err %s\n",
++		       strerror(errno));
++		return -1;
++	}
++	err = ioctl(efd, PERF_EVENT_IOC_SET_BPF, fd);
++	if (err < 0) {
++		printf("ioctl PERF_EVENT_IOC_SET_BPF failed err %s\n",
++		       strerror(errno));
++		return -1;
++	}
++
++	return 0;
++}
++
++static int load_maps(struct bpf_map_data *maps, int nr_maps,
++		     fixup_map_cb fixup_map)
++{
++	int i, numa_node;
++
++	for (i = 0; i < nr_maps; i++) {
++		if (fixup_map) {
++			fixup_map(&maps[i], i);
++			/* Allow userspace to assign map FD prior to creation */
++			if (maps[i].fd != -1) {
++				map_fd[i] = maps[i].fd;
++				continue;
++			}
++		}
++
++		numa_node = maps[i].def.map_flags & BPF_F_NUMA_NODE ?
++			maps[i].def.numa_node : -1;
++
++		if (maps[i].def.type == BPF_MAP_TYPE_ARRAY_OF_MAPS ||
++		    maps[i].def.type == BPF_MAP_TYPE_HASH_OF_MAPS) {
++			int inner_map_fd = map_fd[maps[i].def.inner_map_idx];
++
++			map_fd[i] = bpf_create_map_in_map_node(maps[i].def.type,
++							maps[i].name,
++							maps[i].def.key_size,
++							inner_map_fd,
++							maps[i].def.max_entries,
++							maps[i].def.map_flags,
++							numa_node);
++		} else {
++			map_fd[i] = bpf_create_map_node(maps[i].def.type,
++							maps[i].name,
++							maps[i].def.key_size,
++							maps[i].def.value_size,
++							maps[i].def.max_entries,
++							maps[i].def.map_flags,
++							numa_node);
++		}
++		if (map_fd[i] < 0) {
++			printf("failed to create a map: %d %s\n",
++			       errno, strerror(errno));
++			return 1;
++		}
++		maps[i].fd = map_fd[i];
++
++		if (maps[i].def.type == BPF_MAP_TYPE_PROG_ARRAY)
++			prog_array_fd = map_fd[i];
++	}
++	return 0;
++}
++
++static int get_sec(Elf *elf, int i, GElf_Ehdr *ehdr, char **shname,
++		   GElf_Shdr *shdr, Elf_Data **data)
++{
++	Elf_Scn *scn;
++
++	scn = elf_getscn(elf, i);
++	if (!scn)
++		return 1;
++
++	if (gelf_getshdr(scn, shdr) != shdr)
++		return 2;
++
++	*shname = elf_strptr(elf, ehdr->e_shstrndx, shdr->sh_name);
++	if (!*shname || !shdr->sh_size)
++		return 3;
++
++	*data = elf_getdata(scn, 0);
++	if (!*data || elf_getdata(scn, *data) != NULL)
++		return 4;
++
++	return 0;
++}
++
++static int parse_relo_and_apply(Elf_Data *data, Elf_Data *symbols,
++				GElf_Shdr *shdr, struct bpf_insn *insn,
++				struct bpf_map_data *maps, int nr_maps)
++{
++	int i, nrels;
++
++	nrels = shdr->sh_size / shdr->sh_entsize;
++
++	for (i = 0; i < nrels; i++) {
++		GElf_Sym sym;
++		GElf_Rel rel;
++		unsigned int insn_idx;
++		bool match = false;
++		int j, map_idx;
++
++		gelf_getrel(data, i, &rel);
++
++		insn_idx = rel.r_offset / sizeof(struct bpf_insn);
++
++		gelf_getsym(symbols, GELF_R_SYM(rel.r_info), &sym);
++
++		if (insn[insn_idx].code != (BPF_LD | BPF_IMM | BPF_DW)) {
++			printf("invalid relo for insn[%d].code 0x%x\n",
++			       insn_idx, insn[insn_idx].code);
++			return 1;
++		}
++		insn[insn_idx].src_reg = BPF_PSEUDO_MAP_FD;
++
++		/* Match FD relocation against recorded map_data[] offset */
++		for (map_idx = 0; map_idx < nr_maps; map_idx++) {
++			if (maps[map_idx].elf_offset == sym.st_value) {
++				match = true;
++				break;
++			}
++		}
++		if (match) {
++			insn[insn_idx].imm = maps[map_idx].fd;
++		} else {
++			printf("invalid relo for insn[%d] no map_data match\n",
++			       insn_idx);
++			return 1;
++		}
++	}
++
++	return 0;
++}
++
++static int cmp_symbols(const void *l, const void *r)
++{
++	const GElf_Sym *lsym = (const GElf_Sym *)l;
++	const GElf_Sym *rsym = (const GElf_Sym *)r;
++
++	if (lsym->st_value < rsym->st_value)
++		return -1;
++	else if (lsym->st_value > rsym->st_value)
++		return 1;
++	else
++		return 0;
++}
++
++static int load_elf_maps_section(struct bpf_map_data *maps, int maps_shndx,
++				 Elf *elf, Elf_Data *symbols, int strtabidx)
++{
++	int map_sz_elf, map_sz_copy;
++	bool validate_zero = false;
++	Elf_Data *data_maps;
++	int i, nr_maps;
++	GElf_Sym *sym;
++	Elf_Scn *scn;
++	int copy_sz;
++
++	if (maps_shndx < 0)
++		return -EINVAL;
++	if (!symbols)
++		return -EINVAL;
++
++	/* Get data for maps section via elf index */
++	scn = elf_getscn(elf, maps_shndx);
++	if (scn)
++		data_maps = elf_getdata(scn, NULL);
++	if (!scn || !data_maps) {
++		printf("Failed to get Elf_Data from maps section %d\n",
++		       maps_shndx);
++		return -EINVAL;
++	}
++
++	/* For each map get corrosponding symbol table entry */
++	sym = calloc(MAX_MAPS+1, sizeof(GElf_Sym));
++	for (i = 0, nr_maps = 0; i < symbols->d_size / sizeof(GElf_Sym); i++) {
++		assert(nr_maps < MAX_MAPS+1);
++		if (!gelf_getsym(symbols, i, &sym[nr_maps]))
++			continue;
++		if (sym[nr_maps].st_shndx != maps_shndx)
++			continue;
++		/* Only increment iif maps section */
++		nr_maps++;
++	}
++
++	/* Align to map_fd[] order, via sort on offset in sym.st_value */
++	qsort(sym, nr_maps, sizeof(GElf_Sym), cmp_symbols);
++
++	/* Keeping compatible with ELF maps section changes
++	 * ------------------------------------------------
++	 * The program size of struct bpf_load_map_def is known by loader
++	 * code, but struct stored in ELF file can be different.
++	 *
++	 * Unfortunately sym[i].st_size is zero.  To calculate the
++	 * struct size stored in the ELF file, assume all struct have
++	 * the same size, and simply divide with number of map
++	 * symbols.
++	 */
++	map_sz_elf = data_maps->d_size / nr_maps;
++	map_sz_copy = sizeof(struct bpf_load_map_def);
++	if (map_sz_elf < map_sz_copy) {
++		/*
++		 * Backward compat, loading older ELF file with
++		 * smaller struct, keeping remaining bytes zero.
++		 */
++		map_sz_copy = map_sz_elf;
++	} else if (map_sz_elf > map_sz_copy) {
++		/*
++		 * Forward compat, loading newer ELF file with larger
++		 * struct with unknown features. Assume zero means
++		 * feature not used.  Thus, validate rest of struct
++		 * data is zero.
++		 */
++		validate_zero = true;
++	}
++
++	/* Memcpy relevant part of ELF maps data to loader maps */
++	for (i = 0; i < nr_maps; i++) {
++		struct bpf_load_map_def *def;
++		unsigned char *addr, *end;
++		const char *map_name;
++		size_t offset;
++
++		map_name = elf_strptr(elf, strtabidx, sym[i].st_name);
++		maps[i].name = strdup(map_name);
++		if (!maps[i].name) {
++			printf("strdup(%s): %s(%d)\n", map_name,
++			       strerror(errno), errno);
++			free(sym);
++			return -errno;
++		}
++
++		/* Symbol value is offset into ELF maps section data area */
++		offset = sym[i].st_value;
++		def = (struct bpf_load_map_def *)(data_maps->d_buf + offset);
++		maps[i].elf_offset = offset;
++		memset(&maps[i].def, 0, sizeof(struct bpf_load_map_def));
++		memcpy(&maps[i].def, def, map_sz_copy);
++
++		/* Verify no newer features were requested */
++		if (validate_zero) {
++			addr = (unsigned char*) def + map_sz_copy;
++			end  = (unsigned char*) def + map_sz_elf;
++			for (; addr < end; addr++) {
++				if (*addr != 0) {
++					free(sym);
++					return -EFBIG;
++				}
++			}
++		}
++	}
++
++	free(sym);
++	return nr_maps;
++}
++
++static int do_load_bpf_file(const char *path, fixup_map_cb fixup_map)
++{
++	int fd, i, ret, maps_shndx = -1, strtabidx = -1;
++	Elf *elf;
++	GElf_Ehdr ehdr;
++	GElf_Shdr shdr, shdr_prog;
++	Elf_Data *data, *data_prog, *data_maps = NULL, *symbols = NULL;
++	char *shname, *shname_prog;
++	int nr_maps = 0;
++
++	/* reset global variables */
++	kern_version = 0;
++	memset(license, 0, sizeof(license));
++	memset(processed_sec, 0, sizeof(processed_sec));
++
++	if (elf_version(EV_CURRENT) == EV_NONE)
++		return 1;
++
++	fd = open(path, O_RDONLY, 0);
++	if (fd < 0)
++		return 1;
++
++	elf = elf_begin(fd, ELF_C_READ, NULL);
++
++	if (!elf)
++		return 1;
++
++	if (gelf_getehdr(elf, &ehdr) != &ehdr)
++		return 1;
++
++	/* clear all kprobes */
++	i = write_kprobe_events("");
++
++	/* scan over all elf sections to get license and map info */
++	for (i = 1; i < ehdr.e_shnum; i++) {
++
++		if (get_sec(elf, i, &ehdr, &shname, &shdr, &data))
++			continue;
++
++		if (0) /* helpful for llvm debugging */
++			printf("section %d:%s data %p size %zd link %d flags %d\n",
++			       i, shname, data->d_buf, data->d_size,
++			       shdr.sh_link, (int) shdr.sh_flags);
++
++		if (strcmp(shname, "license") == 0) {
++			processed_sec[i] = true;
++			memcpy(license, data->d_buf, data->d_size);
++		} else if (strcmp(shname, "version") == 0) {
++			processed_sec[i] = true;
++			if (data->d_size != sizeof(int)) {
++				printf("invalid size of version section %zd\n",
++				       data->d_size);
++				return 1;
++			}
++			memcpy(&kern_version, data->d_buf, sizeof(int));
++		} else if (strcmp(shname, "maps") == 0) {
++			int j;
++
++			maps_shndx = i;
++			data_maps = data;
++			for (j = 0; j < MAX_MAPS; j++)
++				map_data[j].fd = -1;
++		} else if (shdr.sh_type == SHT_SYMTAB) {
++			strtabidx = shdr.sh_link;
++			symbols = data;
++		}
++	}
++
++	ret = 1;
++
++	if (!symbols) {
++		printf("missing SHT_SYMTAB section\n");
++		goto done;
++	}
++
++	if (data_maps) {
++		nr_maps = load_elf_maps_section(map_data, maps_shndx,
++						elf, symbols, strtabidx);
++		if (nr_maps < 0) {
++			printf("Error: Failed loading ELF maps (errno:%d):%s\n",
++			       nr_maps, strerror(-nr_maps));
++			goto done;
++		}
++		if (load_maps(map_data, nr_maps, fixup_map))
++			goto done;
++		map_data_count = nr_maps;
++
++		processed_sec[maps_shndx] = true;
++	}
++
++	/* process all relo sections, and rewrite bpf insns for maps */
++	for (i = 1; i < ehdr.e_shnum; i++) {
++		if (processed_sec[i])
++			continue;
++
++		if (get_sec(elf, i, &ehdr, &shname, &shdr, &data))
++			continue;
++
++		if (shdr.sh_type == SHT_REL) {
++			struct bpf_insn *insns;
++
++			/* locate prog sec that need map fixup (relocations) */
++			if (get_sec(elf, shdr.sh_info, &ehdr, &shname_prog,
++				    &shdr_prog, &data_prog))
++				continue;
++
++			if (shdr_prog.sh_type != SHT_PROGBITS ||
++			    !(shdr_prog.sh_flags & SHF_EXECINSTR))
++				continue;
++
++			insns = (struct bpf_insn *) data_prog->d_buf;
++			processed_sec[i] = true; /* relo section */
++
++			if (parse_relo_and_apply(data, symbols, &shdr, insns,
++						 map_data, nr_maps))
++				continue;
++		}
++	}
++
++	/* load programs */
++	for (i = 1; i < ehdr.e_shnum; i++) {
++
++		if (processed_sec[i])
++			continue;
++
++		if (get_sec(elf, i, &ehdr, &shname, &shdr, &data))
++			continue;
++
++		if (memcmp(shname, "kprobe/", 7) == 0 ||
++		    memcmp(shname, "kretprobe/", 10) == 0 ||
++		    memcmp(shname, "tracepoint/", 11) == 0 ||
++		    memcmp(shname, "raw_tracepoint/", 15) == 0 ||
++		    memcmp(shname, "xdp", 3) == 0 ||
++		    memcmp(shname, "perf_event", 10) == 0 ||
++		    memcmp(shname, "socket", 6) == 0 ||
++		    memcmp(shname, "cgroup/", 7) == 0 ||
++		    memcmp(shname, "sockops", 7) == 0 ||
++		    memcmp(shname, "sk_skb", 6) == 0 ||
++		    memcmp(shname, "sk_msg", 6) == 0) {
++			ret = load_and_attach(shname, data->d_buf,
++					      data->d_size);
++			if (ret != 0)
++				goto done;
++		}
++	}
++
++done:
++	close(fd);
++	return ret;
++}
++
++int load_bpf_file(char *path)
++{
++	return do_load_bpf_file(path, NULL);
++}
++
++int load_bpf_file_fixup_map(const char *path, fixup_map_cb fixup_map)
++{
++	return do_load_bpf_file(path, fixup_map);
++}
++
++void read_trace_pipe(void)
++{
++	int trace_fd;
++
++	trace_fd = open(DEBUGFS "trace_pipe", O_RDONLY, 0);
++	if (trace_fd < 0)
++		return;
++
++	while (1) {
++		static char buf[4096];
++		ssize_t sz;
++
++		sz = read(trace_fd, buf, sizeof(buf) - 1);
++		if (sz > 0) {
++			buf[sz] = 0;
++			puts(buf);
++		}
++	}
++}
+diff --git a/src/c/ebpf_collector/ebpf_collector.bpf.c b/src/c/ebpf_collector/ebpf_collector.bpf.c
+new file mode 100644
+index 0000000..28cdde2
+--- /dev/null
++++ b/src/c/ebpf_collector/ebpf_collector.bpf.c
+@@ -0,0 +1,1408 @@
++/*
++ * Copyright (c) Huawei Technologies Co., Ltd. 2024. All rights reserved.
++ * Description: ebpf collector program
++ * Author: Zhang Nan
++ * Create: 2024-09-27
++ */
++#define KBUILD_MODNAME "foo" 
++
++#include <linux/ptrace.h> 
++#include <linux/version.h> 
++#include <linux/blkdev.h> 
++#include <uapi/linux/bpf.h> 
++#include <uapi/linux/in6.h> 
++#include <uapi/linux/stddef.h>
++#include <linux/kdev_t.h>
++#include <linux/blk-mq.h>
++#include <linux/spinlock_types.h>
++#include <linux/blk_types.h>
++#include <sys/sysmacros.h>
++#include "bpf_helpers.h" 
++#include "ebpf_collector.h"
++
++#define _(P) ({typeof(P) val; bpf_probe_read(&val, sizeof(val), &P); val;})
++
++struct bpf_map_def SEC("maps") blk_map = { 
++   .type = BPF_MAP_TYPE_HASH, 
++   .key_size = sizeof(u32), 
++   .value_size = sizeof(struct io_counter), 
++   .max_entries = 10000, 
++};
++
++struct bpf_map_def SEC("maps") blk_res = { 
++   .type = BPF_MAP_TYPE_ARRAY, 
++   .key_size = sizeof(u32), 
++   .value_size = sizeof(struct stage_data), 
++   .max_entries = 128, 
++};
++
++struct bpf_map_def SEC("maps") bio_map = { 
++   .type = BPF_MAP_TYPE_HASH, 
++   .key_size = sizeof(u32), 
++   .value_size = sizeof(struct io_counter), 
++   .max_entries = 10000, 
++};
++
++struct bpf_map_def SEC("maps") bio_res = { 
++   .type = BPF_MAP_TYPE_ARRAY, 
++   .key_size = sizeof(u32), 
++   .value_size = sizeof(struct stage_data), 
++   .max_entries = 128, 
++};
++
++struct bpf_map_def SEC("maps") wbt_map = { 
++   .type = BPF_MAP_TYPE_HASH,
++   .key_size = sizeof(u32), 
++   .value_size = sizeof(struct io_counter), 
++   .max_entries = 10000, 
++};
++
++struct bpf_map_def SEC("maps") wbt_res = { 
++   .type = BPF_MAP_TYPE_ARRAY, 
++   .key_size = sizeof(u32), 
++   .value_size = sizeof(struct stage_data), 
++   .max_entries = 128, 
++};
++
++struct bpf_map_def SEC("maps") wbt_args = { 
++   .type = BPF_MAP_TYPE_HASH, 
++   .key_size = sizeof(u32), 
++   .value_size = sizeof(u64), 
++   .max_entries = 1000, 
++};
++
++struct bpf_map_def SEC("maps") tag_map = { 
++   .type = BPF_MAP_TYPE_HASH,
++   .key_size = sizeof(u32),
++   .value_size = sizeof(struct io_counter), 
++   .max_entries = 10000, 
++};
++
++struct bpf_map_def SEC("maps") tag_res = { 
++   .type = BPF_MAP_TYPE_ARRAY, 
++   .key_size = sizeof(u32), 
++   .value_size = sizeof(struct stage_data), 
++   .max_entries = 128, 
++};
++
++struct bpf_map_def SEC("maps") tag_args = { 
++   .type = BPF_MAP_TYPE_HASH, 
++   .key_size = sizeof(u32), 
++   .value_size = sizeof(u64), 
++   .max_entries = 1000, 
++};
++
++struct blk_mq_alloc_data {
++    /* input parameter */
++    struct request_queue *q;
++    blk_mq_req_flags_t flags;
++    unsigned int shallow_depth;
++
++    /* input & output parameter */
++    struct blk_mq_ctx *ctx;
++    struct blk_mq_hw_ctx *hctx;
++};
++
++static __always_inline void blk_fill_rwbs(char *rwbs, unsigned int op)
++{
++    switch (op & REQ_OP_MASK) {
++    case REQ_OP_WRITE:
++    case REQ_OP_WRITE_SAME:
++        rwbs[0] = 'W';
++        break;
++    case REQ_OP_DISCARD:
++        rwbs[0] = 'D';
++        break;
++    case REQ_OP_SECURE_ERASE:
++        rwbs[0] = 'E';
++        break;
++    case REQ_OP_FLUSH:
++        rwbs[0] = 'F';
++        break;
++    case REQ_OP_READ:
++        rwbs[0] = 'R';
++        break;
++    default:
++        rwbs[0] = 'N';
++    }
++
++    if (op & REQ_FUA) {
++        rwbs[1] = 'F';
++    } else {
++        rwbs[1] = '#';
++    }
++    if (op & REQ_RAHEAD) {
++        rwbs[2] = 'A';
++    } else {
++        rwbs[2] = '#';
++    }
++    if (op & REQ_SYNC) {
++        rwbs[3] = 'S';
++    } else {
++        rwbs[3] = '#';
++    }
++    if (op & REQ_META) {
++        rwbs[4] = 'M';
++    } else {
++        rwbs[4] = '#';
++    }
++}
++
++void update_new_data_in_start(struct stage_data *new_data, struct update_params *params) {
++    blk_fill_rwbs(new_data->io_type, params->cmd_flags);
++    if (new_data->bucket[params->update_bucket].start_range == params->curr_start_range){
++        new_data->bucket[params->update_bucket].io_count += 1;
++    } else {
++        new_data->bucket[MAX_BUCKETS].io_count += new_data->bucket[params->update_bucket].io_count;
++        new_data->bucket[params->update_bucket].io_count = 1;
++        new_data->bucket[params->update_bucket].start_range = params->curr_start_range;
++    }
++}
++
++void update_curr_data_in_start(struct stage_data *curr_data, struct update_params *params) {
++    if (curr_data && params) {
++        curr_data->start_count += 1;
++        curr_data->major = params->major;
++        curr_data->first_minor = params->first_minor;
++        blk_fill_rwbs(curr_data->io_type, params->cmd_flags);
++        if (curr_data->bucket[params->update_bucket].start_range == params->curr_start_range) {
++            curr_data->bucket[params->update_bucket].io_count += 1;
++        } else {
++            curr_data->bucket[MAX_BUCKETS].io_count += curr_data->bucket[params->update_bucket].io_count;
++            curr_data->bucket[params->update_bucket].io_count = 1;
++        }
++        curr_data->bucket[params->update_bucket].start_range = params->curr_start_range;
++    }
++}
++
++void update_new_data_in_finish(struct stage_data *new_data, struct update_params *params) {
++    blk_fill_rwbs(new_data->io_type, params->cmd_flags);
++    if (new_data->bucket[params->update_bucket].start_range == params->curr_start_range){
++        new_data->bucket[params->update_bucket].io_count = (new_data->bucket[params->update_bucket].io_count > 1) ? new_data->bucket[params->update_bucket].io_count - 1 : 0;
++    } else {
++        new_data->bucket[MAX_BUCKETS].io_count = (new_data->bucket[MAX_BUCKETS].io_count > 1) ? new_data->bucket[MAX_BUCKETS].io_count - 1 : 0;
++    }
++}
++
++void update_curr_data_in_finish(struct stage_data *curr_data, struct update_params *params, u64 duration) {
++    if (curr_data && params) {
++        curr_data->finish_count += 1;
++        curr_data->major = params->major;
++        curr_data->first_minor = params->first_minor;
++        blk_fill_rwbs(curr_data->io_type, params->cmd_flags);
++        if (duration > DURATION_THRESHOLD) { 
++            curr_data->finish_over_time += 1;
++        }
++    }
++}
++
++static void init_io_counter(struct io_counter *counterp, int major, int first_minor) {
++    if (counterp) {
++        counterp->start_time = bpf_ktime_get_ns();
++        counterp->major = major;
++        counterp->first_minor = first_minor;
++    }
++}
++
++
++u32 find_matching_tag_1_keys(int major, int minor) {
++    u32 key = 0;
++    struct stage_data *curr_data = bpf_map_lookup_elem(&tag_res, &key);
++    
++    if (curr_data != NULL && curr_data->major == major && curr_data->first_minor == minor) {
++        return key; 
++    }
++
++    u32 key_2 = 1;
++    struct stage_data *curr_data_2 = bpf_map_lookup_elem(&tag_res, &key_2);
++    
++    if (curr_data_2 != NULL && curr_data_2->major == major && curr_data_2->first_minor == minor) {
++        return key_2; 
++    }
++
++    u32 key_3 = 2;
++    struct stage_data *curr_data_3 = bpf_map_lookup_elem(&tag_res, &key_3);
++    
++    if (curr_data_3 != NULL && curr_data_3->major == major && curr_data_3->first_minor == minor) {
++        return key_3; 
++    }
++
++    return MAP_SIZE + 1; 
++}
++
++u32 find_matching_tag_2_keys(int major, int minor) {
++    u32 key = 3;
++    struct stage_data *curr_data = bpf_map_lookup_elem(&tag_res, &key);
++    
++    if (curr_data != NULL && curr_data->major == major && curr_data->first_minor == minor) {
++        return key; 
++    }
++
++    u32 key_2 = 4;
++    struct stage_data *curr_data_2 = bpf_map_lookup_elem(&tag_res, &key_2);
++    
++    if (curr_data_2 != NULL && curr_data_2->major == major && curr_data_2->first_minor == minor) {
++        return key_2; 
++    }
++
++    u32 key_3 = 5;
++    struct stage_data *curr_data_3 = bpf_map_lookup_elem(&tag_res, &key_3);
++    
++    if (curr_data_3 != NULL && curr_data_3->major == major && curr_data_3->first_minor == minor) {
++        return key_3; 
++    }
++    
++    return MAP_SIZE + 1; 
++}
++
++u32 find_matching_tag_3_keys(int major, int minor) {
++    u32 key = 6;
++    struct stage_data *curr_data = bpf_map_lookup_elem(&tag_res, &key);
++    
++    if (curr_data != NULL && curr_data->major == major && curr_data->first_minor == minor) {
++        return key; 
++    }
++
++    u32 key_2 = 7;
++    struct stage_data *curr_data_2 = bpf_map_lookup_elem(&tag_res, &key_2);
++    
++    if (curr_data_2 != NULL && curr_data_2->major == major && curr_data_2->first_minor == minor) {
++        return key_2; 
++    }
++
++    u32 key_3 = 8;
++    struct stage_data *curr_data_3 = bpf_map_lookup_elem(&tag_res, &key_3);
++    
++    if (curr_data_3 != NULL && curr_data_3->major == major && curr_data_3->first_minor == minor) {
++        return key_3; 
++    }
++    
++    return MAP_SIZE + 1; 
++}
++
++u32 find_matching_tag_4_keys(int major, int minor) {
++    u32 key = 9;
++    struct stage_data *curr_data = bpf_map_lookup_elem(&tag_res, &key);
++    
++    if (curr_data != NULL && curr_data->major == major && curr_data->first_minor == minor) {
++        return key; 
++    }
++
++    u32 key_2 = 10;
++    struct stage_data *curr_data_2 = bpf_map_lookup_elem(&tag_res, &key_2);
++    
++    if (curr_data_2 != NULL && curr_data_2->major == major && curr_data_2->first_minor == minor) {
++        return key_2; 
++    }
++
++    u32 key_3 = 11;
++    struct stage_data *curr_data_3 = bpf_map_lookup_elem(&tag_res, &key_3);
++    
++    if (curr_data_3 != NULL && curr_data_3->major == major && curr_data_3->first_minor == minor) {
++        return key_3; 
++    }
++    
++    return MAP_SIZE + 1; 
++}
++
++u32 find_matching_tag_5_keys(int major, int minor) {
++    u32 key = 12;
++    struct stage_data *curr_data = bpf_map_lookup_elem(&tag_res, &key);
++    
++    if (curr_data != NULL && curr_data->major == major && curr_data->first_minor == minor) {
++        return key; 
++    }
++
++    u32 key_2 = 13;
++    struct stage_data *curr_data_2 = bpf_map_lookup_elem(&tag_res, &key_2);
++    
++    if (curr_data_2 != NULL && curr_data_2->major == major && curr_data_2->first_minor == minor) {
++        return key_2; 
++    }
++
++    u32 key_3 = 14;
++    struct stage_data *curr_data_3 = bpf_map_lookup_elem(&tag_res, &key_3);
++    
++    if (curr_data_3 != NULL && curr_data_3->major == major && curr_data_3->first_minor == minor) {
++        return key_3; 
++    }
++    
++    return MAP_SIZE + 1; 
++}
++
++u32 find_matching_blk_1_keys(int major, int minor) {
++    u32 key = 0;
++    struct stage_data *curr_data = bpf_map_lookup_elem(&blk_res, &key);
++    
++    if (curr_data != NULL && curr_data->major == major && curr_data->first_minor == minor) {
++        return key; 
++    }
++
++    u32 key_2 = 1;
++    struct stage_data *curr_data_2 = bpf_map_lookup_elem(&blk_res, &key_2);
++    
++    if (curr_data_2 != NULL && curr_data_2->major == major && curr_data_2->first_minor == minor) {
++        return key_2; 
++    }
++
++    u32 key_3 = 2;
++    struct stage_data *curr_data_3 = bpf_map_lookup_elem(&blk_res, &key_3);
++    
++    if (curr_data_3 != NULL && curr_data_3->major == major && curr_data_3->first_minor == minor) {
++        return key_3; 
++    }
++
++    return MAP_SIZE + 1; 
++}
++
++u32 find_matching_blk_2_keys(int major, int minor) {
++    u32 key = 3;
++    struct stage_data *curr_data = bpf_map_lookup_elem(&blk_res, &key);
++    
++    if (curr_data != NULL && curr_data->major == major && curr_data->first_minor == minor) {
++        return key; 
++    }
++
++    u32 key_2 = 4;
++    struct stage_data *curr_data_2 = bpf_map_lookup_elem(&blk_res, &key_2);
++    
++    if (curr_data_2 != NULL && curr_data_2->major == major && curr_data_2->first_minor == minor) {
++        return key_2; 
++    }
++
++    u32 key_3 = 5;
++    struct stage_data *curr_data_3 = bpf_map_lookup_elem(&blk_res, &key_3);
++    
++    if (curr_data_3 != NULL && curr_data_3->major == major && curr_data_3->first_minor == minor) {
++        return key_3; 
++    }
++    
++    return MAP_SIZE + 1; 
++}
++
++u32 find_matching_blk_3_keys(int major, int minor) {
++    u32 key = 6;
++    struct stage_data *curr_data = bpf_map_lookup_elem(&blk_res, &key);
++    
++    if (curr_data != NULL && curr_data->major == major && curr_data->first_minor == minor) {
++        return key; 
++    }
++
++    u32 key_2 = 7;
++    struct stage_data *curr_data_2 = bpf_map_lookup_elem(&blk_res, &key_2);
++    
++    if (curr_data_2 != NULL && curr_data_2->major == major && curr_data_2->first_minor == minor) {
++        return key_2; 
++    }
++
++    u32 key_3 = 8;
++    struct stage_data *curr_data_3 = bpf_map_lookup_elem(&blk_res, &key_3);
++    
++    if (curr_data_3 != NULL && curr_data_3->major == major && curr_data_3->first_minor == minor) {
++        return key_3; 
++    }
++    
++    return MAP_SIZE + 1; 
++}
++
++u32 find_matching_blk_4_keys(int major, int minor) {
++    u32 key = 9;
++    struct stage_data *curr_data = bpf_map_lookup_elem(&blk_res, &key);
++    
++    if (curr_data != NULL && curr_data->major == major && curr_data->first_minor == minor) {
++        return key; 
++    }
++
++    u32 key_2 = 10;
++    struct stage_data *curr_data_2 = bpf_map_lookup_elem(&blk_res, &key_2);
++    
++    if (curr_data_2 != NULL && curr_data_2->major == major && curr_data_2->first_minor == minor) {
++        return key_2; 
++    }
++
++    u32 key_3 = 11;
++    struct stage_data *curr_data_3 = bpf_map_lookup_elem(&blk_res, &key_3);
++    
++    if (curr_data_3 != NULL && curr_data_3->major == major && curr_data_3->first_minor == minor) {
++        return key_3; 
++    }
++    
++    return MAP_SIZE + 1; 
++}
++
++u32 find_matching_blk_5_keys(int major, int minor) {
++    u32 key = 12;
++    struct stage_data *curr_data = bpf_map_lookup_elem(&blk_res, &key);
++    
++    if (curr_data != NULL && curr_data->major == major && curr_data->first_minor == minor) {
++        return key; 
++    }
++
++    u32 key_2 = 13;
++    struct stage_data *curr_data_2 = bpf_map_lookup_elem(&blk_res, &key_2);
++    
++    if (curr_data_2 != NULL && curr_data_2->major == major && curr_data_2->first_minor == minor) {
++        return key_2; 
++    }
++
++    u32 key_3 = 14;
++    struct stage_data *curr_data_3 = bpf_map_lookup_elem(&blk_res, &key_3);
++    
++    if (curr_data_3 != NULL && curr_data_3->major == major && curr_data_3->first_minor == minor) {
++        return key_3; 
++    }
++    
++    return MAP_SIZE + 1; 
++}
++
++u32 find_matching_bio_1_keys(int major, int minor) {
++    u32 key = 0;
++    struct stage_data *curr_data = bpf_map_lookup_elem(&bio_res, &key);
++    
++    if (curr_data != NULL && curr_data->major == major && curr_data->first_minor == minor) {
++        return key; 
++    }
++
++    u32 key_2 = 1;
++    struct stage_data *curr_data_2 = bpf_map_lookup_elem(&bio_res, &key_2);
++    
++    if (curr_data_2 != NULL && curr_data_2->major == major && curr_data_2->first_minor == minor) {
++        return key_2; 
++    }
++
++    u32 key_3 = 2;
++    struct stage_data *curr_data_3 = bpf_map_lookup_elem(&bio_res, &key_3);
++    
++    if (curr_data_3 != NULL && curr_data_3->major == major && curr_data_3->first_minor == minor) {
++        return key_3; 
++    }
++
++    return MAP_SIZE + 1; 
++}
++
++u32 find_matching_bio_2_keys(int major, int minor) {
++    u32 key = 3;
++    struct stage_data *curr_data = bpf_map_lookup_elem(&bio_res, &key);
++    
++    if (curr_data != NULL && curr_data->major == major && curr_data->first_minor == minor) {
++        return key; 
++    }
++
++    u32 key_2 = 4;
++    struct stage_data *curr_data_2 = bpf_map_lookup_elem(&bio_res, &key_2);
++    
++    if (curr_data_2 != NULL && curr_data_2->major == major && curr_data_2->first_minor == minor) {
++        return key_2; 
++    }
++
++    u32 key_3 = 5;
++    struct stage_data *curr_data_3 = bpf_map_lookup_elem(&bio_res, &key_3);
++    
++    if (curr_data_3 != NULL && curr_data_3->major == major && curr_data_3->first_minor == minor) {
++        return key_3; 
++    }
++    
++    return MAP_SIZE + 1; 
++}
++
++u32 find_matching_bio_3_keys(int major, int minor) {
++    u32 key = 6;
++    struct stage_data *curr_data = bpf_map_lookup_elem(&bio_res, &key);
++    
++    if (curr_data != NULL && curr_data->major == major && curr_data->first_minor == minor) {
++        return key; 
++    }
++
++    u32 key_2 = 7;
++    struct stage_data *curr_data_2 = bpf_map_lookup_elem(&bio_res, &key_2);
++    
++    if (curr_data_2 != NULL && curr_data_2->major == major && curr_data_2->first_minor == minor) {
++        return key_2; 
++    }
++
++    u32 key_3 = 8;
++    struct stage_data *curr_data_3 = bpf_map_lookup_elem(&bio_res, &key_3);
++    
++    if (curr_data_3 != NULL && curr_data_3->major == major && curr_data_3->first_minor == minor) {
++        return key_3; 
++    }
++    
++    return MAP_SIZE + 1; 
++}
++
++u32 find_matching_bio_4_keys(int major, int minor) {
++    u32 key = 9;
++    struct stage_data *curr_data = bpf_map_lookup_elem(&bio_res, &key);
++    
++    if (curr_data != NULL && curr_data->major == major && curr_data->first_minor == minor) {
++        return key; 
++    }
++
++    u32 key_2 = 10;
++    struct stage_data *curr_data_2 = bpf_map_lookup_elem(&bio_res, &key_2);
++    
++    if (curr_data_2 != NULL && curr_data_2->major == major && curr_data_2->first_minor == minor) {
++        return key_2; 
++    }
++
++    u32 key_3 = 11;
++    struct stage_data *curr_data_3 = bpf_map_lookup_elem(&bio_res, &key_3);
++    
++    if (curr_data_3 != NULL && curr_data_3->major == major && curr_data_3->first_minor == minor) {
++        return key_3; 
++    }
++    
++    return MAP_SIZE + 1; 
++}
++
++u32 find_matching_bio_5_keys(int major, int minor) {
++    u32 key = 12;
++    struct stage_data *curr_data = bpf_map_lookup_elem(&bio_res, &key);
++    
++    if (curr_data != NULL && curr_data->major == major && curr_data->first_minor == minor) {
++        return key; 
++    }
++
++    u32 key_2 = 13;
++    struct stage_data *curr_data_2 = bpf_map_lookup_elem(&bio_res, &key_2);
++    
++    if (curr_data_2 != NULL && curr_data_2->major == major && curr_data_2->first_minor == minor) {
++        return key_2; 
++    }
++
++    u32 key_3 = 14;
++    struct stage_data *curr_data_3 = bpf_map_lookup_elem(&bio_res, &key_3);
++    
++    if (curr_data_3 != NULL && curr_data_3->major == major && curr_data_3->first_minor == minor) {
++        return key_3; 
++    }
++    
++    return MAP_SIZE + 1; 
++}
++
++u32 find_matching_wbt_1_keys(int major, int minor) {
++    u32 key = 0;
++    struct stage_data *curr_data = bpf_map_lookup_elem(&wbt_res, &key);
++    
++    if (curr_data != NULL && curr_data->major == major && curr_data->first_minor == minor) {
++        return key; 
++    }
++
++    u32 key_2 = 1;
++    struct stage_data *curr_data_2 = bpf_map_lookup_elem(&wbt_res, &key_2);
++    
++    if (curr_data_2 != NULL && curr_data_2->major == major && curr_data_2->first_minor == minor) {
++        return key_2; 
++    }
++
++    u32 key_3 = 2;
++    struct stage_data *curr_data_3 = bpf_map_lookup_elem(&wbt_res, &key_3);
++    
++    if (curr_data_3 != NULL && curr_data_3->major == major && curr_data_3->first_minor == minor) {
++        return key_3; 
++    }
++
++    return MAP_SIZE + 1; 
++}
++
++u32 find_matching_wbt_2_keys(int major, int minor) {
++    u32 key = 3;
++    struct stage_data *curr_data = bpf_map_lookup_elem(&wbt_res, &key);
++    
++    if (curr_data != NULL && curr_data->major == major && curr_data->first_minor == minor) {
++        return key; 
++    }
++
++    u32 key_2 = 4;
++    struct stage_data *curr_data_2 = bpf_map_lookup_elem(&wbt_res, &key_2);
++    
++    if (curr_data_2 != NULL && curr_data_2->major == major && curr_data_2->first_minor == minor) {
++        return key_2; 
++    }
++
++    u32 key_3 = 5;
++    struct stage_data *curr_data_3 = bpf_map_lookup_elem(&wbt_res, &key_3);
++    
++    if (curr_data_3 != NULL && curr_data_3->major == major && curr_data_3->first_minor == minor) {
++        return key_3; 
++    }
++    
++    return MAP_SIZE + 1; 
++}
++
++u32 find_matching_wbt_3_keys(int major, int minor) {
++    u32 key = 6;
++    struct stage_data *curr_data = bpf_map_lookup_elem(&wbt_res, &key);
++    
++    if (curr_data != NULL && curr_data->major == major && curr_data->first_minor == minor) {
++        return key; 
++    }
++
++    u32 key_2 = 7;
++    struct stage_data *curr_data_2 = bpf_map_lookup_elem(&wbt_res, &key_2);
++    
++    if (curr_data_2 != NULL && curr_data_2->major == major && curr_data_2->first_minor == minor) {
++        return key_2; 
++    }
++
++    u32 key_3 = 8;
++    struct stage_data *curr_data_3 = bpf_map_lookup_elem(&wbt_res, &key_3);
++    
++    if (curr_data_3 != NULL && curr_data_3->major == major && curr_data_3->first_minor == minor) {
++        return key_3; 
++    }
++    
++    return MAP_SIZE + 1; 
++}
++
++u32 find_matching_wbt_4_keys(int major, int minor) {
++    u32 key = 9;
++    struct stage_data *curr_data = bpf_map_lookup_elem(&wbt_res, &key);
++    
++    if (curr_data != NULL && curr_data->major == major && curr_data->first_minor == minor) {
++        return key; 
++    }
++
++    u32 key_2 = 10;
++    struct stage_data *curr_data_2 = bpf_map_lookup_elem(&wbt_res, &key_2);
++    
++    if (curr_data_2 != NULL && curr_data_2->major == major && curr_data_2->first_minor == minor) {
++        return key_2; 
++    }
++
++    u32 key_3 = 11;
++    struct stage_data *curr_data_3 = bpf_map_lookup_elem(&wbt_res, &key_3);
++    
++    if (curr_data_3 != NULL && curr_data_3->major == major && curr_data_3->first_minor == minor) {
++        return key_3; 
++    }
++    
++    return MAP_SIZE + 1; 
++}
++
++u32 find_matching_wbt_5_keys(int major, int minor) {
++    u32 key = 12;
++    struct stage_data *curr_data = bpf_map_lookup_elem(&wbt_res, &key);
++    
++    if (curr_data != NULL && curr_data->major == major && curr_data->first_minor == minor) {
++        return key; 
++    }
++
++    u32 key_2 = 13;
++    struct stage_data *curr_data_2 = bpf_map_lookup_elem(&wbt_res, &key_2);
++    
++    if (curr_data_2 != NULL && curr_data_2->major == major && curr_data_2->first_minor == minor) {
++        return key_2; 
++    }
++
++    u32 key_3 = 14;
++    struct stage_data *curr_data_3 = bpf_map_lookup_elem(&wbt_res, &key_3);
++    
++    if (curr_data_3 != NULL && curr_data_3->major == major && curr_data_3->first_minor == minor) {
++        return key_3; 
++    }
++    
++    return MAP_SIZE + 1; 
++}
++
++SEC("kprobe/blk_mq_start_request") 
++int kprobe_blk_mq_start_request(struct pt_regs *regs) 
++{
++    struct request *rq = (struct request *)PT_REGS_PARM1(regs); 
++    struct gendisk *curr_rq_disk = _(rq->rq_disk);
++    int major = _(curr_rq_disk->major);
++    int first_minor = _(curr_rq_disk->first_minor);
++    unsigned int cmd_flags =  _(rq->cmd_flags);
++    
++    struct io_counter *counterp, zero = {}; 
++
++    u32 key = find_matching_blk_1_keys(major, first_minor);
++    if (key >= MAP_SIZE){
++        key = find_matching_blk_2_keys(major, first_minor);
++        if (key >= MAP_SIZE){
++            key = find_matching_blk_3_keys(major, first_minor);
++            if (key >= MAP_SIZE){
++                key = find_matching_blk_4_keys(major, first_minor);
++                if (key >= MAP_SIZE){
++                    key = find_matching_blk_5_keys(major, first_minor);
++                    if (key >= MAP_SIZE){
++                        return 0;
++                    }
++                }
++            }
++        }
++    } 
++    
++    init_io_counter(&zero, major, first_minor);
++
++    counterp = bpf_map_lookup_elem(&blk_map, &rq); 
++    if (counterp || major == 0) 
++        return 0;
++    long err = bpf_map_update_elem(&blk_map, &rq, &zero, BPF_NOEXIST); 
++    if (err) 
++        return 0;
++
++    u64 curr_start_range = zero.start_time / THRESHOLD / MAX_BUCKETS;
++    u64 update_bucket = curr_start_range % MAX_BUCKETS;
++
++    struct update_params params = {
++        .major = major,
++        .first_minor = first_minor,
++        .cmd_flags = cmd_flags,
++        .update_bucket = update_bucket,
++        .curr_start_range = curr_start_range,
++    };
++
++    struct stage_data *curr_data; 
++    curr_data = bpf_map_lookup_elem(&blk_res, &key);  
++    if (!curr_data) {
++        struct stage_data new_data = {
++            .start_count = 1,
++            .finish_count = 0,
++            .finish_over_time = 0,
++            .duration = 0,
++            .major = major,
++            .first_minor = first_minor,
++            .io_type = "",
++            .bucket = {
++                [0] = {.start_range = 0, .io_count = 0},
++                [1] = {.start_range = 0, .io_count = 0},
++            },
++        }; 
++        update_new_data_in_start(&new_data, &params);
++        bpf_map_update_elem(&blk_res, &key, &new_data, 0);
++    } else {
++        update_curr_data_in_start(curr_data, &params);
++    }
++
++    return 0; 
++}
++
++SEC("kprobe/blk_mq_free_request") 
++int kprobe_blk_mq_free_request(struct pt_regs *regs) 
++{
++    struct request *rq = (struct request *)PT_REGS_PARM1(regs);
++    struct gendisk *curr_rq_disk = _(rq->rq_disk);
++    int major = _(curr_rq_disk->major);
++    int first_minor = _(curr_rq_disk->first_minor);
++    unsigned int cmd_flags =  _(rq->cmd_flags); 
++
++    struct io_counter *counterp;
++    u32 key = find_matching_blk_1_keys(major, first_minor);
++    if (key >= MAP_SIZE){
++        key = find_matching_blk_2_keys(major, first_minor);
++        if (key >= MAP_SIZE){
++            key = find_matching_blk_3_keys(major, first_minor);
++            if (key >= MAP_SIZE){
++                key = find_matching_blk_4_keys(major, first_minor);
++                if (key >= MAP_SIZE){
++                    key = find_matching_blk_5_keys(major, first_minor);
++                    if (key >= MAP_SIZE){
++                        return 0;
++                    }
++                }
++            }
++        }
++    } 
++    
++    counterp = bpf_map_lookup_elem(&blk_map, &rq);
++
++    if (!counterp) { 
++        return 0;
++    }
++
++    u64 duration = bpf_ktime_get_ns() - counterp->start_time; 
++    u64 curr_start_range = counterp->start_time / THRESHOLD / MAX_BUCKETS;
++    u64 update_bucket = curr_start_range % MAX_BUCKETS;
++
++    struct update_params params = {
++        .major = major,
++        .first_minor = first_minor,
++        .cmd_flags = cmd_flags,
++        .update_bucket = update_bucket,
++        .curr_start_range = curr_start_range,
++    };
++
++    struct stage_data *curr_data;
++    curr_data = bpf_map_lookup_elem(&blk_res, &key); 
++    if (curr_data == NULL && duration > DURATION_THRESHOLD) { 
++        struct stage_data new_data = {
++            .start_count = 1,
++            .finish_count = 1,
++            .finish_over_time = 1,
++            .duration = 0,
++            .major = major,
++            .first_minor = first_minor,
++            .io_type = "",
++            .bucket = {
++                [0] = {.start_range = 0, .io_count = 0},
++                [1] = {.start_range = 0, .io_count = 0},
++            },
++        };
++        update_new_data_in_finish(&new_data, &params);
++        bpf_map_update_elem(&blk_res, &key, &new_data, 0); 
++    } else if (curr_data == NULL) { 
++        struct stage_data new_data = {
++            .start_count = 1,
++            .finish_count = 1,
++            .finish_over_time = 0,
++            .duration = 0,
++            .major = major,
++            .first_minor = first_minor,
++            .io_type = "",
++            .bucket = {
++                [0] = {.start_range = 0, .io_count = 0},
++                [1] = {.start_range = 0, .io_count = 0},
++            },
++        };
++        update_new_data_in_finish(&new_data, &params);
++        bpf_map_update_elem(&blk_res, &key, &new_data, 0); 
++    } else {
++        if (curr_data->bucket[update_bucket].start_range == curr_start_range) {
++            curr_data->bucket[update_bucket].io_count = (curr_data->bucket[update_bucket].io_count > 1) ? curr_data->bucket[update_bucket].io_count - 1 : 0;
++        } else {
++            curr_data->bucket[MAX_BUCKETS].io_count = (curr_data->bucket[MAX_BUCKETS].io_count > 1) ? curr_data->bucket[MAX_BUCKETS].io_count - 1 : 0;
++
++        }
++        curr_data->duration += duration; 
++        update_curr_data_in_finish(curr_data, &params, &duration);
++    }
++
++    bpf_map_delete_elem(&blk_map, &rq); 
++    return 0;
++}
++
++SEC("kprobe/blk_mq_make_request") 
++int kprobe_blk_mq_make_request(struct pt_regs *regs)
++{
++    struct bio *bio = (struct bio *)PT_REGS_PARM2(regs);
++    struct gendisk *curr_rq_disk = _(bio->bi_disk);
++    int major = _(curr_rq_disk->major);
++    int first_minor = _(curr_rq_disk->first_minor);
++    unsigned int cmd_flags =  _(bio->bi_opf);
++
++    struct io_counter *counterp, zero = {};
++    u32 key = find_matching_bio_1_keys(major, first_minor);
++    if (key >= MAP_SIZE){
++        key = find_matching_bio_2_keys(major, first_minor);
++        if (key >= MAP_SIZE){
++            key = find_matching_bio_3_keys(major, first_minor);
++            if (key >= MAP_SIZE){
++                key = find_matching_bio_4_keys(major, first_minor);
++                if (key >= MAP_SIZE){
++                    key = find_matching_bio_5_keys(major, first_minor);
++                    if (key >= MAP_SIZE){
++                        return 0;
++                    }
++                }
++            }
++        }
++    } 
++
++    init_io_counter(&zero, major, first_minor);
++
++    counterp = bpf_map_lookup_elem(&bio_map, &bio); 
++    if (counterp || major == 0) 
++        return 0;
++
++    long err = bpf_map_update_elem(&bio_map, &bio, &zero, BPF_NOEXIST); 
++    if (err && err != -EEXIST) 
++        return 0;
++
++    u64 curr_start_range = zero.start_time / THRESHOLD / MAX_BUCKETS;
++    u64 update_bucket = curr_start_range % MAX_BUCKETS;
++
++    struct update_params params = {
++        .major = major,
++        .first_minor = first_minor,
++        .cmd_flags = cmd_flags,
++        .update_bucket = update_bucket,
++        .curr_start_range = curr_start_range,
++    }; 
++
++    struct stage_data *curr_data;
++    curr_data = bpf_map_lookup_elem(&bio_res, &key);
++    if (curr_data == NULL) { 
++        struct stage_data new_data = {
++            .start_count = 1,
++            .finish_count = 0,
++            .finish_over_time = 0,
++            .duration = 0,
++            .major = major,
++            .first_minor = first_minor,
++            .io_type = "",
++            .bucket = {
++                [0] = {.start_range = 0, .io_count = 0},
++                [1] = {.start_range = 0, .io_count = 0},
++            },
++        };
++        update_new_data_in_start(&new_data, &params);
++        bpf_map_update_elem(&bio_res, &key, &new_data, 0);
++    } else { 
++        update_curr_data_in_start(curr_data, &params);
++    }
++
++    return 0; 
++}
++
++SEC("kprobe/bio_endio") 
++int kprobe_bio_endio(struct pt_regs *regs) 
++{
++    struct bio *bio = (struct bio *)PT_REGS_PARM1(regs);
++    struct gendisk *curr_rq_disk = _(bio->bi_disk);
++    int major = _(curr_rq_disk->major);
++    int first_minor = _(curr_rq_disk->first_minor);
++    unsigned int cmd_flags =  _(bio->bi_opf);
++
++    struct io_counter *counterp; 
++    void *delete_map = NULL; 
++    u32 key = find_matching_bio_1_keys(major, first_minor);
++    if (key >= MAP_SIZE){
++        key = find_matching_bio_2_keys(major, first_minor);
++        if (key >= MAP_SIZE){
++            key = find_matching_bio_3_keys(major, first_minor);
++            if (key >= MAP_SIZE){
++                key = find_matching_bio_4_keys(major, first_minor);
++                if (key >= MAP_SIZE){
++                    key = find_matching_bio_5_keys(major, first_minor);
++                    if (key >= MAP_SIZE){
++                        return 0;
++                    }
++                }
++            }
++        }
++    }
++
++    counterp = bpf_map_lookup_elem(&bio_map, &bio);
++
++    if (!counterp) { 
++        return 0;
++    }
++
++    delete_map = &bio_map; 
++
++    u64 duration = bpf_ktime_get_ns() - counterp->start_time; 
++    u64 curr_start_range = counterp->start_time / THRESHOLD / MAX_BUCKETS;
++    u64 update_bucket = curr_start_range % MAX_BUCKETS;
++
++    struct update_params params = {
++        .major = major,
++        .first_minor = first_minor,
++        .cmd_flags = cmd_flags,
++        .update_bucket = update_bucket,
++        .curr_start_range = curr_start_range,
++    };
++
++    struct stage_data *curr_data;
++    curr_data = bpf_map_lookup_elem(&bio_res, &key);
++    if (curr_data == NULL && duration > DURATION_THRESHOLD) { 
++        struct stage_data new_data = {
++            .start_count = 1,
++            .finish_count = 1,
++            .finish_over_time = 1,
++            .duration = 0,
++            .major = major,
++            .first_minor = first_minor,
++            .io_type = "",
++            .bucket = {
++                [0] = {.start_range = 0, .io_count = 0},
++                [1] = {.start_range = 0, .io_count = 0},
++            },
++        };
++        update_new_data_in_finish(&new_data, &params);
++        bpf_map_update_elem(&bio_res, &key, &new_data, 0); 
++    } else if (curr_data == NULL) { 
++        struct stage_data new_data = {
++            .start_count = 1,
++            .finish_count = 1,
++            .finish_over_time = 0,
++            .duration = 0,
++            .major = major,
++            .first_minor = first_minor,
++            .io_type = "",
++            .bucket = {
++                [0] = {.start_range = 0, .io_count = 0},
++                [1] = {.start_range = 0, .io_count = 0},
++            },
++        };
++        update_new_data_in_finish(&new_data, &params);
++        bpf_map_update_elem(&bio_res, &key, &new_data, 0); 
++    } else {
++        if (curr_data->bucket[update_bucket].start_range == curr_start_range) {
++            curr_data->bucket[update_bucket].io_count = (curr_data->bucket[update_bucket].io_count > 1) ? curr_data->bucket[update_bucket].io_count - 1 : 0;
++        } else {
++            curr_data->bucket[MAX_BUCKETS].io_count = (curr_data->bucket[MAX_BUCKETS].io_count > 1) ? curr_data->bucket[MAX_BUCKETS].io_count - 1 : 0;
++
++        }
++        curr_data->duration += duration; 
++        update_curr_data_in_finish(curr_data, &params, &duration);
++    }
++
++    bpf_map_delete_elem(delete_map, &bio); 
++    return 0; 
++}
++
++SEC("kprobe/wbt_wait") 
++int kprobe_wbt_wait(struct pt_regs *regs) 
++{
++    u64 wbtkey = bpf_get_current_task();
++    u64 value = (u64)PT_REGS_PARM2(regs);
++    (void)bpf_map_update_elem(&wbt_args, &wbtkey, &value, BPF_ANY);
++    struct bio *bio = (struct bio *)value;
++    struct gendisk *curr_rq_disk = _(bio->bi_disk);
++    int major = _(curr_rq_disk->major);
++    int first_minor = _(curr_rq_disk->first_minor);
++    unsigned int cmd_flags =  _(bio->bi_opf);
++
++    struct io_counter *counterp, zero = {}; 
++    u32 key = find_matching_wbt_1_keys(major, first_minor);
++    if (key >= MAP_SIZE){
++        key = find_matching_wbt_2_keys(major, first_minor);
++        if (key >= MAP_SIZE){
++            key = find_matching_wbt_3_keys(major, first_minor);
++            if (key >= MAP_SIZE){
++                key = find_matching_wbt_4_keys(major, first_minor);
++                if (key >= MAP_SIZE){
++                    key = find_matching_wbt_5_keys(major, first_minor);
++                    if (key >= MAP_SIZE){
++                        return 0;
++                    }
++                }
++            }
++        }
++    }
++
++    init_io_counter(&zero, major, first_minor);
++
++    counterp = bpf_map_lookup_elem(&wbt_map, &wbtkey);
++
++    if (counterp || major == 0) 
++        return 0;
++    long err = bpf_map_update_elem(&wbt_map, &wbtkey, &zero, BPF_NOEXIST); 
++    if (err) 
++        return 0;
++
++    u64 curr_start_range = zero.start_time / THRESHOLD / MAX_BUCKETS;
++    u64 update_bucket = curr_start_range % MAX_BUCKETS;
++
++    struct update_params params = {
++        .major = major,
++        .first_minor = first_minor,
++        .cmd_flags = cmd_flags,
++        .update_bucket = update_bucket,
++        .curr_start_range = curr_start_range,
++    }; 
++
++    struct stage_data *curr_data; 
++    curr_data = bpf_map_lookup_elem(&wbt_res, &key);
++    if (!curr_data) { 
++        struct stage_data new_data = {
++            .start_count = 1,
++            .finish_count = 0,
++            .finish_over_time = 0,
++            .duration = 0,
++            .major = major,
++            .first_minor = first_minor,
++            .io_type = "",
++            .bucket = {
++                [0] = {.start_range = 0, .io_count = 0},
++                [1] = {.start_range = 0, .io_count = 0},
++            },
++        };
++        update_new_data_in_start(&new_data, &params);
++        bpf_map_update_elem(&wbt_res, &key, &new_data, 0);
++    } else {
++        update_curr_data_in_start(curr_data, &params);
++    }
++
++    return 0; 
++}
++
++SEC("kretprobe/wbt_wait") 
++int kretprobe_wbt_wait(struct pt_regs *regs) 
++{
++    struct bio *bio = NULL;
++    u64 *wbtargs = NULL;
++    u64 wbtkey = bpf_get_current_task();
++    wbtargs = (u64 *)bpf_map_lookup_elem(&wbt_args, &wbtkey);
++    if (wbtargs == NULL) {
++        bpf_map_delete_elem(&wbt_args, &wbtkey);
++        return 0;
++    }
++    bio = (struct bio *)(*wbtargs);
++    struct gendisk *curr_rq_disk = _(bio->bi_disk);
++    int major = _(curr_rq_disk->major);
++    int first_minor = _(curr_rq_disk->first_minor);
++    unsigned int cmd_flags =  _(bio->bi_opf);
++    
++    struct io_counter *counterp; 
++    u32 key = find_matching_wbt_1_keys(major, first_minor);
++    if (key >= MAP_SIZE){
++        key = find_matching_wbt_2_keys(major, first_minor);
++        if (key >= MAP_SIZE){
++            key = find_matching_wbt_3_keys(major, first_minor);
++            if (key >= MAP_SIZE){
++                key = find_matching_wbt_4_keys(major, first_minor);
++                if (key >= MAP_SIZE){
++                    key = find_matching_wbt_5_keys(major, first_minor);
++                    if (key >= MAP_SIZE){
++                        return 0;
++                    }
++                }
++            }
++        }
++    }
++
++    counterp = bpf_map_lookup_elem(&wbt_map, &wbtkey); 
++
++    if (!counterp)
++        return 0;
++
++    u64 duration = bpf_ktime_get_ns() - counterp->start_time; 
++    u64 curr_start_range = counterp->start_time / THRESHOLD / MAX_BUCKETS;
++    u64 update_bucket = curr_start_range % MAX_BUCKETS;
++
++    struct update_params params = {
++        .major = major,
++        .first_minor = first_minor,
++        .cmd_flags = cmd_flags,
++        .update_bucket = update_bucket,
++        .curr_start_range = curr_start_range,
++    }; 
++
++    struct stage_data *curr_data; 
++    curr_data = bpf_map_lookup_elem(&wbt_res, &key);
++    if (curr_data == NULL && duration > DURATION_THRESHOLD) { 
++       struct stage_data new_data = {
++            .start_count = 1,
++            .finish_count = 1,
++            .finish_over_time = 1,
++            .duration = 0,
++            .major = major,
++            .first_minor = first_minor,
++            .io_type = "",
++            .bucket = {
++                [0] = {.start_range = 0, .io_count = 0},
++                [1] = {.start_range = 0, .io_count = 0},
++            },
++        };
++        update_new_data_in_finish(&new_data, &params);
++        bpf_map_update_elem(&wbt_res, &key, &new_data, 0); 
++    } else if (curr_data == NULL) { 
++        struct stage_data new_data = {
++            .start_count = 1,
++            .finish_count = 1,
++            .finish_over_time = 0,
++            .duration = 0,
++            .io_type = "",
++            .major = major,
++            .first_minor = first_minor,
++            .bucket = {
++                [0] = {.start_range = 0, .io_count = 0},
++                [1] = {.start_range = 0, .io_count = 0},
++            },
++        };
++        update_new_data_in_finish(&new_data, &params);
++        bpf_map_update_elem(&wbt_res, &key, &new_data, 0); 
++    } else {
++        if (curr_data->bucket[update_bucket].start_range == curr_start_range) {
++            curr_data->bucket[update_bucket].io_count = (curr_data->bucket[update_bucket].io_count > 1) ? curr_data->bucket[update_bucket].io_count - 1 : 0;
++        } else {
++            curr_data->bucket[MAX_BUCKETS].io_count = (curr_data->bucket[MAX_BUCKETS].io_count > 1) ? curr_data->bucket[MAX_BUCKETS].io_count - 1 : 0;
++
++        }
++        curr_data->duration += duration; 
++        update_curr_data_in_finish(curr_data, &params, &duration);
++    }
++
++    bpf_map_delete_elem(&wbt_map, &wbtkey);
++    bpf_map_delete_elem(&wbt_args, &wbtkey);
++    return 0; 
++}
++
++SEC("kprobe/blk_mq_get_tag") 
++int kprobe_blk_mq_get_tag(struct pt_regs *regs) 
++{ 
++    u64 tagkey = bpf_get_current_task();
++    u64 value = (u64)PT_REGS_PARM1(regs);
++    (void)bpf_map_update_elem(&tag_args, &tagkey, &value, BPF_ANY);
++    struct blk_mq_alloc_data *bd= (struct blk_mq_alloc_data *)value;
++    struct request_queue *q = _(bd->q);
++    struct backing_dev_info	*backing_dev_info = _(q->backing_dev_info);
++    struct device *owner = _(backing_dev_info->owner);
++    dev_t devt = _(owner->devt);
++    int major = MAJOR(devt);
++    int first_minor = MINOR(devt);
++    unsigned int cmd_flags =  0;
++
++    struct io_counter *counterp, zero = {}; 
++    u32 key = find_matching_tag_1_keys(major, first_minor);
++    if (key >= MAP_SIZE){
++        key = find_matching_tag_2_keys(major, first_minor);
++        if (key >= MAP_SIZE){
++            key = find_matching_tag_3_keys(major, first_minor);
++            if (key >= MAP_SIZE){
++                key = find_matching_tag_4_keys(major, first_minor);
++                if (key >= MAP_SIZE){
++                    key = find_matching_tag_5_keys(major, first_minor);
++                    if (key >= MAP_SIZE){
++                        return 0;
++                    }
++                }
++            }
++        }
++    }
++
++    init_io_counter(&zero, major, first_minor); 
++
++    counterp = bpf_map_lookup_elem(&tag_map, &tagkey); 
++    if (counterp || major == 0) 
++        return 0;
++    long err = bpf_map_update_elem(&tag_map, &tagkey, &zero, BPF_NOEXIST); 
++    if (err) 
++        return 0;
++    
++    u64 curr_start_range = zero.start_time / THRESHOLD / MAX_BUCKETS;
++    u64 update_bucket = curr_start_range % MAX_BUCKETS;
++
++    struct update_params params = {
++        .major = major,
++        .first_minor = first_minor,
++        .cmd_flags = cmd_flags,
++        .update_bucket = update_bucket,
++        .curr_start_range = curr_start_range,
++    };
++
++    struct stage_data *curr_data; 
++    curr_data = bpf_map_lookup_elem(&tag_res, &key);
++    if (!curr_data) { 
++        struct stage_data new_data = {
++            .start_count = 1,
++            .finish_count = 0,
++            .finish_over_time = 0,
++            .duration = 0,
++            .major = major,
++            .first_minor = first_minor,
++            .io_type = "",
++            .bucket = {
++                [0] = {.start_range = 0, .io_count = 0},
++                [1] = {.start_range = 0, .io_count = 0},
++            },
++        };
++        update_new_data_in_start(&new_data, &params);
++        bpf_map_update_elem(&tag_res, &key, &new_data, 0);
++    } else { 
++        update_curr_data_in_start(curr_data, &params);
++    }
++
++    return 0; 
++}
++
++SEC("kretprobe/blk_mq_get_tag") 
++int kretprobe_blk_mq_get_tag(struct pt_regs *regs) 
++{
++    u64 tagkey = bpf_get_current_task();
++    u64 *tagargs = NULL;
++    struct blk_mq_alloc_data *bd = NULL;
++
++    tagargs = (u64 *)bpf_map_lookup_elem(&tag_args, &tagkey);
++    if (tagargs == NULL) {
++        bpf_map_delete_elem(&tag_args, &tagkey);
++    	return 0;
++    }
++    bd = (struct blk_mq_alloc_data *)(*tagargs);
++    struct request_queue *q = _(bd->q);
++    struct backing_dev_info	*backing_dev_info = _(q->backing_dev_info);
++    struct device *owner = _(backing_dev_info->owner);
++    dev_t devt = _(owner->devt);
++    int major = MAJOR(devt);
++    int first_minor = MINOR(devt);
++    unsigned int cmd_flags =  0;
++
++    struct io_counter *counterp; 
++    u32 key = find_matching_tag_1_keys(major, first_minor);
++    if (key >= MAP_SIZE){
++        key = find_matching_tag_2_keys(major, first_minor);
++        if (key >= MAP_SIZE){
++            key = find_matching_tag_3_keys(major, first_minor);
++            if (key >= MAP_SIZE){
++                key = find_matching_tag_4_keys(major, first_minor);
++                if (key >= MAP_SIZE){
++                    key = find_matching_tag_5_keys(major, first_minor);
++                    if (key >= MAP_SIZE){
++                        return 0;
++                    }
++                }
++            }
++        }
++    }
++
++    counterp = bpf_map_lookup_elem(&tag_map, &tagkey);
++
++    if (!counterp) 
++        return 0;
++
++    u64 duration = bpf_ktime_get_ns() - counterp->start_time; 
++    u64 curr_start_range = counterp->start_time / THRESHOLD / MAX_BUCKETS;
++    u64 update_bucket = curr_start_range % MAX_BUCKETS;
++
++    struct update_params params = {
++        .major = major,
++        .first_minor = first_minor,
++        .cmd_flags = cmd_flags,
++        .update_bucket = update_bucket,
++        .curr_start_range = curr_start_range,
++    };
++
++    struct stage_data *curr_data; 
++    curr_data = bpf_map_lookup_elem(&tag_res, &key); 
++    if (curr_data == NULL && duration > DURATION_THRESHOLD) { 
++        struct stage_data new_data = {
++            .start_count = 1,
++            .finish_count = 1,
++            .finish_over_time = 1,
++            .duration = 0,
++            .major = major,
++            .first_minor = first_minor,
++            .io_type = "",
++            .bucket = {
++                [0] = {.start_range = 0, .io_count = 0},
++                [1] = {.start_range = 0, .io_count = 0},
++            },
++        };
++        update_new_data_in_finish(&new_data, &params);
++        bpf_map_update_elem(&tag_res, &key, &new_data, 0); 
++    } else if (curr_data == NULL) { 
++        struct stage_data new_data = {
++            .start_count = 1,
++            .finish_count = 1,
++            .finish_over_time = 0,
++            .duration = 0,
++            .major = major,
++            .first_minor = first_minor,
++            .io_type = "",
++            .bucket = {
++                [0] = {.start_range = 0, .io_count = 0},
++                [1] = {.start_range = 0, .io_count = 0},
++            },
++        };
++        update_new_data_in_finish(&new_data, &params);
++        bpf_map_update_elem(&tag_res, &key, &new_data, 0); 
++    } else {
++        if (curr_data->bucket[update_bucket].start_range == curr_start_range) {
++            curr_data->bucket[update_bucket].io_count = (curr_data->bucket[update_bucket].io_count > 1) ? curr_data->bucket[update_bucket].io_count - 1 : 0;
++        } else {
++            curr_data->bucket[MAX_BUCKETS].io_count = (curr_data->bucket[MAX_BUCKETS].io_count > 1) ? curr_data->bucket[MAX_BUCKETS].io_count - 1 : 0;
++
++        }
++        curr_data->duration += duration; 
++        update_curr_data_in_finish(curr_data, &params, &duration);
++    }
++    bpf_map_delete_elem(&tag_map, &tagkey); 
++    bpf_map_delete_elem(&tag_args, &tagkey);
++    return 0; 
++}
++
++char LICENSE[] SEC("license") = "Dual BSD/GPL"; 
++u32 _version SEC("version") = LINUX_VERSION_CODE; 
++
+diff --git a/src/c/ebpf_collector/ebpf_collector.c b/src/c/ebpf_collector/ebpf_collector.c
+new file mode 100644
+index 0000000..acfee81
+--- /dev/null
++++ b/src/c/ebpf_collector/ebpf_collector.c
+@@ -0,0 +1,270 @@
++/*
++ * Copyright (c) Huawei Technologies Co., Ltd. 2024. All rights reserved.
++ * Description: ebpf collector program
++ * Author: Zhang Nan
++ * Create: 2024-09-27
++ */
++#include <argp.h> 
++#include <signal.h>
++#include <stdio.h> 
++#include <unistd.h> 
++#include <time.h> 
++#include <stdlib.h> 
++#include <string.h> 
++#include <linux/sysinfo.h> 
++#include <sys/resource.h> 
++#include <bpf/bpf.h>
++#include <string.h>
++#include <sys/stat.h>
++#include <dirent.h>
++#include <sys/sysmacros.h>
++#include <bpf_load.h>
++#include <dirent.h>
++#include "ebpf_collector.h"
++
++#define BLK_MAP    (map_fd[0]) 
++#define BLK_RES    (map_fd[1]) 
++#define BIO_MAP    (map_fd[2]) 
++#define BIO_RES    (map_fd[3])
++#define WBT_MAP    (map_fd[4])
++#define WBT_RES    (map_fd[5]) 
++#define TAG_MAP    (map_fd[7])
++#define TAG_RES    (map_fd[8])
++#define BPF_FILE   "/usr/lib/ebpf_collector.bpf.o"
++
++typedef struct {
++    int major;
++    int minor;
++} DeviceInfo;
++
++static volatile bool exiting; 
++
++const char argp_program_doc[] = 
++"Show block device I/O pattern.\n"
++"\n"
++"USAGE: ebpf_collector [--help]\n"
++"\n"
++"EXAMPLES:\n"
++"    ebpf_collector              # show block I/O pattern\n";
++
++static const struct argp_option opts[] = {
++    { NULL, 'h', NULL, OPTION_HIDDEN, "Show the full help" }, 
++    {},
++};
++
++static error_t parse_arg(int key, char *arg, struct argp_state *state) {
++    static int pos_args; 
++
++    switch (key) { 
++    case 'h': 
++        argp_state_help(state, stderr, ARGP_HELP_STD_HELP); 
++        break;
++    default: 
++        return ARGP_ERR_UNKNOWN; 
++    }
++    return 0; 
++}
++
++static void sig_handler(int sig)
++{
++    exiting = true; 
++}
++
++char* extract_device_name(const char *path) {
++    const char *dev_dir = "/dev/";
++    char *name = strrchr(path, '/') + 1; 
++    if (strncmp(dev_dir, path, strlen(dev_dir)) == 0) {
++        return strdup(name); 
++    }
++    return NULL; 
++}
++
++char* find_device_name(dev_t dev) {
++    DIR *dir;
++    struct dirent *entry;
++    struct stat sb;
++    char *device_name = NULL;
++    char path[1024];
++
++    dir = opendir("/dev");
++    if (dir == NULL) {
++        perror("Failed to open /dev");
++        return NULL;
++    }
++
++    while ((entry = readdir(dir)) != NULL) {
++        snprintf(path, sizeof(path), "/dev/%s", entry->d_name);
++
++        if (entry->d_type == DT_DIR || entry->d_type == DT_LNK) {
++            continue;
++        }
++
++        if (stat(path, &sb) == -1) {
++            continue; 
++        }
++
++        if (major(sb.st_rdev) == major(dev) && minor(sb.st_rdev) == minor(dev)) {
++            device_name = extract_device_name(path); 
++            break;
++        }
++    }
++
++    closedir(dir);
++    return device_name;
++}
++
++static int print_map_res(struct bpf_map *map_res, char *stage, int *map_size)
++{
++    struct stage_data counter; 
++    int key = 0; 
++
++    struct sysinfo info; 
++    sysinfo(&info); 
++
++    for (key = 0; key < map_size; key++) {
++        int err;
++        err = bpf_map_lookup_elem(map_res, &key, &counter); 
++        if (err < 0) { 
++            fprintf(stderr, "failed to lookup %s map_res: %d\n", stage, err); 
++            return -1; 
++        }
++        
++        size_t length = strlen(counter.io_type);
++        char io_type;
++        if (length > 0) {
++            io_type = counter.io_type[0];
++        } else {
++            io_type = NULL;
++        }
++        int major = counter.major;
++        int first_minor = counter.first_minor;
++        dev_t dev = makedev(major, first_minor);    
++        char *device_name = find_device_name(dev);
++        if (device_name && io_type) {
++            printf("%-7s %10llu %10llu %u %c %s\n",
++                stage, 
++                counter.finish_count, 
++                counter.duration,
++                counter.bucket[MAX_BUCKETS].io_count,
++                io_type,
++                device_name
++            );
++            fflush(stdout);
++        }
++    }
++
++    return 0; 
++}
++
++int init_map(int *map_fd, const char *map_name, int *map_size, DeviceInfo *devices) {
++    struct stage_data init_data = {0};
++    memset(init_data.io_type, 0, sizeof(init_data.io_type));
++    memset(init_data.bucket, 0, sizeof(init_data.bucket));
++
++    for (int i = 0; i < map_size; i++) {
++        init_data.major = devices[i].major;
++        init_data.first_minor = devices[i].minor;
++        if (bpf_map_update_elem(map_fd, &i, &init_data, BPF_ANY) != 0) {
++            printf("Failed to initialize map %s at index %d\n", map_name, i);
++            return 1;
++        }
++    }
++
++    return 0;
++}
++
++int main(int argc, char **argv) {
++    struct partitions *partitions = NULL; 
++    const struct partition *partition; 
++    static const struct argp argp = { 
++        .options = opts, 
++        .parser = parse_arg, 
++        .doc = argp_program_doc, 
++    };
++    int err; 
++    char filename[256];
++    DIR *dir;
++    struct dirent *entry;
++    char path[1024];
++    int major, minor;
++    DeviceInfo devices[MAP_SIZE];
++    int device_count = 0;
++    struct rlimit r = {RLIM_INFINITY, RLIM_INFINITY}; 
++    setrlimit(RLIMIT_MEMLOCK, &r); 
++
++    err = argp_parse(&argp, argc, argv, 0, NULL, NULL); 
++    if (err) 
++        return err; 
++
++    snprintf(filename, sizeof(filename), BPF_FILE);
++
++    if (load_bpf_file(filename)) { 
++        return 1; 
++    }
++
++    signal(SIGINT, sig_handler);
++
++    dir = opendir("/dev");
++    if (dir == NULL) {
++        printf("Failed to open /dev directory");
++        return EXIT_FAILURE;
++    }
++
++    while ((entry = readdir(dir)) != NULL) {
++        if (entry->d_type == DT_BLK) { 
++            snprintf(path, sizeof(path), "/dev/%s", entry->d_name);
++            struct stat statbuf;
++            if (lstat(path, &statbuf) == 0) {
++                if (S_ISBLK(statbuf.st_mode)) {
++                    devices[device_count].major = major(statbuf.st_rdev);
++                    devices[device_count].minor = minor(statbuf.st_rdev);
++                    device_count++;
++                    if (device_count >= MAP_SIZE) {
++                        break;
++                    }
++                }
++            }
++        }
++    }
++
++    closedir(dir);
++
++    if (init_map(BLK_RES, "blk_res_map", device_count, devices) != 0) {
++        return 1;
++    }
++    if (init_map(BIO_RES, "blo_res_map", device_count, devices) != 0) {
++        return 1;
++    }
++    if (init_map(WBT_RES, "wbt_res_map", device_count, devices) != 0) {
++        return 1;
++    }
++    if (init_map(TAG_RES, "tag_res_map", device_count, devices) != 0) {
++        return 1;
++    }
++
++    for (;;) { 
++       
++        sleep(1); 
++
++        err = print_map_res(BLK_RES, "rq_driver", device_count); 
++        if (err) 
++            break; 
++
++        err = print_map_res(BIO_RES, "bio", device_count); 
++        if (err) 
++            break; 
++        
++        err = print_map_res(TAG_RES, "gettag", device_count); 
++        if (err)	
++            break; 
++        
++        err = print_map_res(WBT_RES, "wbt", device_count); 
++        if (err) 
++            break; 
++
++        if (exiting) 
++            break; 
++    }
++
++    return -err; 
++}
+diff --git a/src/c/ebpf_collector/ebpf_collector.h b/src/c/ebpf_collector/ebpf_collector.h
+new file mode 100644
+index 0000000..1ae33de
+--- /dev/null
++++ b/src/c/ebpf_collector/ebpf_collector.h
+@@ -0,0 +1,77 @@
++/*
++ * Copyright (c) Huawei Technologies Co., Ltd. 2024. All rights reserved.
++ * Description: ebpf collector program
++ * Author: Zhang Nan
++ * Create: 2024-09-27
++ */
++#ifndef __EBPFCOLLECTOR_H
++#define __EBPFCOLLECTOR_H
++
++typedef long long unsigned int u64;
++typedef unsigned int u32;
++
++#define MAX_BUCKETS 1
++#define THRESHOLD 1000
++#define DURATION_THRESHOLD 500000000
++
++#define RWBS_LEN    8
++
++#define REQ_OP_BITS 8
++#define REQ_OP_MASK ((1 << REQ_OP_BITS) - 1)
++#define REQ_FUA         (1ULL << __REQ_FUA)
++#define REQ_RAHEAD      (1ULL << __REQ_RAHEAD)
++#define REQ_SYNC        (1ULL << __REQ_SYNC)
++#define REQ_META        (1ULL << __REQ_META)
++#define REQ_PREFLUSH    (1ULL << __REQ_PREFLUSH)
++#define REQ_OP_READ 0
++#define REQ_OP_WRITE 1
++#define REQ_OP_FLUSH 2
++#define REQ_OP_DISCARD 3
++#define REQ_OP_SECURE_ERASE 5
++#define REQ_OP_WRITE_SAME 7
++#define MAP_SIZE   128
++
++enum stage_type {
++    BIO=0,
++    WBT,
++    GET_TAG,
++    DEADLINE,
++    BFQ,
++    KYBER,
++    RQ_DRIVER,
++    MAX_STAGE_TYPE,
++};
++
++struct time_bucket {
++    u64 start_range;		
++    u32 io_count;			
++};
++
++struct stage_data {
++    u64 start_count;		
++    u64 finish_count;		
++    u64 finish_over_time;	
++    u64 duration;			
++    int major;
++    int first_minor;
++    char io_type[RWBS_LEN];
++    struct time_bucket bucket[MAX_BUCKETS+1]; 	
++};
++
++struct io_counter { 
++    u64 duration; 
++    u64 start_time; 
++    u32 isend; 
++    int major;
++    int first_minor; 
++};
++
++struct update_params {
++    int major;
++    int first_minor;
++    unsigned int cmd_flags;
++    u64 update_bucket;
++    u64 curr_start_range;
++};
++
++#endif /* __EBPFCOLLECTOR_H */
+diff --git a/src/python/sentryCollector/collect_io.py b/src/python/sentryCollector/collect_io.py
+index 019d174..e45947a 100644
+--- a/src/python/sentryCollector/collect_io.py
++++ b/src/python/sentryCollector/collect_io.py
+@@ -16,12 +16,18 @@ import os
+ import time
+ import logging
+ import threading
++import subprocess
++from typing import Union
+ 
+ from .collect_config import CollectConfig
+ 
+ Io_Category = ["read", "write", "flush", "discard"]
+ IO_GLOBAL_DATA = {}
+ IO_CONFIG_DATA = []
++EBPF_GLOBAL_DATA = []
++EBPF_PROCESS = None
++EBPF_STAGE_LIST = ["wbt", "rq_driver", "bio", "gettag"]
++EBPF_SUPPORT_VERSION = ["4.19.90"]
+ 
+ class IoStatus():
+     TOTAL = 0
+@@ -41,6 +47,8 @@ class CollectIo():
+         self.disk_map_stage = {}
+         self.window_value = {}
+ 
++        self.ebpf_base_path = 'ebpf_collector'
++
+         self.loop_all = False
+ 
+         if disk_str == "default":
+@@ -62,7 +70,7 @@ class CollectIo():
+             logging.error("The file %s does not exist", stats_file)
+             return -1
+         except Exception as e:
+-            logging.error("An error occurred3: %s", e)
++            logging.error("An error occurred: %s", e)
+             return -1
+ 
+         curr_value = lines.strip().split('\n')
+@@ -193,33 +201,109 @@ class CollectIo():
+             IO_GLOBAL_DATA[disk_name] = {}
+ 
+         return len(IO_GLOBAL_DATA) != 0
+-
+-    def main_loop(self):
+-        logging.info("collect io thread start")
++    
++    def is_ebpf_avaliable(self):
++        with open('/proc/version', 'r') as f:
++            kernel_version = f.read().split()[2]
++            major_version = kernel_version.split('-')[0]
++        
++        base_path = '/sys/kernel/debug/block'
++        for disk_name in os.listdir(base_path):
++            if not self.loop_all and disk_name not in self.disk_list:
++                continue
++            self.disk_map_stage[disk_name] = EBPF_STAGE_LIST
++            self.window_value[disk_name] = {}
++            IO_GLOBAL_DATA[disk_name] = {}
+         
+-        if not self.is_kernel_avaliable() or len(self.disk_map_stage) == 0:
+-            logging.warning("no disks meet the requirements. collect io thread exit")
+-            return
+-
+         for disk_name, stage_list in self.disk_map_stage.items():
+             for stage in stage_list:
+-                self.window_value[disk_name][stage] = []
++                self.window_value[disk_name][stage] = {}
+                 IO_GLOBAL_DATA[disk_name][stage] = {}
+                 for category in Io_Category:
+                     IO_GLOBAL_DATA[disk_name][stage][category] = []
++                    self.window_value[disk_name][stage][category] = [[0,0,0], [0,0,0]]
+ 
+-        while True:
+-            start_time = time.time()
++        return major_version in EBPF_SUPPORT_VERSION and os.path.exists('/usr/bin/ebpf_collector') and len(IO_GLOBAL_DATA) != 0 
++    
++    def get_ebpf_raw_data(
++        self
++    ) -> None:
++        global EBPF_PROCESS
++        global EBPF_GLOBAL_DATA
+ 
++        while True:
+             if self.stop_event.is_set():
+                 logging.debug("collect io thread exit")
+                 return
++            line = EBPF_PROCESS.stdout.readline()
++            if not line:
++                logging.info("no ebpf data found, wait for collect")
++                break
++            EBPF_GLOBAL_DATA.append(line.strip())
++            time.sleep(0.1)
++    
++    def update_ebpf_collector_data(
++        self,
++    ) -> None:
++        global EBPF_GLOBAL_DATA
+ 
++        while True:
++            if self.stop_event.is_set():
++                logging.debug("collect io thread exit")
++                return
++            if EBPF_GLOBAL_DATA:
++                for data in EBPF_GLOBAL_DATA:
++                    data_list = data.split()
++                    stage, finish_count, latency, io_dump, io_type ,disk_name = data_list
++                    if disk_name not in self.window_value:
++                        continue
++                    io_type = self.get_ebpf_io_type(io_type)
++                    if not io_type:
++                        continue                  
++                    if (len(self.window_value[disk_name][stage][io_type])) >= 2:
++                        self.window_value[disk_name][stage][io_type].pop()
++                    self.window_value[disk_name][stage][io_type].append([int(finish_count), int(latency), int(io_dump)])
++                EBPF_GLOBAL_DATA.clear()
++            time.sleep(0.1)
++    
++    def get_ebpf_io_type(
++        self,
++        io_type: str
++    ) -> str:
++        io_type_mapping = {
++            "R": "read",
++            "W": "write",
++            "F": "flush",
++            "D": "discard"
++        }
++        io_type = io_type_mapping.get(io_type, None)
++        return io_type
++    
++    def append_ebpf_period_data(
++        self, 
++    ) -> None:
++        global IO_GLOBAL_DATA
++        while True:
++            if self.stop_event.is_set():
++                logging.debug("collect io thread exit")
++                return
++            start_time = time.time()
+             for disk_name, stage_list in self.disk_map_stage.items():
+-                if self.get_blk_io_hierarchy(disk_name, stage_list) < 0:
+-                    continue
+-                self.append_period_lat(disk_name, stage_list)
+-                
++                for stage in stage_list:
++                    for io_type in Io_Category:
++                        if len(self.window_value[disk_name][stage][io_type]) < 2:
++                            return
++                        if (len(IO_GLOBAL_DATA[disk_name][stage][io_type])) >= self.max_save:
++                            IO_GLOBAL_DATA[disk_name][stage][io_type].pop()
++                        curr_finish_count, curr_latency, curr_io_dump_count = self.window_value[disk_name][stage][io_type][-1]
++                        prev_finish_count, prev_latency, prev_io_dump_count = self.window_value[disk_name][stage][io_type][-2]
++                        self.window_value[disk_name][stage][io_type].pop(0)
++                        self.window_value[disk_name][stage][io_type].insert(1, self.window_value[disk_name][stage][io_type][0])
++                        curr_lat = self.get_ebpf_latency_value(curr_latency=curr_latency, prev_latency=prev_latency, curr_finish_count=curr_finish_count, prev_finish_count=prev_finish_count)
++                        curr_iops = self.get_ebpf_iops(curr_finish_count=curr_finish_count, prev_finish_count=prev_finish_count)
++                        curr_io_length = self.get_ebpf_io_length(curr_latency=curr_latency, prev_latency=prev_latency)
++                        curr_io_dump = self.get_ebpf_io_dump(curr_io_dump_count=curr_io_dump_count, prev_io_dump_count=prev_io_dump_count)
++                        IO_GLOBAL_DATA[disk_name][stage][io_type].insert(0, [curr_lat, curr_iops, curr_io_length, curr_io_dump])
+             elapsed_time = time.time() - start_time
+             sleep_time = self.period_time - elapsed_time
+             if sleep_time < 0:
+@@ -231,6 +315,133 @@ class CollectIo():
+                 time.sleep(1)
+                 sleep_time -= 1
+             time.sleep(sleep_time)
++            
++    def get_ebpf_latency_value(
++        self,
++        curr_latency: int,
++        prev_latency: int,
++        curr_finish_count: int,
++        prev_finish_count: int
++    ) -> Union[int, float]:
++        finish = curr_finish_count - prev_finish_count
++        lat_time = curr_latency - prev_latency
++        if finish <= 0 or lat_time <= 0:
++            return 0
++        value = lat_time / finish / 1000 / 1000
++        if value.is_integer():
++            return int(value)
++        else:
++            return round(value, 1)
++    
++    def get_ebpf_iops(
++        self,
++        curr_finish_count: int,
++        prev_finish_count: int
++    ) -> Union[int, float]:
++        finish = curr_finish_count - prev_finish_count
++        if finish <= 0:
++            return 0
++        value = finish / self.period_time / 1000 / 1000
++        if value.is_integer():
++            return int(value)
++        else:
++            return round(value, 1)
++    
++    def get_ebpf_io_length(
++        self,
++        curr_latency: int,
++        prev_latency: int,
++    ) -> Union[int, float]:
++        lat_time = curr_latency - prev_latency
++        if lat_time <= 0:
++            return 0
++        value = lat_time / self.period_time
++        if value.is_integer():
++            return int(value)
++        else:
++            return round(value, 1)
++    
++    def get_ebpf_io_dump(
++        self,
++        curr_io_dump_count: int,
++        prev_io_dump_count: int
++    ) -> Union[int, float]:
++        io_dump_count = curr_io_dump_count - prev_io_dump_count
++        if io_dump_count <= 0:
++            return 0
++        value = io_dump_count
++        return int(value)                         
++    
++    def start_ebpf_subprocess(
++        self
++    ) -> None:
++        global EBPF_PROCESS
++        EBPF_PROCESS = subprocess.Popen(self.ebpf_base_path, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
++    
++    def stop_ebpf_subprocess(
++        self
++    ) -> None:
++        global EBPF_PROCESS
++        if EBPF_PROCESS:
++            EBPF_PROCESS.terminate()
++            EBPF_PROCESS.wait()
++            logging.info("ebpf collector thread exit")
++
++    def main_loop(self):
++        global IO_GLOBAL_DATA
++        logging.info("collect io thread start")
++        
++        if self.is_kernel_avaliable() and len(self.disk_map_stage) != 0:
++            for disk_name, stage_list in self.disk_map_stage.items():
++                for stage in stage_list:
++                    self.window_value[disk_name][stage] = []
++                    IO_GLOBAL_DATA[disk_name][stage] = {}
++                    for category in Io_Category:
++                        IO_GLOBAL_DATA[disk_name][stage][category] = []
++
++            while True:
++                start_time = time.time()
++
++                if self.stop_event.is_set():
++                    logging.debug("collect io thread exit")
++                    return
++
++                for disk_name, stage_list in self.disk_map_stage.items():
++                    if self.get_blk_io_hierarchy(disk_name, stage_list) < 0:
++                        continue
++                    self.append_period_lat(disk_name, stage_list)
++                    
++                elapsed_time = time.time() - start_time
++                sleep_time = self.period_time - elapsed_time
++                if sleep_time < 0:
++                    continue
++                while sleep_time > 1:
++                    if self.stop_event.is_set():
++                        logging.debug("collect io thread exit")
++                        return
++                    time.sleep(1)
++                    sleep_time -= 1
++                time.sleep(sleep_time)
++        elif self.is_ebpf_avaliable():
++            self.start_ebpf_subprocess()
++            
++            thread_get_data = threading.Thread(target=self.get_ebpf_raw_data)
++            thread_update_data = threading.Thread(target=self.update_ebpf_collector_data)
++            thread_append_data = threading.Thread(target=self.append_ebpf_period_data)
++            
++            thread_get_data.start()
++            thread_update_data.start()
++            thread_append_data.start()
++            
++            thread_get_data.join()
++            thread_update_data.join()
++            thread_append_data.join()
++
++            self.stop_ebpf_subprocess()
++            logging.info("ebpf collector thread exits")
++        else:
++            logging.warning("fail to start ebpf collector thread. collect io thread exits")
++            return
+ 
+     # set stop event, notify thread exit
+     def stop_thread(self):
+diff --git a/src/python/sentryPlugins/avg_block_io/avg_block_io.py b/src/python/sentryPlugins/avg_block_io/avg_block_io.py
+index ac35be2..a83bd9b 100644
+--- a/src/python/sentryPlugins/avg_block_io/avg_block_io.py
++++ b/src/python/sentryPlugins/avg_block_io/avg_block_io.py
+@@ -114,7 +114,7 @@ def read_config_lat_iodump(io_dic, config):
+     common_param = {}
+     lat_sec = None
+     if not config.has_section("latency"):
+-        logging.warning("Cannot find algorithm section in config file")
++        logging.warning("Cannot find latency section in config file")
+     else:
+         lat_sec = config["latency"]
+ 
+@@ -122,7 +122,7 @@ def read_config_lat_iodump(io_dic, config):
+     if not config.has_section("iodump"):
+         logging.warning("Cannot find iodump section in config file")
+     else:
+-        lat_sec = config["iodump"]
++        iodump_sec = config["iodump"]
+     
+     if not lat_sec and not iodump_sec:
+         return common_param
+-- 
+2.33.0
