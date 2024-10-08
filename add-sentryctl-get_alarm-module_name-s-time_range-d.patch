@@ -1,0 +1,438 @@
+From 8fa9389a85763831ea85d94f179a305d7f95d585 Mon Sep 17 00:00:00 2001
+From: jinsaihang <jinsaihang@h-partners.com>
+Date: Sun, 29 Sep 2024 02:04:52 +0000
+Subject: [PATCH] =?UTF-8?q?=E6=96=B0=E5=A2=9E=E5=91=8A=E8=AD=A6=E4=BA=8B?=
+ =?UTF-8?q?=E4=BB=B6=E6=9F=A5=E8=AF=A2=E5=8A=9F=E8=83=BD=EF=BC=9Asentryctl?=
+ =?UTF-8?q?=20get=5Falarm=20<module=5Fname>=20-s=20<time=5Frange>=20-d?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Signed-off-by: jinsaihang <jinsaihang@h-partners.com>
+---
+ src/python/syssentry/alarm.py | 142 ++++++++++++++++++
+ .../src/python/syssentry/callbacks.py         |  17 +++
+ .../src/python/syssentry/global_values.py     |   4 +
+ .../src/python/syssentry/load_mods.py         |  16 ++
+ .../src/python/syssentry/sentryctl            |  20 ++-
+ .../src/python/syssentry/syssentry.py         |  13 +-
+ .../src/python/syssentry/task_map.py          |   5 +-
+ 7 files changed, 212 insertions(+), 5 deletions(-)
+ create mode 100644 src/python/syssentry/alarm.py
+
+diff --git a/src/python/syssentry/alarm.py b/src/python/syssentry/alarm.py
+new file mode 100644
+index 0000000..74a2716
+--- /dev/null
++++ b/src/python/syssentry/alarm.py
+@@ -0,0 +1,142 @@
++# coding: utf-8
++# Copyright (c) 2024 Huawei Technologies Co., Ltd.
++# sysSentry is licensed under the Mulan PSL v2.
++# You can use this software according to the terms and conditions of the Mulan PSL v2.
++# You may obtain a copy of Mulan PSL v2 at:
++#     http://license.coscl.org.cn/MulanPSL2
++# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR
++# IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FIT FOR A PARTICULAR
++# PURPOSE.
++# See the Mulan PSL v2 for more details.
++
++"""
++use for report alarm
++"""
++import threading
++from typing import Dict, List
++from datetime import datetime
++import time
++import logging
++import json
++
++from xalarm.register_xalarm import xalarm_register,xalarm_getid,xalarm_getlevel,xalarm_gettype,xalarm_gettime,xalarm_getdesc
++from xalarm.xalarm_api import Xalarm
++
++from .global_values import InspectTask
++from .task_map import TasksMap
++
++# 告警ID映射字典，key为插件名，value为告警ID（类型为数字）
++task_alarm_id_dict: Dict[str, int] = {}
++
++# 告警老化时间字典，key为告警ID，value为老化时间（类型为数字，单位为秒）
++alarm_id_clear_time_dict: Dict[int, int] = {}
++
++# 告警事件列表，key为告警ID，value为告警ID对应的告警事件列表（类型为list）
++alarm_list_dict: Dict[int, List[Xalarm]] = {}
++# 告警事件列表锁
++alarm_list_lock = threading.Lock()
++
++id_filter = []
++id_base = 1001
++clientId = -1
++
++MILLISECONDS_UNIT_SECONDS = 1000
++
++def update_alarm_list(alarm_info: Xalarm):
++    alarm_id = xalarm_getid(alarm_info)
++    timestamp = xalarm_gettime(alarm_info)
++    if not timestamp:
++        logging.error("Retrieve timestamp failed")
++        return
++    alarm_list_lock.acquire()
++    try:
++        # new alarm is inserted into list head
++        if alarm_id not in alarm_list_dict:
++            logging.warning(f"update_alarm_list: alarm_id {alarm_id} not found in alarm_list_dict")
++            return
++        alarm_list = alarm_list_dict[alarm_id]
++
++        alarm_list.insert(0, alarm_info)
++        # clear alarm_info older than clear time threshold
++        clear_index = -1
++        clear_time = alarm_id_clear_time_dict[alarm_id]
++        for i in range(len(alarm_list)):
++            if (timestamp - xalarm_gettime(alarm_list[i])) / MILLISECONDS_UNIT_SECONDS > clear_time:
++                clear_index = i
++                break
++        if clear_index >= 0:
++            alarm_list_dict[alarm_id] = alarm_list[:clear_index]
++    finally:
++        alarm_list_lock.release()
++
++def alarm_register():
++    logging.debug(f"alarm_register: enter")
++    # 初始化告警ID映射字典、告警老化时间字典
++    for task_type in TasksMap.tasks_dict:
++        for task_name in TasksMap.tasks_dict[task_type]:
++            logging.info(f"alarm_register: {task_name} is registered")
++            task = TasksMap.tasks_dict[task_type][task_name]
++            alarm_id = task.alarm_id
++            alarm_clear_time = task.alarm_clear_time
++            alarm_list_dict[alarm_id] = []
++            task_alarm_id_dict[task_name] = alarm_id
++            if alarm_id not in alarm_id_clear_time_dict:
++                alarm_id_clear_time_dict[alarm_id] = alarm_clear_time
++            else:
++                alarm_id_clear_time_dict[alarm_id] = max(alarm_clear_time, alarm_id_clear_time_dict[alarm_id])
++    # 注册告警回调
++    id_filter = [True] * 128
++    clientId = xalarm_register(update_alarm_list, id_filter)
++    if clientId < 0:
++        logging.info(f'register xalarm: failed')
++        return clientId
++    logging.info('register xalarm: success')
++    return clientId
++
++def get_alarm_result(task_name: str, time_range: int, detailed: bool) -> List[Dict]:
++    alarm_list_lock.acquire()
++    try:
++        if task_name not in task_alarm_id_dict:
++            logging.debug("task_name does not exist")
++            return []
++        alarm_id = task_alarm_id_dict[task_name]
++        if alarm_id not in alarm_list_dict:
++            logging.debug("alarm_id does not exist")
++            return []
++        alarm_list = alarm_list_dict[alarm_id]
++        logging.debug(f"get_alarm_result: alarm_list of {alarm_id} has {len(alarm_list)} elements")
++        # clear alarm_info older than clear time threshold
++        stop_index = -1
++        timestamp = int(datetime.now().timestamp())
++        for i in range(len(alarm_list)):
++            logging.debug(f"timestamp, alarm_list[{i}].timestamp: {timestamp}, {xalarm_gettime(alarm_list[i])}")
++            if timestamp - (xalarm_gettime(alarm_list[i])) / MILLISECONDS_UNIT_SECONDS > int(time_range):
++                stop_index = i
++                break
++        if stop_index >= 0:
++            alarm_list = alarm_list[:stop_index]
++        logging.debug(f"get_alarm_result: final alarm_list of {alarm_id} has {len(alarm_list)} elements")
++
++        def xalarm_to_dict(alarm_info: Xalarm) -> dict:
++            return {
++                'alarm_id': xalarm_getid(alarm_info),
++                'alarm_type': xalarm_gettype(alarm_info),
++                'alarm_level': xalarm_getlevel(alarm_info),
++                'timetamp': xalarm_gettime(alarm_info),
++                'msg1': xalarm_getdesc(alarm_info)
++            }
++
++        alarm_list = [xalarm_to_dict(alarm) for alarm in alarm_list]
++
++        # keep detail
++        for alarm in alarm_list:
++            alarm_info = alarm['msg1']
++            alarm_info = json.loads(alarm_info)
++            if not detailed:
++                if 'details' in alarm_info:
++                    alarm_info.pop('details', None)
++            alarm.pop('msg1', None)
++            alarm['alarm_info'] = alarm_info
++        return alarm_list
++    finally:
++        alarm_list_lock.release()
+diff --git a/src/python/syssentry/callbacks.py b/src/python/syssentry/callbacks.py
+index b38b381..6ec2c29 100644
+--- a/src/python/syssentry/callbacks.py
++++ b/src/python/syssentry/callbacks.py
+@@ -18,6 +18,7 @@ import logging
+ 
+ from .task_map import TasksMap, ONESHOT_TYPE, PERIOD_TYPE
+ from .mod_status import EXITED_STATUS, RUNNING_STATUS, WAITING_STATUS, set_runtime_status
++from .alarm import get_alarm_result
+ 
+ 
+ def task_get_status(mod_name):
+@@ -41,6 +42,22 @@ def task_get_result(mod_name):
+ 
+     return "success", task.get_result()
+ 
++def task_get_alarm(data):
++    """get alarm by mod name"""
++    task_name = data['task_name']
++    time_range = data['time_range']
++    try:
++        detailed = data['detailed']
++    except KeyError:
++        logging.debug("Key 'detailed' does not exist in the dictionary")
++        detailed = None
++    task = TasksMap.get_task_by_name(task_name)
++    if not task:
++        return "failed", f"cannot find task by name {task_name}"
++    if not task.load_enabled:
++        return "failed", f"mod {task_name} is not enabled"
++
++    return "success", get_alarm_result(task_name, time_range, detailed)
+ 
+ def task_stop(mod_name):
+     """stop by mod name"""
+diff --git a/src/python/syssentry/global_values.py b/src/python/syssentry/global_values.py
+index 483d544..b123b2d 100644
+--- a/src/python/syssentry/global_values.py
++++ b/src/python/syssentry/global_values.py
+@@ -27,6 +27,7 @@ CTL_SOCKET_PATH = "/var/run/sysSentry/control.sock"
+ SYSSENTRY_CONF_PATH = "/etc/sysSentry"
+ INSPECT_CONF_PATH = "/etc/sysSentry/inspect.conf"
+ TASK_LOG_DIR = "/var/log/sysSentry"
++DEFAULT_ALARM_CLEAR_TIME = 15
+ 
+ SENTRY_RUN_DIR_PERM = 0o750
+ 
+@@ -76,6 +77,9 @@ class InspectTask:
+         self.env_file = ""
+         # start mode
+         self.conflict = "up"
++        # alarm id
++        self.alarm_id = -1
++        self.alarm_clear_time = DEFAULT_ALARM_CLEAR_TIME
+ 
+     def start(self):
+         """
+diff --git a/src/python/syssentry/load_mods.py b/src/python/syssentry/load_mods.py
+index 48d7e66..ae05e57 100644
+--- a/src/python/syssentry/load_mods.py
++++ b/src/python/syssentry/load_mods.py
+@@ -24,6 +24,7 @@ from .task_map import TasksMap, ONESHOT_TYPE, PERIOD_TYPE
+ from .cron_process import PeriodTask
+ from .mod_status import set_task_status
+ 
++from xalarm.register_xalarm import MIN_ALARM_ID, MAX_ALARM_ID
+ ONESHOT_CONF = 'oneshot'
+ PERIOD_CONF = 'period'
+ 
+@@ -41,6 +42,8 @@ CONF_TASK_RESTART = 'task_restart'
+ CONF_ONSTART = 'onstart'
+ CONF_ENV_FILE = 'env_file'
+ CONF_CONFLICT = 'conflict'
++CONF_ALARM_ID = 'alarm_id'
++CONF_ALARM_CLEAR_TIME = 'alarm_clear_time'
+ 
+ MOD_FILE_SUFFIX = '.mod'
+ MOD_SUFFIX_LEN = 4
+@@ -194,6 +197,18 @@ def parse_mod_conf(mod_name, mod_conf):
+     task.heartbeat_interval = heartbeat_interval
+     task.load_enabled = is_enabled
+ 
++    try:
++        task.alarm_id = int(mod_conf.get(CONF_TASK, CONF_ALARM_ID))
++        task.alarm_clear_time = int(mod_conf.get(CONF_TASK, CONF_ALARM_CLEAR_TIME))
++        if not (MIN_ALARM_ID <= task.alarm_id <= MAX_ALARM_ID):
++            raise ValueError("Invalid alarm_id")
++    except ValueError:
++        task.alarm_id = -1
++        logging.warning("Invalid alarm_id, set to -1")
++    except configparser.NoOptionError:
++        task.alarm_id = -1
++        logging.warning("Unset alarm_id and alarm_clear_time, use -1 and 15s as default")
++
+     if CONF_ONSTART in mod_conf.options(CONF_TASK):
+         is_onstart = (mod_conf.get(CONF_TASK, CONF_ONSTART) == 'yes')
+         if task_type == PERIOD_CONF:
+@@ -327,3 +342,4 @@ def reload_single_mod(mod_name):
+     res, ret = reload_mod_by_name(mod_name)
+ 
+     return res, ret
++
+diff --git a/src/python/syssentry/sentryctl b/src/python/syssentry/sentryctl
+index e94491f..675c17a 100644
+--- a/src/python/syssentry/sentryctl
++++ b/src/python/syssentry/sentryctl
+@@ -25,6 +25,7 @@ MAX_PARAM_LENGTH = 256
+ 
+ RESULT_MSG_DATA_LEN = 4
+ CTL_MSG_LEN_LEN = 3
++DEFAULT_ALARM_TIME_RANGE = 10
+ 
+ def status_output_format(res_data):
+     """format output"""
+@@ -57,6 +58,8 @@ def res_output_handle(res_struct, req_type):
+         status_output_format(res_struct['data'])
+     elif req_type == 'get_result':
+          result_output_format(res_struct['data'])
++    elif req_type == 'get_alarm':
++         result_output_format(res_struct['data'])
+     elif res_struct['ret'] == "failed":
+         print(res_struct['data'])
+ 
+@@ -75,6 +78,7 @@ def client_send_and_recv(request_data, data_str_len):
+         print("sentryctl: client creat socket error")
+         return None
+ 
++    # connect to syssentry
+     try:
+         client_socket.connect(CTL_SOCKET_PATH)
+     except OSError:
+@@ -82,6 +86,7 @@ def client_send_and_recv(request_data, data_str_len):
+         print("sentryctl: client connect error")
+         return None
+ 
++    # msg: CTL{len}{data}
+     req_data_len = len(request_data)
+     request_msg = "CTL" + str(req_data_len).zfill(3) + request_data
+ 
+@@ -94,8 +99,8 @@ def client_send_and_recv(request_data, data_str_len):
+         print("sentryctl: client communicate error")
+         return None
+ 
++    # res: RES{len}{data}
+     res_magic = res_data[:3]
+-
+     if res_magic != "RES":
+         print("res msg format error")
+         return None
+@@ -128,6 +133,10 @@ if __name__ == '__main__':
+     parser_status.add_argument('task_name')
+     parser_get_result = subparsers.add_parser('get_result', help='get task result')
+     parser_get_result.add_argument('task_name')
++    parser_get_alarm = subparsers.add_parser('get_alarm', help='get task alarm')
++    parser_get_alarm.add_argument('task_name')
++    parser_get_alarm.add_argument('-s', '--time_range', type=str, default=DEFAULT_ALARM_TIME_RANGE, help='Specified time range')
++    parser_get_alarm.add_argument('-d', '--detailed', action='store_true', help='Print Detailed Information')
+     parser_list = subparsers.add_parser('list', help='show all loaded task mod')
+ 
+     client_args = parser.parse_args()
+@@ -142,6 +151,15 @@ if __name__ == '__main__':
+         req_msg_struct = {"type": "get_status", "data": client_args.task_name}
+     elif client_args.cmd_type == 'get_result':
+         req_msg_struct = {"type": "get_result", "data": client_args.task_name}
++    elif client_args.cmd_type == 'get_alarm':
++        req_msg_struct = {
++            "type": "get_alarm", 
++            "data": {
++                'task_name': client_args.task_name, 
++                'time_range': client_args.time_range,
++                'detailed': client_args.detailed,
++            }
++        }
+     elif client_args.cmd_type == 'reload':
+         req_msg_struct = {"type": "reload", "data": client_args.task_name}
+     else:
+diff --git a/src/python/syssentry/syssentry.py b/src/python/syssentry/syssentry.py
+index 9ef0203..c2dee85 100644
+--- a/src/python/syssentry/syssentry.py
++++ b/src/python/syssentry/syssentry.py
+@@ -28,7 +28,7 @@ from .sentry_config import SentryConfig, get_log_level
+ from .task_map import TasksMap
+ from .global_values import SENTRY_RUN_DIR, CTL_SOCKET_PATH, SENTRY_RUN_DIR_PERM
+ from .cron_process import period_tasks_handle
+-from .callbacks import mod_list_show, task_start, task_get_status, task_stop, task_get_result
++from .callbacks import mod_list_show, task_start, task_get_status, task_stop, task_get_result, task_get_alarm
+ from .mod_status import get_task_by_pid, set_runtime_status
+ from .load_mods import load_tasks, reload_single_mod
+ from .heartbeat import (heartbeat_timeout_chk, heartbeat_fd_create,
+@@ -36,7 +36,11 @@ from .heartbeat import (heartbeat_timeout_chk, heartbeat_fd_create,
+ from .result import RESULT_MSG_HEAD_LEN, RESULT_MSG_MAGIC_LEN, RESULT_MAGIC
+ from .result import RESULT_LEVEL_ERR_MSG_DICT, ResultLevel
+ from .utils import get_current_time_string
++from .alarm import alarm_register
+ 
++from xalarm.register_xalarm import xalarm_unregister
++
++clientId = -1
+ 
+ CPU_EXIST = True
+ try:
+@@ -62,6 +66,7 @@ type_func = {
+     'stop': task_stop,
+     'get_status': task_get_status,
+     'get_result': task_get_result,
++    'get_alarm': task_get_alarm,
+     'reload': reload_single_mod
+ }
+ 
+@@ -107,11 +112,12 @@ def msg_data_process(msg_data):
+         return "Invaild cmd type"
+ 
+     cmd_param = data_struct['data']
+-    logging.debug("msg_data_process cmd_type:%s cmd_param:%s", cmd_type, cmd_param)
++    logging.debug("msg_data_process cmd_type:%s cmd_param:%s", cmd_type, str(cmd_param))
+     if cmd_type in type_func:
+         ret, res_data = type_func[cmd_type](cmd_param)
+     else:
+         ret, res_data = type_func_void[cmd_type]()
++    logging.debug("msg_data_process res_data:%s",str(res_data))
+     res_msg_struct = {"ret": ret, "data": res_data}
+     res_msg = json.dumps(res_msg_struct)
+ 
+@@ -584,10 +590,13 @@ def main():
+         _ = SentryConfig.init_param()
+         TasksMap.init_task_map()
+         load_tasks()
++        clientId = alarm_register()
+         main_loop()
+ 
+     except Exception:
+         logging.error('%s', traceback.format_exc())
+     finally:
++        if clientId != -1:
++            xalarm_unregister(clientId)
+         release_pidfile()
+ 
+diff --git a/src/python/syssentry/task_map.py b/src/python/syssentry/task_map.py
+index 70aa19d..27e97ff 100644
+--- a/src/python/syssentry/task_map.py
++++ b/src/python/syssentry/task_map.py
+@@ -13,16 +13,16 @@
+ tasks map class and initialize function.
+ """
+ import logging
++from typing import Dict
+ 
+ ONESHOT_TYPE = "ONESHOT"
+ PERIOD_TYPE = "PERIOD"
+ 
+ TASKS_MAP = None
+ 
+-
+ class TasksMap:
+     """task map class"""
+-    tasks_dict = {}
++    tasks_dict: Dict[str, Dict] = {}
+ 
+     @classmethod
+     def init_task_map(cls):
+@@ -65,3 +65,4 @@ class TasksMap:
+                 logging.debug("getting task by name: %s", res)
+                 break
+         return res
++
+-- 
+2.27.0
+
