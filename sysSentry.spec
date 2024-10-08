@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 19
+Release: 20
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -31,6 +31,7 @@ Patch18:   over-threshold-should-be-warn-level-log-in-cat-cli.patch
 Patch19:   fix-bug-step-2-about-collect-module-and-avg-block-io.patch
 Patch20:   add-log-level-and-change-log-format.patch
 Patch21:   fix-ai_block_io-some-issues.patch
+Patch22:   add-pyxalarm-and-pySentryNotify-add-multi-users-supp.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -81,6 +82,20 @@ Requires:       sysSentry = %{version}-%{release}
 
 %description -n ai_block_io
 This package provides Supports slow I/O detection based on AI
+
+%package -n pyxalarm
+Summary:        Supports xalarm api in python immplementation
+Requires:       sysSentry = %{version}-%{release}
+
+%description -n pyxalarm
+This package provides Supports xalarm api for users
+
+%package -n pysentry_notify
+Summary:        Supports xalarm report in python immplementation
+Requires:       sysSentry = %{version}-%{release}
+
+%description -n pysentry_notify
+This package provides Supports xalarm report for plugins
 
 %prep
 %autosetup -n %{name}-%{version} -p1
@@ -146,6 +161,8 @@ install config/plugins/ai_block_io.ini %{buildroot}/etc/sysSentry/plugins/ai_blo
 
 pushd src/python
 python3 setup.py install -O1 --root=$RPM_BUILD_ROOT --record=SENTRY_FILES
+cat SENTRY_FILES | grep -v register_xalarm.* | grep -v sentry_notify.*  > SENTRY_FILES.tmp
+mv SENTRY_FILES.tmp SENTRY_FILES
 popd
 
 %pre
@@ -173,7 +190,7 @@ rm -rf %{buildroot}
 
 %files -f src/python/SENTRY_FILES
 %defattr(0550,root,root)
-%attr(0550,root,root) %{python3_sitelib}/xalarm
+%dir %attr(0550,root,root) %{python3_sitelib}/xalarm
 %attr(0550,root,root) %{python3_sitelib}/syssentry
 %attr(0550,root,root) %{python3_sitelib}/sentryCollector
 %attr(0550,root,root) %{python3_sitelib}/sentryPlugins/avg_block_io
@@ -228,6 +245,14 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{_includedir}/xalarm
 %attr(0550,root,root) %{_includedir}/xalarm/register_xalarm.h
 
+%files -n pyxalarm
+%attr(0550,root,root) %{python3_sitelib}/xalarm/register_xalarm.py
+%attr(0550,root,root) %{python3_sitelib}/xalarm/__pycache__/register_xalarm*
+
+%files -n pysentry_notify
+%attr(0550,root,root) %{python3_sitelib}/xalarm/sentry_notify.py
+%attr(0550,root,root) %{python3_sitelib}/xalarm/__pycache__/sentry_notify*
+
 %files -n cpu_sentry
 %attr(0500,root,root) %{_bindir}/cat-cli
 %attr(0500,root,root) %{_bindir}/cpu_sentry
@@ -249,6 +274,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryPlugins/ai_block_io
 
 %changelog
+* Tue Oct 8 2024 caixiaomeng <caixiaomeng2@huawei.com> - 1.0.2-20
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:add pyxalarm and pySentryNotify, add multi users support for xalarmd
+
 * Mon Sep 30 2024 heyouzhi <heyouzhi@huawei.com> - 1.0.2-19
 - Type:bugfix
 - CVE:NA
@@ -364,3 +395,4 @@ rm -rf %{buildroot}
 - CVE:NA
 - SUG:NA
 - DESC:Package init
+
