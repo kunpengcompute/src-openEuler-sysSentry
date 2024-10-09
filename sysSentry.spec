@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 21
+Release: 22
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -32,6 +32,7 @@ Patch19:   fix-ai_block_io-some-issues.patch
 Patch20:   add-ebpf-collector.patch
 Patch21:   add-pyxalarm-and-pySentryNotify-add-multi-users-supp.patch
 Patch22:   add-sentryctl-get_alarm-module_name-s-time_range-d.patch
+Patch23:   fix-python-3.7-not-support-list-bool-type.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -284,6 +285,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryPlugins/ai_block_io
 
 %changelog
+* Wed Oct 9 2024 caixiaomeng <caixiaomeng2@huawei.com> - 1.0.2-22
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix python 3.7 not support list[bool] type
+
 * Tue Oct 8 2024 jinsaihang <jinsaihang@h-partners.com> - 1.0.2-21
 - Type:bugfix
 - CVE:NA
