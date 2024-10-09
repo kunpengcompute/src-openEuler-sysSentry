@@ -1,0 +1,58 @@
+From c8dd5e1e3b73a02a866e30776add10dc1dd35fa0 Mon Sep 17 00:00:00 2001
+From: zhangnan <zhangnan134@huawei.com>
+Date: Wed, 9 Oct 2024 16:46:24 +0800
+Subject: [PATCH] ebpf log update
+
+---
+ src/python/sentryCollector/collect_io.py | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/src/python/sentryCollector/collect_io.py b/src/python/sentryCollector/collect_io.py
+index e45947a..0d87c8f 100644
+--- a/src/python/sentryCollector/collect_io.py
++++ b/src/python/sentryCollector/collect_io.py
+@@ -254,6 +254,8 @@ class CollectIo():
+             if EBPF_GLOBAL_DATA:
+                 for data in EBPF_GLOBAL_DATA:
+                     data_list = data.split()
++                    if len(data_list) != 6:
++                        continue
+                     stage, finish_count, latency, io_dump, io_type ,disk_name = data_list
+                     if disk_name not in self.window_value:
+                         continue
+@@ -341,7 +343,7 @@ class CollectIo():
+         finish = curr_finish_count - prev_finish_count
+         if finish <= 0:
+             return 0
+-        value = finish / self.period_time / 1000 / 1000
++        value = finish / self.period_time
+         if value.is_integer():
+             return int(value)
+         else:
+@@ -355,7 +357,7 @@ class CollectIo():
+         lat_time = curr_latency - prev_latency
+         if lat_time <= 0:
+             return 0
+-        value = lat_time / self.period_time
++        value = lat_time / self.period_time / 1000 / 1000
+         if value.is_integer():
+             return int(value)
+         else:
+@@ -423,6 +425,7 @@ class CollectIo():
+                     sleep_time -= 1
+                 time.sleep(sleep_time)
+         elif self.is_ebpf_avaliable():
++            logging.info("ebpf collector thread start")
+             self.start_ebpf_subprocess()
+             
+             thread_get_data = threading.Thread(target=self.get_ebpf_raw_data)
+@@ -438,7 +441,6 @@ class CollectIo():
+             thread_append_data.join()
+ 
+             self.stop_ebpf_subprocess()
+-            logging.info("ebpf collector thread exits")
+         else:
+             logging.warning("fail to start ebpf collector thread. collect io thread exits")
+             return
+-- 
+2.33.0
