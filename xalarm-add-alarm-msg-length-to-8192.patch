@@ -1,0 +1,112 @@
+From c95be14eee48e5afb255700c9d67c1d8ef2532dc Mon Sep 17 00:00:00 2001
+From: PshySimon <caixiaomeng2@huawei.com>
+Date: Thu, 10 Oct 2024 16:15:52 +0800
+Subject: [PATCH] xalarm add alarm msg length to 8192
+
+---
+ src/libso/xalarm/register_xalarm.c   | 2 +-
+ src/libso/xalarm/register_xalarm.h   | 2 +-
+ src/python/xalarm/register_xalarm.py | 2 +-
+ src/python/xalarm/sentry_notify.py   | 2 +-
+ src/python/xalarm/xalarm_api.py      | 8 ++++++--
+ src/python/xalarm/xalarm_server.py   | 2 +-
+ 6 files changed, 11 insertions(+), 7 deletions(-)
+
+diff --git a/src/libso/xalarm/register_xalarm.c b/src/libso/xalarm/register_xalarm.c
+index 21a419f..5aff2bc 100644
+--- a/src/libso/xalarm/register_xalarm.c
++++ b/src/libso/xalarm/register_xalarm.c
+@@ -35,7 +35,7 @@
+ #define ALARM_SOCKET_PERMISSION 0700
+ #define TIME_UNIT_MILLISECONDS 1000
+ 
+-#define MAX_PARAS_LEN 1023
++#define MAX_PARAS_LEN 8191
+ #define MIN_ALARM_ID 1001
+ #define MAX_ALARM_ID (MIN_ALARM_ID + MAX_NUM_OF_ALARM_ID - 1)
+ 
+diff --git a/src/libso/xalarm/register_xalarm.h b/src/libso/xalarm/register_xalarm.h
+index fef9482..dcf4f03 100644
+--- a/src/libso/xalarm/register_xalarm.h
++++ b/src/libso/xalarm/register_xalarm.h
+@@ -11,7 +11,7 @@
+ #include <sys/time.h>
+ #include <stdbool.h>
+  
+-#define ALARM_INFO_MAX_PARAS_LEN 1024
++#define ALARM_INFO_MAX_PARAS_LEN 8192
+ #define MAX_STRERROR_SIZE 1024
+ #define MAX_ALARM_TYEPS 1024
+ #define MIN_ALARM_ID 1001
+diff --git a/src/python/xalarm/register_xalarm.py b/src/python/xalarm/register_xalarm.py
+index 6756b1b..edd9994 100644
+--- a/src/python/xalarm/register_xalarm.py
++++ b/src/python/xalarm/register_xalarm.py
+@@ -11,7 +11,7 @@ from struct import error as StructParseError
+ from .xalarm_api import Xalarm, alarm_bin2stu
+ 
+ 
+-ALARM_REPORT_LEN = 1048
++ALARM_REPORT_LEN = 8216
+ MAX_NUM_OF_ALARM_ID=128
+ MIN_ALARM_ID = 1001
+ MAX_ALARM_ID = (MIN_ALARM_ID + MAX_NUM_OF_ALARM_ID - 1)
+diff --git a/src/python/xalarm/sentry_notify.py b/src/python/xalarm/sentry_notify.py
+index a19e5b3..c763a24 100644
+--- a/src/python/xalarm/sentry_notify.py
++++ b/src/python/xalarm/sentry_notify.py
+@@ -17,7 +17,7 @@ CRITICAL_ALM = 3
+ ALARM_TYPE_OCCUR = 1
+ ALARM_TYPE_RECOVER = 2
+ 
+-MAX_PUC_PARAS_LEN = 1024
++MAX_PUC_PARAS_LEN = 8192
+ 
+ DIR_XALARM = "/var/run/xalarm"
+ PATH_REPORT_ALARM = "/var/run/xalarm/report"
+diff --git a/src/python/xalarm/xalarm_api.py b/src/python/xalarm/xalarm_api.py
+index 99eabf5..863bd02 100644
+--- a/src/python/xalarm/xalarm_api.py
++++ b/src/python/xalarm/xalarm_api.py
+@@ -23,7 +23,7 @@ ALARM_LEVELS = (1, 2, 3, 4, 5)
+ ALARM_SOCK_PATH = "/var/run/xalarm/report"
+ MIN_ALARM_ID = 1001
+ MAX_ALARM_ID = 1128
+-MAX_MSG_LEN = 1024
++MAX_MSG_LEN = 8192
+ 
+ 
+ @dataclasses.dataclass
+@@ -120,6 +120,10 @@ def alarm_bin2stu(bin_data):
+ 
+ 
+ def alarm_stu2bin(alarm_info: Xalarm):
++    alarm_msg = alarm_info.msg1
++    padding_length = MAX_MSG_LEN - len(alarm_msg)
++    if padding_length > 0:
++        alarm_msg = alarm_msg + ('\x00' * padding_length)
+     return struct.pack(
+         f'@HBBll{MAX_MSG_LEN}s',
+         alarm_info.alarm_id,
+@@ -127,4 +131,4 @@ def alarm_stu2bin(alarm_info: Xalarm):
+         alarm_info.alarm_type,
+         alarm_info.timetamp.tv_sec,
+         alarm_info.timetamp.tv_usec,
+-        alarm_info.msg1.encode('utf-8'))
++        alarm_msg.encode('utf-8'))
+diff --git a/src/python/xalarm/xalarm_server.py b/src/python/xalarm/xalarm_server.py
+index fcaf393..2882609 100644
+--- a/src/python/xalarm/xalarm_server.py
++++ b/src/python/xalarm/xalarm_server.py
+@@ -28,7 +28,7 @@ from .xalarm_transfer import check_filter, transmit_alarm, wait_for_connection
+ ALARM_DIR = "/var/run/xalarm"
+ USER_RECV_SOCK = "/var/run/xalarm/alarm"
+ SOCK_FILE = "/var/run/xalarm/report"
+-ALARM_REPORT_LEN = 1048
++ALARM_REPORT_LEN = 8216
+ ALARM_DIR_PERMISSION = 0o750
+ ALARM_LISTEN_QUEUE_LEN = 5
+ 
+-- 
+2.27.0
+
