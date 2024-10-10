@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 29
+Release: 30
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -40,6 +40,7 @@ Patch27:   change-alarm-length.patch
 Patch28:   add-detail-time.patch
 Patch29:   fix-config-relative-some-issues.patch
 Patch30:   ebpf-fix-alarm-bug.patch
+Patch31:   xalarm-add-alarm-msg-length-to-8192.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -294,6 +295,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryPlugins/ai_block_io
 
 %changelog
+* Thu Oct 10 2024 caixiaomeng <caixiaomeng2@huawei.com> - 1.0.2-30
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:xalarm add alarm msg length restriction to 8192
+
 * Thu Oct 10 2024 jinsaihang <jinsaihang@h-partners.com> - 1.0.2-29
 - Type:bugfix
 - CVE:NA
