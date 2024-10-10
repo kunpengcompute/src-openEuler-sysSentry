@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 28
+Release: 29
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -41,6 +41,7 @@ Patch28:   update-log-when-it-is-not-lock-collect.patch
 Patch29:   change-alarm-length.patch
 Patch30:   add-detail-time.patch
 Patch31:   xalarm-add-alarm-msg-length-to-8192.patch
+Patch32:   ai_block_io-adapt-alarm-module.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -285,6 +286,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryPlugins/ai_block_io
 
 %changelog
+* Thu Oct 10 2024 heyouzhi <heyouzhi@huawei.com> - 1.0.2-29
+- Type:requirement
+- CVE:NA
+- SUG:NA
+- DESC:ai_block_io adapt alarm module
+
 * Thu Oct 10 2024 caixiaomeng <caixiaomeng2@huawei.com> - 1.0.2-28
 - Type:bugfix
 - CVE:NA
