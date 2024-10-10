@@ -1,0 +1,40 @@
+From 4077ea1871abe7c52319b76b199dd1b0c0e0f069 Mon Sep 17 00:00:00 2001
+From: zhangnan <zhangnan134@huawei.com>
+Date: Thu, 10 Oct 2024 12:27:06 +0800
+Subject: [PATCH] ebpf fix alarm bug
+
+---
+ src/c/ebpf_collector/ebpf_collector.h    | 2 +-
+ src/python/sentryCollector/collect_io.py | 3 ++-
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/c/ebpf_collector/ebpf_collector.h b/src/c/ebpf_collector/ebpf_collector.h
+index 1ae33de..dca04d8 100644
+--- a/src/c/ebpf_collector/ebpf_collector.h
++++ b/src/c/ebpf_collector/ebpf_collector.h
+@@ -11,7 +11,7 @@ typedef long long unsigned int u64;
+ typedef unsigned int u32;
+ 
+ #define MAX_BUCKETS 1
+-#define THRESHOLD 1000
++#define THRESHOLD 1000000000
+ #define DURATION_THRESHOLD 500000000
+ 
+ #define RWBS_LEN    8
+diff --git a/src/python/sentryCollector/collect_io.py b/src/python/sentryCollector/collect_io.py
+index 9d61f60..ba94b9d 100644
+--- a/src/python/sentryCollector/collect_io.py
++++ b/src/python/sentryCollector/collect_io.py
+@@ -309,7 +309,8 @@ class CollectIo():
+                         curr_iops = self.get_ebpf_iops(curr_finish_count=curr_finish_count, prev_finish_count=prev_finish_count)
+                         curr_io_length = self.get_ebpf_io_length(curr_latency=curr_latency, prev_latency=prev_latency)
+                         curr_io_dump = self.get_ebpf_io_dump(curr_io_dump_count=curr_io_dump_count, prev_io_dump_count=prev_io_dump_count)
+-                        IO_GLOBAL_DATA[disk_name][stage][io_type].insert(0, [curr_lat, curr_iops, curr_io_length, curr_io_dump])
++                        IO_GLOBAL_DATA[disk_name][stage][io_type].insert(0, [curr_lat, curr_io_dump, curr_io_length, curr_iops])
++                    logging.debug(f"ebpf collect data : {IO_GLOBAL_DATA}")
+             elapsed_time = time.time() - start_time
+             sleep_time = self.period_time - elapsed_time
+             if sleep_time < 0:
+-- 
+2.33.0
+
