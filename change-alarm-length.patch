@@ -1,0 +1,56 @@
+From 67439c0040b1fb0614ac009bf53062e9ec2880aa Mon Sep 17 00:00:00 2001
+From: jinsaihang <jinsaihang@h-partners.com>
+Date: Wed, 9 Oct 2024 11:55:35 +0800
+Subject: [PATCH 1/2] change alarm length
+
+Signed-off-by: jinsaihang <jinsaihang@h-partners.com>
+---
+ src/python/syssentry/sentryctl    | 3 +++
+ src/python/syssentry/syssentry.py | 3 +++
+ 2 files changed, 6 insertions(+)
+
+diff --git a/src/python/syssentry/sentryctl b/src/python/syssentry/sentryctl
+index 675c17a..3de93d0 100644
+--- a/src/python/syssentry/sentryctl
++++ b/src/python/syssentry/sentryctl
+@@ -25,6 +25,7 @@ MAX_PARAM_LENGTH = 256
+ 
+ RESULT_MSG_DATA_LEN = 4
+ CTL_MSG_LEN_LEN = 3
++ALARM_MSG_DATA_LEN = 6
+ DEFAULT_ALARM_TIME_RANGE = 10
+ 
+ def status_output_format(res_data):
+@@ -173,6 +174,8 @@ if __name__ == '__main__':
+     request_message = json.dumps(req_msg_struct)
+     if client_args.cmd_type == 'get_result':
+         result_message = client_send_and_recv(request_message, RESULT_MSG_DATA_LEN)
++    elif client_args.cmd_type == 'get_alarm':
++        result_message = client_send_and_recv(request_message, ALARM_MSG_DATA_LEN)
+     else:
+         result_message = client_send_and_recv(request_message, CTL_MSG_LEN_LEN)
+     if not result_message:
+diff --git a/src/python/syssentry/syssentry.py b/src/python/syssentry/syssentry.py
+index c2dee85..ea09095 100644
+--- a/src/python/syssentry/syssentry.py
++++ b/src/python/syssentry/syssentry.py
+@@ -56,6 +56,7 @@ CTL_MSG_MAGIC_LEN = 3
+ CTL_MSG_LEN_LEN = 3
+ CTL_MAGIC = "CTL"
+ RES_MAGIC = "RES"
++ALARM_MSG_DATA_LEN = 6
+ 
+ CTL_LISTEN_QUEUE_LEN = 5
+ SERVER_EPOLL_TIMEOUT = 0.3
+@@ -256,6 +257,8 @@ def server_recv(server_socket: socket.socket):
+     res_head = RES_MAGIC
+     if cmd_type == "get_result":
+         res_data_len = str(len(res_data)).zfill(RESULT_MSG_HEAD_LEN - RESULT_MSG_MAGIC_LEN)
++    elif cmd_type == "get_alarm":
++        res_data_len = str(len(res_data)).zfill(ALARM_MSG_DATA_LEN)
+     else:
+         res_data_len = str(len(res_data)).zfill(CTL_MSG_MAGIC_LEN)
+     res_head += res_data_len
+-- 
+2.27.0
+
