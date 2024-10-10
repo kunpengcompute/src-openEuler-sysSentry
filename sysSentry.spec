@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 26
+Release: 27
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -46,6 +46,7 @@ BuildRequires: python3 python3-setuptools
 BuildRequires: json-c-devel
 BuildRequires: chrpath
 Requires:      libxalarm = %{version}
+Requires:      pyxalarm = %{version}
 
 %description
 sysSentry provides framework tools for system inspection.
@@ -79,6 +80,7 @@ This package provides CPU fault detection
 %package -n avg_block_io
 Summary:        Supports slow I/O detection
 Requires:       sysSentry = %{version}-%{release}
+Requires:       pysentry_notify = %{version}-%{release}
 
 %description -n avg_block_io
 This package provides Supports slow I/O detection based on EBPF
@@ -282,6 +284,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryPlugins/ai_block_io
 
 %changelog
+* Thu Oct 10 2024 jinsaihang <jinsaihang@h-partners.com> - 1.0.2-27
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:add dependency for sysSentry and avg_block_io
+
 * Thu Oct 10 2024 jinsaihang <jinsaihang@h-partners.com> - 1.0.2-26
 - Type:bugfix
 - CVE:NA
