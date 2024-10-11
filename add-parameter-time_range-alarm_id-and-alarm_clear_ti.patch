@@ -1,0 +1,104 @@
+From 0a4bd4097690bee7250676a0c262a830c7a8fbcf Mon Sep 17 00:00:00 2001
+From: jinsaihang <jinsaihang@h-partners.com>
+Date: Fri, 11 Oct 2024 15:35:43 +0800
+Subject: [PATCH] add parameter time_range ,alarm_id and alarm_clear_time
+ validation
+
+Signed-off-by: jinsaihang <jinsaihang@h-partners.com>
+---
+ sysSentry-1.0.2/src/python/syssentry/alarm.py | 19 +++++++++++++++++++
+ .../src/python/syssentry/load_mods.py         |  6 ++----
+ .../src/python/syssentry/sentryctl            |  4 +++-
+ 3 files changed, 24 insertions(+), 5 deletions(-)
+
+diff --git a/src/python/syssentry/alarm.py b/src/python/syssentry/alarm.py
+index d5337d3..43c1065 100644
+--- a/src/python/syssentry/alarm.py
++++ b/src/python/syssentry/alarm.py
+@@ -18,6 +18,7 @@ from datetime import datetime
+ import time
+ import logging
+ import json
++import sys
+ 
+ from xalarm.register_xalarm import xalarm_register,xalarm_getid,xalarm_getlevel,xalarm_gettype,xalarm_gettime,xalarm_getdesc
+ from xalarm.xalarm_api import Xalarm
+@@ -41,9 +42,15 @@ id_base = 1001
+ clientId = -1
+ 
+ MILLISECONDS_UNIT_SECONDS = 1000
++MAX_NUM_OF_ALARM_ID = 128
++MIN_ALARM_ID = 1001
++MAX_ALARM_ID = (MIN_ALARM_ID + MAX_NUM_OF_ALARM_ID - 1)
+ 
+ def update_alarm_list(alarm_info: Xalarm):
+     alarm_id = xalarm_getid(alarm_info)
++    if alarm_id < MIN_ALARM_ID or alarm_id > MAX_ALARM_ID:
++        logging.warnning(f"Invalid alarm_id {alarm_id}")
++        return
+     timestamp = xalarm_gettime(alarm_info)
+     if not timestamp:
+         logging.error("Retrieve timestamp failed")
+@@ -77,7 +84,19 @@ def alarm_register():
+             logging.info(f"alarm_register: {task_name} is registered")
+             task = TasksMap.tasks_dict[task_type][task_name]
+             alarm_id = task.alarm_id
++            if alarm_id < MIN_ALARM_ID or alarm_id > MAX_ALARM_ID:
++                logging.warnning(f"Invalid alarm_id {alarm_id}: ignore {task_name} alarm")
++                continue
+             alarm_clear_time = task.alarm_clear_time
++            try:
++                alarm_clear_time = int(alarm_clear_time)
++                if alarm_clear_time <= 0:
++                    raise ValueError("Not a positive integer")
++                if alarm_clear_time > sys.maxsize:
++                    raise ValueError("Exceeds maximum value for int")
++            except (ValueError, OverflowError, TypeError) as e:
++                logging.warnning(f"Invalid alarm_clear_time {alarm_clear_time}: ignore {task_name} alarm")
++                continue
+             alarm_list_dict[alarm_id] = []
+             task_alarm_id_dict[task_name] = alarm_id
+             if alarm_id not in alarm_id_clear_time_dict:
+diff --git a/src/python/syssentry/load_mods.py b/src/python/syssentry/load_mods.py
+index ae05e57..7daf17d 100644
+--- a/src/python/syssentry/load_mods.py
++++ b/src/python/syssentry/load_mods.py
+@@ -203,11 +203,9 @@ def parse_mod_conf(mod_name, mod_conf):
+         if not (MIN_ALARM_ID <= task.alarm_id <= MAX_ALARM_ID):
+             raise ValueError("Invalid alarm_id")
+     except ValueError:
+-        task.alarm_id = -1
+-        logging.warning("Invalid alarm_id, set to -1")
++        logging.warning("Invalid alarm_id")
+     except configparser.NoOptionError:
+-        task.alarm_id = -1
+-        logging.warning("Unset alarm_id and alarm_clear_time, use -1 and 15s as default")
++        logging.warning("Unset alarm_clear_time, use 15s as default")
+ 
+     if CONF_ONSTART in mod_conf.options(CONF_TASK):
+         is_onstart = (mod_conf.get(CONF_TASK, CONF_ONSTART) == 'yes')
+diff --git a/src/python/syssentry/sentryctl b/src/python/syssentry/sentryctl
+index 3de93d0..c2e3cef 100644
+--- a/src/python/syssentry/sentryctl
++++ b/src/python/syssentry/sentryctl
+@@ -136,7 +136,7 @@ if __name__ == '__main__':
+     parser_get_result.add_argument('task_name')
+     parser_get_alarm = subparsers.add_parser('get_alarm', help='get task alarm')
+     parser_get_alarm.add_argument('task_name')
+-    parser_get_alarm.add_argument('-s', '--time_range', type=str, default=DEFAULT_ALARM_TIME_RANGE, help='Specified time range')
++    parser_get_alarm.add_argument('-s', '--time_range', type=int, default=DEFAULT_ALARM_TIME_RANGE, help='Specified time range')
+     parser_get_alarm.add_argument('-d', '--detailed', action='store_true', help='Print Detailed Information')
+     parser_list = subparsers.add_parser('list', help='show all loaded task mod')
+ 
+@@ -153,6 +153,8 @@ if __name__ == '__main__':
+     elif client_args.cmd_type == 'get_result':
+         req_msg_struct = {"type": "get_result", "data": client_args.task_name}
+     elif client_args.cmd_type == 'get_alarm':
++        if not isinstance(client_args.time_range, int) or client_args.time_range <= 0:
++            print(f"time_range is not a positive integer: {client_args.time_range}")
+         req_msg_struct = {
+             "type": "get_alarm", 
+             "data": {
+-- 
+2.27.0
+
