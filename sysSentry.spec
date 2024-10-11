@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 32
+Release: 33
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -44,6 +44,7 @@ Patch31:   xalarm-add-alarm-msg-length-to-8192.patch
 Patch32:   add-log-for-improving-maintainability.patch
 Patch33:   add-get_disk_type-and-fix-some-bugs.patch
 Patch34:   ai_block_io-adapt-alarm-module.patch
+Patch35:   diff-disk-type-use-diff-config.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -298,6 +299,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryPlugins/ai_block_io
 
 %changelog
+* Thu Oct 11 2024 gaoruoshu <gaoruoshu@huawei.com> - 1.0.2-33
+- Type:requirement
+- CVE:NA
+- SUG:NA
+- DESC:avg_block_io adapt different type of disk, use different config
+
 * Thu Oct 10 2024 heyouzhi <heyouzhi.com> - 1.0.2-32
 - Type:requirement
 - CVE:NA
