@@ -1,0 +1,24 @@
+From ef3aad0ca57d35b0a4fe29a0205596021bae0227 Mon Sep 17 00:00:00 2001
+From: caixiaomeng <caixiaomeng2@.com>
+Date: Fri, 11 Oct 2024 17:59:54 +0800
+Subject: [PATCH] add log for xalarm when sending msg and clean invalid client
+ socket
+
+---
+ src/python/xalarm/xalarm_transfer.py | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/python/xalarm/xalarm_transfer.py b/src/python/xalarm/xalarm_transfer.py
+index 42137d8..9e867cc 100644
+--- a/src/python/xalarm/xalarm_transfer.py
++++ b/src/python/xalarm/xalarm_transfer.py
+@@ -117,4 +117,5 @@ def transmit_alarm(server_sock, epoll, fd_to_socket, bin_data):
+         epoll.unregister(fileno)
+         fd_to_socket[fileno].close()
+         del fd_to_socket[fileno]
++        logging.info(f"cleaned up connection {fileno} for client lost connection.")
+ 
+-- 
+2.27.0
+
+
