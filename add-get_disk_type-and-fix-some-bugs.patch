@@ -1,0 +1,176 @@
+From c2ffc679eddda5d78362612d89a9319d268da7e3 Mon Sep 17 00:00:00 2001
+From: zhuofeng <zhuofeng2@huawei.com>
+Date: Thu, 10 Oct 2024 20:17:34 +0800
+Subject: [PATCH] add get_disk_type and fix some bugs
+
+---
+ service/sentryCollector.service              |  2 +-
+ src/python/sentryCollector/collect_io.py     | 16 ++++-
+ src/python/sentryCollector/collect_plugin.py | 68 +++++++++++++++++++-
+ 3 files changed, 81 insertions(+), 5 deletions(-)
+
+diff --git a/service/sentryCollector.service b/service/sentryCollector.service
+index 4ee07d5..e09ddb3 100644
+--- a/service/sentryCollector.service
++++ b/service/sentryCollector.service
+@@ -1,5 +1,5 @@
+ [Unit]
+-Description = Collection module added for sysSentry and kernel lock-free collection
++Description = Collection module added for sysSentry
+  
+ [Service]
+ ExecStart=/usr/bin/python3 /usr/bin/sentryCollector
+diff --git a/src/python/sentryCollector/collect_io.py b/src/python/sentryCollector/collect_io.py
+index 8780648..6699a90 100644
+--- a/src/python/sentryCollector/collect_io.py
++++ b/src/python/sentryCollector/collect_io.py
+@@ -116,7 +116,7 @@ class CollectIo():
+             return 0
+         if finish <= 0 or lat_time <= 0:
+             return 0
+-        value = lat_time / finish / 1000 / 1000
++        value = lat_time / finish / 1000
+         if value.is_integer():
+             return int(value)
+         else:
+@@ -124,11 +124,17 @@ class CollectIo():
+ 
+     def get_io_length(self, curr_stage_value, last_stage_value, category):
+         try:
+-            finish = int(curr_stage_value[category * 3 + IoStatus.FINISH]) - int(last_stage_value[category * 3 + IoStatus.FINISH])
++            lat_time = (int(curr_stage_value[category * 3 + IoStatus.LATENCY]) - int(last_stage_value[category * 3 + IoStatus.LATENCY]))
+         except ValueError as e:
+             logging.error("get_io_length convert to int failed, %s", e)
+             return 0
+-        value = finish / self.period_time / 1000 / 1000
++        if lat_time <= 0:
++            return 0
++        # ns convert us
++        lat_time = lat_time / 1000
++        # s convert us
++        period_time = self.period_time * 1000 * 1000
++        value = lat_time / period_time
+         if value.is_integer():
+             return int(value)
+         else:
+@@ -141,6 +147,8 @@ class CollectIo():
+             with open(io_dump_file, 'r') as file:
+                 for line in file:
+                     count += line.count('.op=' + Io_Category[category])
++                if count > 0:
++                    logging.info(f"io_dump info : {disk_name}, {stage}, {category}, {count}")
+         except FileNotFoundError:
+             logging.error("The file %s does not exist.", io_dump_file)
+             return count
+@@ -223,6 +231,8 @@ class CollectIo():
+                 if self.get_blk_io_hierarchy(disk_name, stage_list) < 0:
+                     continue
+                 self.append_period_lat(disk_name, stage_list)
++
++            logging.debug(f"no-lock collect data : {IO_GLOBAL_DATA}")
+                 
+             elapsed_time = time.time() - start_time
+             sleep_time = self.period_time - elapsed_time
+diff --git a/src/python/sentryCollector/collect_plugin.py b/src/python/sentryCollector/collect_plugin.py
+index 3e2cf4c..31bf11b 100644
+--- a/src/python/sentryCollector/collect_plugin.py
++++ b/src/python/sentryCollector/collect_plugin.py
+@@ -16,6 +16,7 @@ import json
+ import socket
+ import logging
+ import re
++import os
+ 
+ COLLECT_SOCKET_PATH = "/var/run/sysSentry/collector.sock"
+ 
+@@ -58,6 +59,8 @@ class ResultMessage():
+     RESULT_EXCEED_LIMIT = 4 # the parameter length exceeds the limit.
+     RESULT_PARSE_FAILED = 5 # parse failed
+     RESULT_INVALID_CHAR = 6 # invalid char
++    RESULT_DISK_NOEXIST = 7 # disk is not exist
++    RESULT_DISK_TYPE_MISMATCH= 8 # disk type mismatch
+ 
+ Result_Messages = {
+     ResultMessage.RESULT_SUCCEED: "Succeed",
+@@ -66,9 +69,15 @@ Result_Messages = {
+     ResultMessage.RESULT_INVALID_LENGTH: "Invalid parameter length",
+     ResultMessage.RESULT_EXCEED_LIMIT: "The parameter length exceeds the limit",
+     ResultMessage.RESULT_PARSE_FAILED: "Parse failed",
+-    ResultMessage.RESULT_INVALID_CHAR: "Invalid char"
++    ResultMessage.RESULT_INVALID_CHAR: "Invalid char",
++    ResultMessage.RESULT_DISK_NOEXIST: "Disk is not exist",
++    ResultMessage.RESULT_DISK_TYPE_MISMATCH: "Disk type mismatch"
+ }
+ 
++class DiskType():
++    TYPE_NVME_SSD = 0
++    TYPE_SATA_SSD = 1
++    TYPE_SATA_HDD = 2
+ 
+ def client_send_and_recv(request_data, data_str_len, protocol):
+     """client socket send and recv message"""
+@@ -273,3 +282,60 @@ def inter_get_io_data(period, disk_list, stage, iotype):
+     result['message'] = result_message
+     return result
+ 
++def get_disk_type(disk):
++    result = {}
++    result['ret'] = ResultMessage.RESULT_UNKNOWN
++    result['message'] = ""
++    if not disk:
++        logging.error("param is invalid")
++        result['ret'] = ResultMessage.RESULT_NOT_PARAM
++        return result
++    if len(disk) <= 0 or len(disk) > LIMIT_DISK_CHAR_LEN:
++        logging.error("invalid disk length")
++        result['ret'] = ResultMessage.RESULT_INVALID_LENGTH
++        return result
++    pattern = r'^[a-zA-Z0-9_-]+$'
++    if not re.match(pattern, disk):
++        logging.error("%s is invalid char", disk)
++        result['ret'] =  ResultMessage.RESULT_INVALID_CHAR
++        return result
++
++    base_path = '/sys/block'
++    all_disk = []
++    for disk_name in os.listdir(base_path):
++        all_disk.append(disk_name)
++
++    if disk not in all_disk:
++        logging.error("disk %s is not exist", disk)
++        result['ret'] = ResultMessage.RESULT_DISK_NOEXIST
++        return result
++    
++    if disk[0:4] == "nvme":
++        result['message'] = str(DiskType.TYPE_NVME_SSD)
++    elif disk[0:2] == "sd":
++        disk_file = '/sys/block/{}/queue/rotational'.format(disk)
++        try:
++            with open(disk_file, 'r') as file:
++                num = int(file.read())
++                if num == 1:
++                    result['message'] = str(DiskType.TYPE_SATA_SSD)
++                elif num == 0:
++                    result['message'] = str(DiskType.TYPE_SATA_HDD)
++                else:
++                    logging.error("disk %s is not support, num = %d", disk, num)
++                    result['ret'] = ResultMessage.RESULT_DISK_TYPE_MISMATCH
++                    return result
++        except FileNotFoundError:
++            logging.error("The disk_file [%s] does not exist", disk_file)
++            result['ret'] = ResultMessage.RESULT_DISK_NOEXIST
++            return result
++        except Exception as e:
++            logging.error("open disk_file %s happen an error: %s", disk_file, e)
++            return result
++    else:
++        logging.error("disk %s is not support", disk)
++        result['ret'] = ResultMessage.RESULT_DISK_TYPE_MISMATCH
++        return result
++
++    result['ret'] = ResultMessage.RESULT_SUCCEED
++    return result
+\ No newline at end of file
+-- 
+2.33.0
+
