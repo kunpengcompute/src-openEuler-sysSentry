@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 32
+Release: 33
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -46,6 +46,10 @@ Patch33:   add-log-for-improving-maintainability.patch
 Patch34:   add-get_disk_type-and-fix-some-bugs.patch
 Patch35:   diff-disk-type-use-diff-config.patch
 Patch36:   add-parameter-time_range-alarm_id-and-alarm_clear_ti.patch
+Patch37:   fix-xalarm_Report-function-not-refuse-alarm-msg-exce.patch
+Patch38:   fix-xalarm_upgrade-not-return-val-and-fail-when-thre.patch
+Patch39:   add-log-for-xalarm-when-sending-msg-and-clean-invali.patch
+Patch40:   add-xalarm-cleanup-invalid-server-socket-peroidly.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -290,6 +294,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryPlugins/ai_block_io
 
 %changelog
+* Fri Oct 11 2024 caixiaomeng <caixiaomeng2@huawei.com> - 1.0.2-33
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix xalarm upgrade not return val, not refuse to send msg when length exceeds 8192,cleanup invalid socket peroidlly
+
 * Fri Oct 11 2024 jinsaihang <jinsaihang@h-partners.com> - 1.0.2-32
 - Type:bugfix
 - CVE:NA
