@@ -1,0 +1,90 @@
+From 4fa9b250f56dc3f4f431fc091e25d8f2558a9bb2 Mon Sep 17 00:00:00 2001
+From: caixiaomeng <caixiaomeng2@.com>
+Date: Fri, 11 Oct 2024 18:12:21 +0800
+Subject: [PATCH] add xalarm cleanup invalid server socket peroidly
+
+---
+ src/python/xalarm/xalarm_server.py   | 20 +++++++++++++++-----
+ src/python/xalarm/xalarm_transfer.py |  8 ++++++++
+ 2 files changed, 23 insertions(+), 5 deletions(-)
+
+diff --git a/src/python/xalarm/xalarm_server.py b/src/python/xalarm/xalarm_server.py
+index 2882609..f90a0e2 100644
+--- a/src/python/xalarm/xalarm_server.py
++++ b/src/python/xalarm/xalarm_server.py
+@@ -22,7 +22,12 @@ import threading
+ from struct import error as StructParseError
+ 
+ from .xalarm_api import alarm_bin2stu
+-from .xalarm_transfer import check_filter, transmit_alarm, wait_for_connection
++from .xalarm_transfer import (
++    check_filter,
++    transmit_alarm,
++    wait_for_connection,
++    peroid_task_to_cleanup_connections
++)
+ 
+ 
+ ALARM_DIR = "/var/run/xalarm"
+@@ -66,9 +71,13 @@ def server_loop(alarm_config):
+     fd_to_socket = {alarm_sock.fileno(): alarm_sock,}
+     thread_should_stop = False
+ 
+-    thread = threading.Thread(target=wait_for_connection, args=(alarm_sock, epoll, fd_to_socket, thread_should_stop))
+-    thread.daemon = True
+-    thread.start()
++    conn_thread = threading.Thread(target=wait_for_connection, args=(alarm_sock, epoll, fd_to_socket, thread_should_stop))
++    conn_thread.daemon = True
++    conn_thread.start()
++
++    cleanup_thread = threading.Thread(target=peroid_task_to_cleanup_connections, args=(alarm_sock, epoll, fd_to_socket, thread_should_stop))
++    cleanup_thread.daemon = True
++    cleanup_thread.start()
+ 
+     while True:
+         try:
+@@ -88,7 +97,8 @@ def server_loop(alarm_config):
+             logging.error(f"Error server:{e}")
+             
+     thread_should_stop = True
+-    thread.join()
++    conn_thread.join()
++    cleanup_thread.join()
+ 
+     epoll.unregister(alarm_sock.fileno())
+     epoll.close()
+diff --git a/src/python/xalarm/xalarm_transfer.py b/src/python/xalarm/xalarm_transfer.py
+index 90dccbc..75807e0 100644
+--- a/src/python/xalarm/xalarm_transfer.py
++++ b/src/python/xalarm/xalarm_transfer.py
+@@ -17,11 +17,13 @@ Create: 2023-11-02
+ import socket
+ import logging
+ import select
++from time import sleep
+ 
+ MIN_ID_NUMBER = 1001
+ MAX_ID_NUMBER = 1128
+ MAX_CONNECTION_NUM = 100 
+ TEST_CONNECT_BUFFER_SIZE = 32
++PEROID_SCANN_TIME = 60
+ 
+ 
+ def check_filter(alarm_info, alarm_filter):
+@@ -66,6 +68,12 @@ def cleanup_closed_connections(server_sock, epoll, fd_to_socket):
+         logging.info(f"cleaned up connection {fileno} for client lost connection.")
+ 
+ 
++def peroid_task_to_cleanup_connections(server_sock, epoll, fd_to_socket, thread_should_stop):
++    while not thread_should_stop:
++        sleep(PEROID_SCANN_TIME)
++        cleanup_closed_connections(server_sock, epoll, fd_to_socket)
++
++
+ def wait_for_connection(server_sock, epoll, fd_to_socket, thread_should_stop):
+     """
+     thread function for catch and save client connection
+-- 
+2.27.0
+
+
