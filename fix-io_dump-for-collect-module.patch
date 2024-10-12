@@ -1,0 +1,25 @@
+From 6307a1ff4068a541658e3312ca938c6fdd9a5c1a Mon Sep 17 00:00:00 2001
+From: zhuofeng <zhuofeng2@huawei.com>
+Date: Sat, 12 Oct 2024 14:51:51 +0800
+Subject: [PATCH] fix io_dump for collect module
+
+---
+ src/python/sentryCollector/collect_io.py | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/python/sentryCollector/collect_io.py b/src/python/sentryCollector/collect_io.py
+index d734734..11c9d9a 100644
+--- a/src/python/sentryCollector/collect_io.py
++++ b/src/python/sentryCollector/collect_io.py
+@@ -154,7 +154,7 @@ class CollectIo():
+         try:
+             with open(io_dump_file, 'r') as file:
+                 for line in file:
+-                    count += line.count('.op=' + Io_Category[category])
++                    count += line.count('.op=' + Io_Category[category].upper())
+                 if count > 0:
+                     logging.info(f"io_dump info : {disk_name}, {stage}, {category}, {count}")
+         except FileNotFoundError:
+-- 
+2.33.0
+
