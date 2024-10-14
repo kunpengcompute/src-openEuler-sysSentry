@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 38
+Release: 39
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -53,6 +53,7 @@ Patch40:   add-xalarm-cleanup-invalid-server-socket-peroidly.patch
 Patch41:   ai_block_io-support-stage-and-iotype.patch
 Patch42:   ebpf-fix-collect-iodump.patch
 Patch43:   fix-io_dump-for-collect-module.patch
+Patch44:   add-root-cause-analysis.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -307,6 +308,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryPlugins/ai_block_io
 
 %changelog
+* Sat Oct 12 2024 heyouzhi <heyouzhi@huawei.com> - 1.0.2-39
+- Type:requirement
+- CVE:NA
+- SUG:NA
+- DESC:add root cause analysis
+
 * Sat Oct 12 2024 zhuofeng <zhangnan134@huawei.com> - 1.0.2-38
 - Type:bugfix
 - CVE:NA
