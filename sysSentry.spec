@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 41
+Release: 42
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -57,6 +57,7 @@ Patch44:   add-root-cause-analysis.patch
 Patch45:   update-collect-log.patch
 Patch46:   modify-abnormal-stack-when-the-disk-field-is-not-con.patch
 Patch47:   precise-alarm-query-time.patch
+Patch48:   fix-word-error.patch 
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -329,6 +330,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin*
 
 %changelog
+* Mon Oct 14 2024 jinsaihang <jinsaihang@h-partners.com> - 1.0.2-42
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix word error
+
 * Mon Oct 14 2024 zhuofeng <zhuofeng2@huawei.com> - 1.0.2-41
 - Type:bugfix
 - CVE:NA
