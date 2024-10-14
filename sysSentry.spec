@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 39
+Release: 40
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -54,6 +54,8 @@ Patch41:   ai_block_io-support-stage-and-iotype.patch
 Patch42:   ebpf-fix-collect-iodump.patch
 Patch43:   fix-io_dump-for-collect-module.patch
 Patch44:   add-root-cause-analysis.patch
+Patch45:   update-collect-log.patch
+Patch46:   modify-abnormal-stack-when-the-disk-field-is-not-con.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -97,6 +99,7 @@ This package provides CPU fault detection
 Summary:        Supports slow I/O detection
 Requires:       sysSentry = %{version}-%{release}
 Requires:       pysentry_notify = %{version}-%{release}
+Requires:       pysentry_collect = %{version}-%{release}
 
 %description -n avg_block_io
 This package provides Supports slow I/O detection based on EBPF
@@ -105,6 +108,8 @@ This package provides Supports slow I/O detection based on EBPF
 Summary:        Supports slow I/O detection
 Requires:       python3-numpy
 Requires:       sysSentry = %{version}-%{release}
+Requires:       pysentry_notify = %{version}-%{release}
+Requires:       pysentry_collect = %{version}-%{release}
 
 %description -n ai_block_io
 This package provides Supports slow I/O detection based on AI
@@ -122,6 +127,13 @@ Requires:       sysSentry = %{version}-%{release}
 
 %description -n pysentry_notify
 This package provides Supports xalarm report for plugins
+
+%package -n pysentry_collect
+Summary:        Supports collect in python immplementation
+Requires:       sysSentry = %{version}-%{release}
+
+%description -n pysentry_collect
+This package provides Supports collect for plugins
 
 %prep
 %autosetup -n %{name}-%{version} -p1
@@ -271,6 +283,10 @@ rm -rf %{buildroot}
 %attr(0600,root,root) %{_sysconfdir}/sysSentry/collector.conf
 %attr(0600,root,root) %{_unitdir}/sentryCollector.service
 
+# pysentry_collect
+%exclude %{python3_sitelib}/sentryCollector/collect_plugin.py
+%exclude %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin*
+
 %files -n libxalarm
 %attr(0550,root,root) %{_libdir}/libxalarm.so
 
@@ -307,7 +323,18 @@ rm -rf %{buildroot}
 %attr(0600,root,root) %{_sysconfdir}/sysSentry/plugins/ai_block_io.ini
 %attr(0550,root,root) %{python3_sitelib}/sentryPlugins/ai_block_io
 
+%files -n pysentry_collect
+%attr(0550,root,root) %{python3_sitelib}/sentryCollector/collect_plugin.py
+%attr(0550,root,root) %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin*
+
 %changelog
+* Sat Oct 12 2024 zhuofeng <zhuofeng2@huawei.com> - 1.0.2-40
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:add pysentry_collect package and update collect log
+       modify abnormal stack when the disk field is not configured
+
 * Sat Oct 12 2024 heyouzhi <heyouzhi@huawei.com> - 1.0.2-39
 - Type:requirement
 - CVE:NA
