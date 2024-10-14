@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 41
+Release: 42
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -57,6 +57,7 @@ Patch44:   add-root-cause-analysis.patch
 Patch45:   update-collect-log.patch
 Patch46:   modify-abnormal-stack-when-the-disk-field-is-not-con.patch
 Patch47:   precise-alarm-query-time.patch
+Patch48:   ebpf-fix-dead-loop.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -329,6 +330,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin*
 
 %changelog
+* Mon Oct 14 2024 zhangnan <zhangnan134@huawei.com> - 1.0.2-42
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix dead loop when find next bpf map key
+
 * Mon Oct 14 2024 zhuofeng <zhuofeng2@huawei.com> - 1.0.2-41
 - Type:bugfix
 - CVE:NA
@@ -378,7 +385,7 @@ rm -rf %{buildroot}
 - SUG:NA
 - DESC:add parameter valication for time_range and alarm_id and alarm_clear_time
 
-* Thu Oct 11 2024 gaoruoshu <gaoruoshu@huawei.com> - 1.0.2-33
+* Fri Oct 11 2024 gaoruoshu <gaoruoshu@huawei.com> - 1.0.2-33
 - Type:requirement
 - CVE:NA
 - SUG:NA
