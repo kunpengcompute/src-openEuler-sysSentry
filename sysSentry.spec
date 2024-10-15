@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 38
+Release: 39
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -56,6 +56,8 @@ Patch43:   add-root-cause-analysis.patch
 Patch44:   update-collect-log.patch
 Patch45:   modify-abnormal-stack-when-the-disk-field-is-not-con.patch
 Patch46:   ai_block_io-fix-some-bugs.patch
+Patch47:   refactor-config.py-and-bugfix-uncorrect-slow-io-repo.patch
+Patch48:   get_io_data-failed-wont-stop-avg_block_io-and-del-di.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -318,6 +320,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin*
 
 %changelog
+* Tue Oct 15 2024 gaoruoshu <gaoruoshu@huawei.com> - 1.0.2-39
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:refactor config.py and bugfix uncorrect slow io report
+
 * Mon Oct 14 2024 heyouzhi <heyouzhi@huawei.com> - 1.0.2-38
 - Type:bugfix
 - CVE:NA
