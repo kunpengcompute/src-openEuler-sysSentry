@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 50
+Release: 51
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -67,6 +67,7 @@ Patch54:   fix-ai_block_io-root-cause-bug.patch
 Patch55:   ebpf-fix-kyqin-miss-rq_driver-data.patch
 Patch56:   optimize-log-printing.patch
 Patch57:   enrich-alert-info-about-kernel-stack.patch
+Patch58:   ebpf-fix-iodump-warning.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -339,6 +340,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin*
 
 %changelog
+* Wed Oct 16 2024 zhangnan <zhangnan134@huawei.com> - 1.0.2-51
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DES:fix ebpf iodump warning
+
 * Wed Oct 16 2024 heyouzhi <heyouzhi@huawei.com> - 1.0.2-50
 - Type:bugfix
 - CVE:NA
