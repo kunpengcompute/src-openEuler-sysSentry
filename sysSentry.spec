@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 46
+Release: 47
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -63,6 +63,7 @@ Patch50:   ai_block_io-fix-some-bugs.patch
 Patch51:   refactor-config.py-and-bugfix-uncorrect-slow-io-repo.patch
 Patch52:   get_io_data-failed-wont-stop-avg_block_io-and-del-di.patch
 Patch53:   listen-thread-of-collect-module-exits-occasionally.patch
+Patch54:   fix-ai_block_io-root-cause-bug.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -335,6 +336,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin*
 
 %changelog
+* Wed Oct 16 2024 heyouzhi <heyouzhi@huawei.com> - 1.0.2-47
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix ai_block_io root cause bug
+
 * Wed Oct 16 2024 zhuofeng <zhuofeng2@huawei.com> - 1.0.2-46
 - Type:bugfix
 - CVE:NA
