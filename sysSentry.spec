@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 42
+Release: 43
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -63,6 +63,7 @@ Patch50:   listen-thread-of-collect-module-exits-occasionally.patch
 Patch51:   precise-alarm-query-time.patch
 Patch52:   fix-word-error.patch
 Patch53:   optimize-log-printing.patch
+Patch54:   enrich-alert-info-about-kernel-stack.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -325,6 +326,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin*
 
 %changelog
+* Wed Oct 16 2024 heyouzhi <heyouzhi@huawei.com> - 1.0.2-43
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:enrich alert info about kernel stack
+
 * Wed Oct 16 2024 jinsaihang <jinsaihang@h-partners.com> - 1.0.2-42
 - Type:bugfix
 - CVE:NA
