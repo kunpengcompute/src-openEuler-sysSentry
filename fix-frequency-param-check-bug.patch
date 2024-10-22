@@ -1,0 +1,70 @@
+From a06ad0c944b093a71f49cc9fccd5097c1493ca5e Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=E8=B4=BA=E6=9C=89=E5=BF=97?= <1037617413@qq.com>
+Date: Mon, 21 Oct 2024 17:31:32 +0800
+Subject: [PATCH] fix frequency param check bug
+
+---
+ .../sentryPlugins/ai_block_io/config_parser.py     | 13 +++++++++++--
+ .../sentryPlugins/ai_block_io/data_access.py       | 14 ++++++++++++++
+ 2 files changed, 25 insertions(+), 2 deletions(-)
+
+diff --git a/src/python/sentryPlugins/ai_block_io/config_parser.py b/src/python/sentryPlugins/ai_block_io/config_parser.py
+index 447eccd..274a31e 100644
+--- a/src/python/sentryPlugins/ai_block_io/config_parser.py
++++ b/src/python/sentryPlugins/ai_block_io/config_parser.py
+@@ -16,6 +16,7 @@ import logging
+ from .alarm_report import Report
+ from .threshold import ThresholdType
+ from .utils import get_threshold_type_enum, get_sliding_window_type_enum, get_log_level
++from .data_access import check_detect_frequency_is_valid
+ 
+ 
+ LOG_FORMAT = "%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s"
+@@ -165,9 +166,17 @@ class ConfigParser:
+             "slow_io_detect_frequency",
+             int,
+             self.DEFAULT_CONF["common"]["slow_io_detect_frequency"],
+-            gt=0,
+-            le=300,
++            gt=0
+         )
++        frequency = self._conf["common"]["slow_io_detect_frequency"]
++        ret = check_detect_frequency_is_valid(frequency)
++        if ret is None:
++            log = f"slow io detect frequency: {frequency} is valid, "\
++                  f"Check whether the value range is too large or is not an "\
++                  f"integer multiple of period_time.. exiting..."
++            Report.report_pass(log)
++            logging.critical(log)
++            exit(1)
+ 
+     def _read_disks_to_detect(self, items_common: dict):
+         disks_to_detection = items_common.get("disk")
+diff --git a/src/python/sentryPlugins/ai_block_io/data_access.py b/src/python/sentryPlugins/ai_block_io/data_access.py
+index 1bc5ed8..e4869d5 100644
+--- a/src/python/sentryPlugins/ai_block_io/data_access.py
++++ b/src/python/sentryPlugins/ai_block_io/data_access.py
+@@ -53,6 +53,20 @@ def check_collect_valid(period):
+         return None
+ 
+ 
++def check_detect_frequency_is_valid(period):
++    data_raw = is_iocollect_valid(period)
++    if data_raw["ret"] == 0:
++        try:
++            data = json.loads(data_raw["message"])
++        except Exception as e:
++            return None
++        if not data:
++            return None
++        return [k for k in data.keys()]
++    else:
++        return None
++
++
+ def _get_raw_data(period, disk_list):
+     return get_io_data(
+         period,
+-- 
+2.23.0
+
