@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 55
+Release: 56
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -72,6 +72,7 @@ Patch59:   ai_block_io-lack-section-exit.patch
 Patch60:   fix-xalarm-non-uniform-log-formatting.patch 
 Patch61:   update-collect-plugin-period-max.patch
 Patch62:   fix-frequency-param-check-bug.patch
+Patch63:   ai_block_io-support-iodump.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -344,6 +345,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin*
 
 %changelog
+* Tue Oct 22 2024 heyouzhi <heyouzhi@huawei.com> - 1.0.2-56
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DES:ai_block_io support iodump
+
 * Mon Oct 21 2024 heyouzhi <heyouzhi@huawei.com> - 1.0.2-55
 - Type:bugfix
 - CVE:NA
