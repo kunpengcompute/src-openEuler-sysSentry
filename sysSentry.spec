@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 46
+Release: 47
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -67,6 +67,7 @@ Patch54:   enrich-alert-info-about-kernel-stack.patch
 Patch55:   ai_block_io-lack-section-exit.patch
 Patch56:   fix-xalarm-non-uniform-log-formatting.patch
 Patch57:   update-collect-plugin-period-max.patch
+Patch58:   fix-frequency-param-check-bug.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -329,6 +330,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin*
 
 %changelog
+* Tue Oct 22 2024 heyouzhi <heyouzhi@huawei.com> - 1.0.2-47
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DES:fix frequency param check bug
+
 * Mon Oct 21 2024 zhuofeng <zhuofeng2@huawei.com> - 1.0.2-46
 - Type:bugfix
 - CVE:NA
