@@ -1,0 +1,728 @@
+From cedd862d4e4a97a6c4fa13cbff2af452910ea5b4 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=E8=B4=BA=E6=9C=89=E5=BF=97?= <1037617413@qq.com>
+Date: Thu, 24 Oct 2024 09:39:16 +0800
+Subject: [PATCH] ai_block_io support absolute threshold lower limit
+
+---
+ config/plugins/ai_block_io.ini                |  19 +-
+ .../sentryPlugins/ai_block_io/ai_block_io.py  |  36 ++--
+ .../sentryPlugins/ai_block_io/alarm_report.py |  18 +-
+ .../ai_block_io/config_parser.py              | 168 ++++++++++++------
+ .../sentryPlugins/ai_block_io/detector.py     |  92 ++++++----
+ .../ai_block_io/sliding_window.py             |  21 ++-
+ 6 files changed, 222 insertions(+), 132 deletions(-)
+
+diff --git a/config/plugins/ai_block_io.ini b/config/plugins/ai_block_io.ini
+index 040237d..d0b1e74 100644
+--- a/config/plugins/ai_block_io.ini
++++ b/config/plugins/ai_block_io.ini
+@@ -2,9 +2,9 @@
+ level=info
+ 
+ [common]
+-slow_io_detect_frequency=1
++period_time=1
+ disk=default
+-stage=bio
++stage=default
+ iotype=read,write
+ 
+ [algorithm]
+@@ -12,22 +12,25 @@ train_data_duration=24
+ train_update_duration=2
+ algorithm_type=boxplot
+ boxplot_parameter=1.5
+-n_sigma_parameter=3
+-
+-[sliding_window]
+-sliding_window_type=not_continuous
+-window_size=30
+-window_minimum_threshold=6
++win_type=not_continuous
++win_size=30
++win_threshold=6
+ 
+ [latency_sata_ssd]
++read_avg_lim=10000
++write_avg_lim=10000
+ read_tot_lim=50000
+ write_tot_lim=50000
+ 
+ [latency_nvme_ssd]
++read_avg_lim=300
++write_avg_lim=300
+ read_tot_lim=500
+ write_tot_lim=500
+ 
+ [latency_sata_hdd]
++read_avg_lim=15000
++write_avg_lim=15000
+ read_tot_lim=50000
+ write_tot_lim=50000
+ 
+diff --git a/src/python/sentryPlugins/ai_block_io/ai_block_io.py b/src/python/sentryPlugins/ai_block_io/ai_block_io.py
+index f25e6d5..74f246a 100644
+--- a/src/python/sentryPlugins/ai_block_io/ai_block_io.py
++++ b/src/python/sentryPlugins/ai_block_io/ai_block_io.py
+@@ -49,7 +49,7 @@ class SlowIODetection:
+ 
+     def __init_detector_name_list(self):
+         self._disk_list = check_collect_valid(
+-            self._config_parser.slow_io_detect_frequency
++            self._config_parser.period_time
+         )
+         if self._disk_list is None:
+             Report.report_pass(
+@@ -109,7 +109,7 @@ class SlowIODetection:
+         train_data_duration, train_update_duration = (
+             self._config_parser.get_train_data_duration_and_train_update_duration()
+         )
+-        slow_io_detection_frequency = self._config_parser.slow_io_detect_frequency
++        slow_io_detection_frequency = self._config_parser.period_time
+         threshold_type = self._config_parser.algorithm_type
+         data_queue_size, update_size = get_data_queue_size_and_update_size(
+             train_data_duration, train_update_duration, slow_io_detection_frequency
+@@ -131,10 +131,13 @@ class SlowIODetection:
+                         data_queue_size=data_queue_size,
+                         data_queue_update_size=update_size,
+                     )
+-                    abs_threshold = self._config_parser.get_tot_lim(
++                    tot_lim = self._config_parser.get_tot_lim(
+                         metric_name.disk_type, metric_name.io_access_type_name
+                     )
+-                    if abs_threshold is None:
++                    avg_lim = self._config_parser.get_avg_lim(
++                        metric_name.disk_type, metric_name.io_access_type_name
++                    )
++                    if tot_lim is None:
+                         logging.warning(
+                             "disk %s, disk type %s, io type %s, get tot lim error, so it will be ignored.",
+                             disk,
+@@ -145,7 +148,8 @@ class SlowIODetection:
+                         sliding_window_type,
+                         queue_length=window_size,
+                         threshold=window_threshold,
+-                        abs_threshold=abs_threshold,
++                        abs_threshold=tot_lim,
++                        avg_lim=avg_lim
+                     )
+                     detector = Detector(metric_name, threshold, sliding_window)
+                     disk_detector.add_detector(detector)
+@@ -176,7 +180,7 @@ class SlowIODetection:
+ 
+             # Step1：获取IO数据
+             io_data_dict_with_disk_name = get_io_data_from_collect_plug(
+-                self._config_parser.slow_io_detect_frequency, self._disk_list
++                self._config_parser.period_time, self._disk_list
+             )
+             logging.debug(f"step1. Get io data: {str(io_data_dict_with_disk_name)}")
+             if io_data_dict_with_disk_name is None:
+@@ -197,25 +201,21 @@ class SlowIODetection:
+             # Step3：慢IO事件上报
+             logging.debug("step3. Report slow io event to sysSentry.")
+             for slow_io_event in slow_io_event_list:
+-                metric_name: MetricName = slow_io_event[1]
+-                window_info = slow_io_event[2]
+-                root_cause = slow_io_event[3]
+                 alarm_content = {
+-                    "driver_name": f"{metric_name.disk_name}",
+-                    "reason": root_cause,
+-                    "block_stack": f"{metric_name.stage_name}",
+-                    "io_type": f"{metric_name.io_access_type_name}",
++                    "driver_name": slow_io_event[1],
++                    "reason": slow_io_event[2],
++                    "block_stack": slow_io_event[3],
++                    "io_type": slow_io_event[4],
+                     "alarm_source": "ai_block_io",
+-                    "alarm_type": "latency",
+-                    "details": f"disk type: {metric_name.disk_type}, current window: {window_info[1]}, "
+-                               f"ai threshold: {window_info[2]}, abs threshold: {window_info[3]}.",
++                    "alarm_type": slow_io_event[5],
++                    "details": slow_io_event[6],
+                 }
+                 Xalarm.major(alarm_content)
+-                logging.warning(alarm_content)
++                logging.warning("[SLOW IO] " + str(alarm_content))
+ 
+             # Step4：等待检测时间
+             logging.debug("step4. Wait to start next slow io event detection loop.")
+-            time.sleep(self._config_parser.slow_io_detect_frequency)
++            time.sleep(self._config_parser.period_time)
+ 
+ 
+ def main():
+diff --git a/src/python/sentryPlugins/ai_block_io/alarm_report.py b/src/python/sentryPlugins/ai_block_io/alarm_report.py
+index 92bd6e3..61bb145 100644
+--- a/src/python/sentryPlugins/ai_block_io/alarm_report.py
++++ b/src/python/sentryPlugins/ai_block_io/alarm_report.py
+@@ -30,17 +30,17 @@ class Report:
+     @staticmethod
+     def report_pass(info: str):
+         report_result(Report.TASK_NAME, ResultLevel.PASS, json.dumps({"msg": info}))
+-        logging.info(f'Report {Report.TASK_NAME} PASS: {info}')
++        logging.debug(f'Report {Report.TASK_NAME} PASS: {info}')
+ 
+     @staticmethod
+     def report_fail(info: str):
+         report_result(Report.TASK_NAME, ResultLevel.FAIL, json.dumps({"msg": info}))
+-        logging.info(f'Report {Report.TASK_NAME} FAIL: {info}')
++        logging.debug(f'Report {Report.TASK_NAME} FAIL: {info}')
+ 
+     @staticmethod
+     def report_skip(info: str):
+         report_result(Report.TASK_NAME, ResultLevel.SKIP, json.dumps({"msg": info}))
+-        logging.info(f'Report {Report.TASK_NAME} SKIP: {info}')
++        logging.debug(f'Report {Report.TASK_NAME} SKIP: {info}')
+ 
+ 
+ class Xalarm:
+@@ -50,31 +50,31 @@ class Xalarm:
+     def minor(info: dict):
+         info_str = json.dumps(info)
+         xalarm_report(Xalarm.ALARM_ID, MINOR_ALM, ALARM_TYPE_OCCUR, info_str)
+-        logging.info(f"Report {Xalarm.ALARM_ID} MINOR_ALM: {info_str}")
++        logging.debug(f"Report {Xalarm.ALARM_ID} MINOR_ALM: {info_str}")
+ 
+     @staticmethod
+     def major(info: dict):
+         info_str = json.dumps(info)
+         xalarm_report(Xalarm.ALARM_ID, MAJOR_ALM, ALARM_TYPE_OCCUR, info_str)
+-        logging.info(f"Report {Xalarm.ALARM_ID} MAJOR_ALM: {info_str}")
++        logging.debug(f"Report {Xalarm.ALARM_ID} MAJOR_ALM: {info_str}")
+ 
+     @staticmethod
+     def critical(info: dict):
+         info_str = json.dumps(info)
+         xalarm_report(Xalarm.ALARM_ID, CRITICAL_ALM, ALARM_TYPE_OCCUR, info_str)
+-        logging.info(f"Report {Xalarm.ALARM_ID} CRITICAL_ALM: {info_str}")
++        logging.debug(f"Report {Xalarm.ALARM_ID} CRITICAL_ALM: {info_str}")
+ 
+     def minor_recover(info: dict):
+         info_str = json.dumps(info)
+         xalarm_report(Xalarm.ALARM_ID, MINOR_ALM, ALARM_TYPE_RECOVER, info_str)
+-        logging.info(f"Report {Xalarm.ALARM_ID} MINOR_ALM Recover: {info_str}")
++        logging.debug(f"Report {Xalarm.ALARM_ID} MINOR_ALM Recover: {info_str}")
+ 
+     def major_recover(info: dict):
+         info_str = json.dumps(info)
+         xalarm_report(Xalarm.ALARM_ID, MAJOR_ALM, ALARM_TYPE_RECOVER, info_str)
+-        logging.info(f"Report {Xalarm.ALARM_ID} MAJOR_ALM Recover: {info_str}")
++        logging.debug(f"Report {Xalarm.ALARM_ID} MAJOR_ALM Recover: {info_str}")
+ 
+     def critical_recover(info: dict):
+         info_str = json.dumps(info)
+         xalarm_report(Xalarm.ALARM_ID, CRITICAL_ALM, ALARM_TYPE_RECOVER, info_str)
+-        logging.info(f"Report {Xalarm.ALARM_ID} CRITICAL_ALM Recover: {info_str}")
++        logging.debug(f"Report {Xalarm.ALARM_ID} CRITICAL_ALM Recover: {info_str}")
+diff --git a/src/python/sentryPlugins/ai_block_io/config_parser.py b/src/python/sentryPlugins/ai_block_io/config_parser.py
+index 1117939..91ec5c6 100644
+--- a/src/python/sentryPlugins/ai_block_io/config_parser.py
++++ b/src/python/sentryPlugins/ai_block_io/config_parser.py
+@@ -52,7 +52,7 @@ class ConfigParser:
+     DEFAULT_CONF = {
+         "log": {"level": "info"},
+         "common": {
+-            "slow_io_detect_frequency": 1,
++            "period_time": 1,
+             "disk": None,
+             "stage": "throtl,wbt,gettag,plug,deadline,hctx,requeue,rq_driver,bio",
+             "iotype": "read,write",
+@@ -63,16 +63,32 @@ class ConfigParser:
+             "algorithm_type": get_threshold_type_enum("boxplot"),
+             "boxplot_parameter": 1.5,
+             "n_sigma_parameter": 3.0,
++            "win_type": get_sliding_window_type_enum("not_continuous"),
++            "win_size": 30,
++            "win_threshold": 6,
+         },
+-        "sliding_window": {
+-            "sliding_window_type": get_sliding_window_type_enum("not_continuous"),
+-            "window_size": 30,
+-            "window_minimum_threshold": 6,
++        "latency_sata_ssd": {
++            "read_avg_lim": 10000,
++            "write_avg_lim": 10000,
++            "read_tot_lim": 50000,
++            "write_tot_lim": 50000
+         },
+-        "latency_sata_ssd": {"read_tot_lim": 50000, "write_tot_lim": 50000},
+-        "latency_nvme_ssd": {"read_tot_lim": 500, "write_tot_lim": 500},
+-        "latency_sata_hdd": {"read_tot_lim": 50000, "write_tot_lim": 50000},
+-        "iodump": {"read_iodump_lim": 0, "write_iodump_lim": 0}
++        "latency_nvme_ssd": {
++            "read_avg_lim": 300,
++            "write_avg_lim": 300,
++            "read_tot_lim": 500,
++            "write_tot_lim": 500
++        },
++        "latency_sata_hdd": {
++            "read_avg_lim": 15000,
++            "write_avg_lim": 15000,
++            "read_tot_lim": 50000,
++            "write_tot_lim": 50000
++        },
++        "iodump": {
++            "read_iodump_lim": 0,
++            "write_iodump_lim": 0
++        }
+     }
+ 
+     def __init__(self, config_file_name):
+@@ -161,18 +177,18 @@ class ConfigParser:
+ 
+         return value
+ 
+-    def _read_slow_io_detect_frequency(self, items_common: dict):
+-        self._conf["common"]["slow_io_detect_frequency"] = self._get_config_value(
++    def _read_period_time(self, items_common: dict):
++        self._conf["common"]["period_time"] = self._get_config_value(
+             items_common,
+-            "slow_io_detect_frequency",
++            "period_time",
+             int,
+-            self.DEFAULT_CONF["common"]["slow_io_detect_frequency"],
++            self.DEFAULT_CONF["common"]["period_time"],
+             gt=0
+         )
+-        frequency = self._conf["common"]["slow_io_detect_frequency"]
++        frequency = self._conf["common"]["period_time"]
+         ret = check_detect_frequency_is_valid(frequency)
+         if ret is None:
+-            log = f"slow io detect frequency: {frequency} is valid, "\
++            log = f"period_time: {frequency} is valid, "\
+                   f"Check whether the value range is too large or is not an "\
+                   f"integer multiple of period_time.. exiting..."
+             Report.report_pass(log)
+@@ -316,50 +332,41 @@ class ConfigParser:
+         self._conf["common"]["iotype"] = dup_iotype_list
+ 
+     def _read_sliding_window_type(self, items_sliding_window: dict):
+-        sliding_window_type = items_sliding_window.get("sliding_window_type")
++        sliding_window_type = items_sliding_window.get("win_type")
+         if sliding_window_type is not None:
+-            self._conf["sliding_window"]["sliding_window_type"] = (
++            self._conf["algorithm"]["win_type"] = (
+                 get_sliding_window_type_enum(sliding_window_type)
+             )
+-        if self._conf["sliding_window"]["sliding_window_type"] is None:
++        if self._conf["algorithm"]["win_type"] is None:
+             logging.critical(
+-                "the sliding_window_type: %s you set is invalid. ai_block_io plug will exit.",
++                "the win_type: %s you set is invalid. ai_block_io plug will exit.",
+                 sliding_window_type,
+             )
+             Report.report_pass(
+-                f"the sliding_window_type: {sliding_window_type} you set is invalid. ai_block_io plug will exit."
++                f"the win_type: {sliding_window_type} you set is invalid. ai_block_io plug will exit."
+             )
+             exit(1)
+ 
+     def _read_window_size(self, items_sliding_window: dict):
+-        self._conf["sliding_window"]["window_size"] = self._get_config_value(
++        self._conf["algorithm"]["win_size"] = self._get_config_value(
+             items_sliding_window,
+-            "window_size",
++            "win_size",
+             int,
+-            self.DEFAULT_CONF["sliding_window"]["window_size"],
++            self.DEFAULT_CONF["algorithm"]["win_size"],
+             gt=0,
+-            le=3600,
++            le=300,
+         )
+ 
+     def _read_window_minimum_threshold(self, items_sliding_window: dict):
+-        default_window_minimum_threshold = self.DEFAULT_CONF["sliding_window"][
+-            "window_minimum_threshold"
+-        ]
+-        if (
+-            default_window_minimum_threshold
+-            > self._conf["sliding_window"]["window_size"]
+-        ):
+-            default_window_minimum_threshold = (
+-                self._conf["sliding_window"]["window_size"] / 2
+-            )
+-        self._conf["sliding_window"]["window_minimum_threshold"] = (
++        default_window_minimum_threshold = self.DEFAULT_CONF["algorithm"]["win_threshold"]
++        self._conf["algorithm"]["win_threshold"] = (
+             self._get_config_value(
+                 items_sliding_window,
+-                "window_minimum_threshold",
++                "win_threshold",
+                 int,
+                 default_window_minimum_threshold,
+                 gt=0,
+-                le=self._conf["sliding_window"]["window_size"],
++                le=self._conf["algorithm"]["win_size"],
+             )
+         )
+ 
+@@ -406,7 +413,7 @@ class ConfigParser:
+         if con.has_section("common"):
+             items_common = dict(con.items("common"))
+ 
+-            self._read_slow_io_detect_frequency(items_common)
++            self._read_period_time(items_common)
+             self._read_disks_to_detect(items_common)
+             self._read_stage(items_common)
+             self._read_iotype(items_common)
+@@ -420,20 +427,9 @@ class ConfigParser:
+             self._read_train_data_duration(items_algorithm)
+             self._read_train_update_duration(items_algorithm)
+             self._read_algorithm_type_and_parameter(items_algorithm)
+-        else:
+-            Report.report_pass("not found algorithm section. exiting...")
+-            logging.critical("not found algorithm section. exiting...")
+-            exit(1)
+-
+-        if con.has_section("sliding_window"):
+-            items_sliding_window = dict(con.items("sliding_window"))
+-
+-            self._read_window_size(items_sliding_window)
+-            self._read_window_minimum_threshold(items_sliding_window)
+-        else:
+-            Report.report_pass("not found sliding_window section. exiting...")
+-            logging.critical("not found sliding_window section. exiting...")
+-            exit(1)
++            self._read_sliding_window_type(items_algorithm)
++            self._read_window_size(items_algorithm)
++            self._read_window_minimum_threshold(items_algorithm)
+ 
+         if con.has_section("latency_sata_ssd"):
+             items_latency_sata_ssd = dict(con.items("latency_sata_ssd"))
+@@ -451,6 +447,20 @@ class ConfigParser:
+                 self.DEFAULT_CONF["latency_sata_ssd"]["write_tot_lim"],
+                 gt=0,
+             )
++            self._conf["latency_sata_ssd"]["read_avg_lim"] = self._get_config_value(
++                items_latency_sata_ssd,
++                "read_avg_lim",
++                int,
++                self.DEFAULT_CONF["latency_sata_ssd"]["read_avg_lim"],
++                gt=0
++            )
++            self._conf["latency_sata_ssd"]["write_avg_lim"] = self._get_config_value(
++                items_latency_sata_ssd,
++                "write_avg_lim",
++                int,
++                self.DEFAULT_CONF["latency_sata_ssd"]["write_avg_lim"],
++                gt=0
++            )
+         else:
+             Report.report_pass("not found latency_sata_ssd section. exiting...")
+             logging.critical("not found latency_sata_ssd section. exiting...")
+@@ -472,6 +482,20 @@ class ConfigParser:
+                 self.DEFAULT_CONF["latency_nvme_ssd"]["write_tot_lim"],
+                 gt=0,
+             )
++            self._conf["latency_nvme_ssd"]["read_avg_lim"] = self._get_config_value(
++                items_latency_nvme_ssd,
++                "read_avg_lim",
++                int,
++                self.DEFAULT_CONF["latency_nvme_ssd"]["read_avg_lim"],
++                gt=0
++            )
++            self._conf["latency_nvme_ssd"]["write_avg_lim"] = self._get_config_value(
++                items_latency_nvme_ssd,
++                "write_avg_lim",
++                int,
++                self.DEFAULT_CONF["latency_nvme_ssd"]["write_avg_lim"],
++                gt=0
++            )
+         else:
+             Report.report_pass("not found latency_nvme_ssd section. exiting...")
+             logging.critical("not found latency_nvme_ssd section. exiting...")
+@@ -493,6 +517,20 @@ class ConfigParser:
+                 self.DEFAULT_CONF["latency_sata_hdd"]["write_tot_lim"],
+                 gt=0,
+             )
++            self._conf["latency_sata_hdd"]["read_avg_lim"] = self._get_config_value(
++                items_latency_sata_hdd,
++                "read_avg_lim",
++                int,
++                self.DEFAULT_CONF["latency_sata_hdd"]["read_avg_lim"],
++                gt=0
++            )
++            self._conf["latency_sata_hdd"]["write_avg_lim"] = self._get_config_value(
++                items_latency_sata_hdd,
++                "write_avg_lim",
++                int,
++                self.DEFAULT_CONF["latency_sata_hdd"]["write_avg_lim"],
++                gt=0
++            )
+         else:
+             Report.report_pass("not found latency_sata_hdd section. exiting...")
+             logging.critical("not found latency_sata_hdd section. exiting...")
+@@ -542,6 +580,18 @@ class ConfigParser:
+         else:
+             return None
+ 
++    def get_avg_lim(self, disk_type, io_type):
++        if io_type == "read":
++            return self._conf.get(
++                f"latency_{DISK_TYPE_MAP.get(disk_type, '')}", {}
++            ).get("read_avg_lim", None)
++        elif io_type == "write":
++            return self._conf.get(
++                f"latency_{DISK_TYPE_MAP.get(disk_type, '')}", {}
++            ).get("write_avg_lim", None)
++        else:
++            return None
++
+     def get_train_data_duration_and_train_update_duration(self):
+         return (
+             self._conf["algorithm"]["train_data_duration"],
+@@ -550,13 +600,13 @@ class ConfigParser:
+ 
+     def get_window_size_and_window_minimum_threshold(self):
+         return (
+-            self._conf["sliding_window"]["window_size"],
+-            self._conf["sliding_window"]["window_minimum_threshold"],
++            self._conf["algorithm"]["win_size"],
++            self._conf["algorithm"]["win_threshold"],
+         )
+ 
+     @property
+-    def slow_io_detect_frequency(self):
+-        return self._conf["common"]["slow_io_detect_frequency"]
++    def period_time(self):
++        return self._conf["common"]["period_time"]
+ 
+     @property
+     def algorithm_type(self):
+@@ -564,7 +614,7 @@ class ConfigParser:
+ 
+     @property
+     def sliding_window_type(self):
+-        return self._conf["sliding_window"]["sliding_window_type"]
++        return self._conf["algorithm"]["win_type"]
+ 
+     @property
+     def train_data_duration(self):
+@@ -576,11 +626,11 @@ class ConfigParser:
+ 
+     @property
+     def window_size(self):
+-        return self._conf["sliding_window"]["window_size"]
++        return self._conf["algorithm"]["win_size"]
+ 
+     @property
+     def window_minimum_threshold(self):
+-        return self._conf["sliding_window"]["window_minimum_threshold"]
++        return self._conf["algorithm"]["win_threshold"]
+ 
+     @property
+     def absolute_threshold(self):
+diff --git a/src/python/sentryPlugins/ai_block_io/detector.py b/src/python/sentryPlugins/ai_block_io/detector.py
+index 8536f7a..e3a0952 100644
+--- a/src/python/sentryPlugins/ai_block_io/detector.py
++++ b/src/python/sentryPlugins/ai_block_io/detector.py
+@@ -28,9 +28,13 @@ class Detector:
+         self._threshold.attach_observer(self._slidingWindow)
+         self._count = None
+ 
+-    def get_metric_name(self):
++    @property
++    def metric_name(self):
+         return self._metric_name
+ 
++    def get_sliding_window_data(self):
++        return self._slidingWindow.get_data()
++
+     def is_slow_io_event(self, io_data_dict_with_disk_name: dict):
+         if self._count is None:
+             self._count = datetime.now()
+@@ -38,22 +42,27 @@ class Detector:
+             now_time = datetime.now()
+             time_diff = (now_time - self._count).total_seconds()
+             if time_diff >= 60:
+-                logging.info(f"({self._metric_name}) 's latest threshold is: {self._threshold.get_threshold()}.")
++                logging.info(f"({self._metric_name}) 's latest ai threshold is: {self._threshold.get_threshold()}.")
+                 self._count = None
+ 
+         logging.debug(f'enter Detector: {self}')
+         metric_value = get_metric_value_from_io_data_dict_by_metric_name(io_data_dict_with_disk_name, self._metric_name)
+         if metric_value is None:
+             logging.debug('not found metric value, so return None.')
+-            return (False, False), None, None, None
++            return (False, False), None, None, None, None
+         logging.debug(f'input metric value: {str(metric_value)}')
+         self._threshold.push_latest_data_to_queue(metric_value)
+         detection_result = self._slidingWindow.is_slow_io_event(metric_value)
+         # 检测到慢周期，由Detector负责打印info级别日志
+         if detection_result[0][1]:
+-            logging.info(f'[abnormal period happen]: disk info: {self._metric_name}, window: {detection_result[1]}, '
+-                         f'current value: {metric_value}, ai threshold: {detection_result[2]}, '
+-                         f'absolute threshold: {detection_result[3]}')
++            logging.info(f'[abnormal_period]: disk: {self._metric_name.disk_name}, '
++                         f'stage: {self._metric_name.stage_name}, '
++                         f'iotype: {self._metric_name.io_access_type_name}, '
++                         f'metric: {self._metric_name.metric_name}, '
++                         f'current value: {metric_value}, '
++                         f'ai threshold: {detection_result[2]}, '
++                         f'absolute threshold upper limit: {detection_result[3]}, '
++                         f'lower limit: {detection_result[4]}')
+         else:
+             logging.debug(f'Detection result: {str(detection_result)}')
+         logging.debug(f'exit Detector: {self}')
+@@ -75,41 +84,60 @@ class DiskDetector:
+     def add_detector(self, detector: Detector):
+         self._detector_list.append(detector)
+ 
++    def get_detector_list_window(self):
++        latency_wins = {"read": {}, "write": {}}
++        iodump_wins = {"read": {}, "write": {}}
++        for detector in self._detector_list:
++            if detector.metric_name.metric_name == 'latency':
++                latency_wins[detector.metric_name.io_access_type_name][detector.metric_name.stage_name] = detector.get_sliding_window_data()
++            elif detector.metric_name.metric_name == 'io_dump':
++                iodump_wins[detector.metric_name.io_access_type_name][detector.metric_name.stage_name] = detector.get_sliding_window_data()
++        return latency_wins, iodump_wins
++
+     def is_slow_io_event(self, io_data_dict_with_disk_name: dict):
+-        """
+-        根因诊断逻辑：只有bio阶段发生异常，才认为发生了慢IO事件，即bio阶段异常是慢IO事件的必要条件
+-        情况一：bio异常，rq_driver也异常，则慢盘
+-        情况二：bio异常，rq_driver无异常，且有内核IO栈任意阶段异常，则IO栈异常
+-        情况三：bio异常，rq_driver无异常，且无内核IO栈任意阶段异常，则IO压力大
+-        情况四：bio异常，则UNKNOWN
+-        """
+-        diagnosis_info = {"bio": [], "rq_driver": [], "io_stage": []}
++        diagnosis_info = {"bio": [], "rq_driver": [], "kernel_stack": []}
+         for detector in self._detector_list:
+             # result返回内容：(是否检测到慢IO，是否检测到慢周期)、窗口、ai阈值、绝对阈值
+             # 示例： (False, False), self._io_data_queue, self._ai_threshold, self._abs_threshold
+             result = detector.is_slow_io_event(io_data_dict_with_disk_name)
+             if result[0][0]:
+-                if detector.get_metric_name().stage_name == "bio":
+-                    diagnosis_info["bio"].append((detector.get_metric_name(), result))
+-                elif detector.get_metric_name().stage_name == "rq_driver":
+-                    diagnosis_info["rq_driver"].append((detector.get_metric_name(), result))
++                if detector.metric_name.stage_name == "bio":
++                    diagnosis_info["bio"].append(detector.metric_name)
++                elif detector.metric_name.stage_name == "rq_driver":
++                    diagnosis_info["rq_driver"].append(detector.metric_name)
+                 else:
+-                    diagnosis_info["io_stage"].append((detector.get_metric_name(), result))
++                    diagnosis_info["kernel_stack"].append(detector.metric_name)
+ 
+-        # 返回内容：（1）是否检测到慢IO事件、（2）MetricName、（3）滑动窗口及阈值、（4）慢IO事件根因
+-        root_cause = None
+         if len(diagnosis_info["bio"]) == 0:
+-            return False, None, None, None
+-        elif len(diagnosis_info["rq_driver"]) != 0:
+-            root_cause = "[Root Cause: disk slow]"
+-        elif len(diagnosis_info["io_stage"]) != 0:
+-            stage_list = []
+-            for io_stage in diagnosis_info["io_stage"]:
+-                stage_list.append(io_stage[0].stage_name)
+-            root_cause = f"[Root Cause: io stage slow, stage: {stage_list}]"
+-        if root_cause is None:
+-            root_cause = "[Root Cause: high io pressure]"
+-        return True, diagnosis_info["bio"][0][0], diagnosis_info["bio"][0][1], root_cause
++            return False, None, None, None, None, None, None
++
++        driver_name = self._disk_name
++        reason = "unknown"
++        block_stack = set()
++        io_type = set()
++        alarm_type = set()
++
++        for key, value in diagnosis_info.items():
++            for metric_name in value:
++                block_stack.add(metric_name.stage_name)
++                io_type.add(metric_name.io_access_type_name)
++                alarm_type.add(metric_name.metric_name)
++
++        latency_wins, iodump_wins = self.get_detector_list_window()
++        details = f"latency: {latency_wins}, iodump: {iodump_wins}"
++
++        io_press = {"throtl", "wbt", "iocost", "bfq"}
++        driver_slow = {"rq_driver"}
++        kernel_slow = {"gettag", "plug", "deadline", "hctx", "requeue"}
++
++        if not io_press.isdisjoint(block_stack):
++            reason = "io_press"
++        elif not driver_slow.isdisjoint(block_stack):
++            reason = "driver_slow"
++        elif not kernel_slow.isdisjoint(block_stack):
++            reason = "kernel_slow"
++
++        return True, driver_name, reason, str(block_stack), str(io_type), str(alarm_type), details
+ 
+     def __repr__(self):
+         msg = f'disk: {self._disk_name}, '
+diff --git a/src/python/sentryPlugins/ai_block_io/sliding_window.py b/src/python/sentryPlugins/ai_block_io/sliding_window.py
+index cebe41f..4083c43 100644
+--- a/src/python/sentryPlugins/ai_block_io/sliding_window.py
++++ b/src/python/sentryPlugins/ai_block_io/sliding_window.py
+@@ -21,11 +21,12 @@ class SlidingWindowType(Enum):
+ 
+ 
+ class SlidingWindow:
+-    def __init__(self, queue_length: int, threshold: int, abs_threshold: int = None):
++    def __init__(self, queue_length: int, threshold: int, abs_threshold: int = None, avg_lim: int = None):
+         self._queue_length = queue_length
+         self._queue_threshold = threshold
+         self._ai_threshold = None
+         self._abs_threshold = abs_threshold
++        self._avg_lim = avg_lim
+         self._io_data_queue = []
+         self._io_data_queue_abnormal_tag = []
+ 
+@@ -35,8 +36,13 @@ class SlidingWindow:
+             self._io_data_queue_abnormal_tag.pop(0)
+         self._io_data_queue.append(data)
+         tag = False
+-        if ((self._ai_threshold is not None and data > self._ai_threshold) or
+-                (self._abs_threshold is not None and data > self._abs_threshold)):
++        if self._avg_lim is not None and data < self._avg_lim:
++            tag = False
++            self._io_data_queue_abnormal_tag.append(tag)
++            return tag
++        if self._ai_threshold is not None and data > self._ai_threshold:
++            tag = True
++        if self._abs_threshold is not None and data > self._abs_threshold:
+             tag = True
+         self._io_data_queue_abnormal_tag.append(tag)
+         return tag
+@@ -52,6 +58,9 @@ class SlidingWindow:
+     def is_slow_io_event(self, data):
+         return False, None, None, None
+ 
++    def get_data(self):
++        return self._io_data_queue
++
+     def __repr__(self):
+         return "[SlidingWindow]"
+ 
+@@ -64,7 +73,7 @@ class NotContinuousSlidingWindow(SlidingWindow):
+             is_slow_io_event = False
+         if self._io_data_queue_abnormal_tag.count(True) >= self._queue_threshold:
+             is_slow_io_event = True
+-        return (is_slow_io_event, is_abnormal_period), self._io_data_queue, self._ai_threshold, self._abs_threshold
++        return (is_slow_io_event, is_abnormal_period), self._io_data_queue, self._ai_threshold, self._abs_threshold, self._avg_lim
+ 
+     def __repr__(self):
+         return f"[NotContinuousSlidingWindow, window size: {self._queue_length}, threshold: {self._queue_threshold}]"
+@@ -85,7 +94,7 @@ class ContinuousSlidingWindow(SlidingWindow):
+                     break
+             else:
+                 consecutive_count = 0
+-        return (is_slow_io_event, is_abnormal_period), self._io_data_queue, self._ai_threshold, self._abs_threshold
++        return (is_slow_io_event, is_abnormal_period), self._io_data_queue, self._ai_threshold, self._abs_threshold, self._avg_lim
+ 
+     def __repr__(self):
+         return f"[ContinuousSlidingWindow, window size: {self._queue_length}, threshold: {self._queue_threshold}]"
+@@ -100,7 +109,7 @@ class MedianSlidingWindow(SlidingWindow):
+         median = np.median(self._io_data_queue)
+         if median >= self._ai_threshold:
+             is_slow_io_event = True
+-        return (is_slow_io_event, is_abnormal_period), self._io_data_queue, self._ai_threshold, self._abs_threshold
++        return (is_slow_io_event, is_abnormal_period), self._io_data_queue, self._ai_threshold, self._abs_threshold, self._avg_lim
+ 
+     def __repr__(self):
+         return f"[MedianSlidingWindow, window size: {self._queue_length}]"
+-- 
+2.23.0
+
