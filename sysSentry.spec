@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 15
+Release: 16
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -26,6 +26,7 @@ Patch13:   optimize-the-handing-of-cat-cli-error-msg-in-cpu_sentry.patch
 Patch14:   over-threshold-should-be-warn-level-log-in-cat-cli.patch
 Patch15:   add-separator-to-err-info.patch
 Patch16:   remove-threshold-max-cpu-cores.patch
+Patch17:   add-hbm-online-repair.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -62,6 +63,16 @@ Recommends:     ipmitool
 %description -n cpu_sentry
 This package provides CPU fault detection
 
+%package -n hbm_online_repair
+Summary:        hbm_online_repair for the sysSentry
+Provides:       hbm_online_repair = %{version}
+BuildRequires:  libtraceevent-devel
+Requires:       libtraceevent ipmitool
+Requires:       sysSentry = %{version}-%{release}
+
+%description -n hbm_online_repair
+This package provides hbm_online_repair for the sysSentry.
+
 %prep
 %autosetup -n %{name}-%{version} -p1
 
@@ -79,6 +90,11 @@ cmake -B ./build/ -S . -D CMAKE_INSTALL_PREFIX=/usr/local -D CMAKE_BUILD_TYPE=Re
 pushd build
 make
 popd
+popd
+
+# hbm_online_repair
+pushd src/c/hbm_online_repair
+make
 popd
 
 %install
@@ -108,6 +124,12 @@ install config/tasks/cpu_sentry.mod %{buildroot}/etc/sysSentry/tasks/
 install config/plugins/cpu_sentry.ini %{buildroot}/etc/sysSentry/plugins/cpu_sentry.ini
 install src/c/catcli/catlib/build/cat-cli %{buildroot}%{_bindir}/cat-cli
 install src/c/catcli/catlib/build/plugin/cpu_patrol/libcpu_patrol.so %{buildroot}%{_libdir}
+
+# hbm_online_repair
+mkdir -p %{buildroot}/etc/sysconfig/
+install config/tasks/hbm_online_repair.mod %{buildroot}/etc/sysSentry/tasks/
+install src/c/hbm_online_repair/hbm_online_repair %{buildroot}%{_bindir}
+install src/c/hbm_online_repair/hbm_online_repair.env %{buildroot}/etc/sysconfig/hbm_online_repair.env
 
 chrpath -d %{buildroot}%{_bindir}/cat-cli
 chrpath -d %{buildroot}%{_libdir}/libcpu_patrol.so
@@ -166,6 +188,11 @@ rm -rf %{buildroot}
 %exclude %{python3_sitelib}/syssentry/cpu_*
 %exclude %{python3_sitelib}/syssentry/*/cpu_*
 
+# hbm repair module
+%exclude %{_sysconfdir}/sysSentry/tasks/hbm_online_repair.mod
+%exclude %{python3_sitelib}/syssentry/bmc_*
+%exclude %{python3_sitelib}/syssentry/*/bmc_*
+
 %files -n libxalarm
 %attr(0550,root,root) %{_libdir}/libxalarm.so
 
@@ -182,7 +209,19 @@ rm -rf %{buildroot}
 %attr(0600,root,root) %{_sysconfdir}/sysSentry/plugins/cpu_sentry.ini
 %attr(0550,root,root) %{python3_sitelib}/syssentry/cpu_*
 
+%files -n hbm_online_repair
+%attr(0550,root,root) %{_bindir}/hbm_online_repair
+%attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysconfig/hbm_online_repair.env
+%attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/hbm_online_repair.mod
+%attr(0550,root,root) %{python3_sitelib}/syssentry/bmc_alarm.py
+
 %changelog
+* Mon Oct 21 2024 luckky <guodashun1@huawei.com> - 1.0.2-16
+- Type:requirement
+- CVE:NA
+- SUG:NA
+- DESC:add hbm_online_repair
+
 * Wed Sep 25 2024 shixuantong <shixuantong1@huawei.com> - 1.0.2-15
 - Type:bugfix
 - CVE:NA
