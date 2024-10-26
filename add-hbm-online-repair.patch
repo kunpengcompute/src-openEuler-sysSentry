@@ -1,0 +1,2194 @@
+From abdeacfa6ae54b503714cb98f3262a39d883972e Mon Sep 17 00:00:00 2001
+From: luckky <guodashun1@huawei.com>
+Date: Fri, 11 Oct 2024 09:49:40 +0000
+Subject: [PATCH] add hbm online repair
+
+---
+ config/tasks/hbm_online_repair.mod            |   9 +
+ src/c/hbm_online_repair/.gitignore            |   6 +
+ src/c/hbm_online_repair/Makefile              |  25 +
+ src/c/hbm_online_repair/hbm_online_repair.c   | 144 ++++
+ src/c/hbm_online_repair/hbm_online_repair.env |   2 +
+ src/c/hbm_online_repair/logger.h              |  31 +
+ .../non-standard-hbm-repair.c                 | 799 ++++++++++++++++++
+ .../non-standard-hbm-repair.h                 |  89 ++
+ src/c/hbm_online_repair/ras-events.c          | 534 ++++++++++++
+ src/c/hbm_online_repair/ras-events.h          |  28 +
+ .../ras-non-standard-handler.c                |  81 ++
+ .../ras-non-standard-handler.h                |  25 +
+ src/python/.gitignore                         |   1 +
+ src/python/syssentry/bmc_alarm.py             | 159 ++++
+ src/python/syssentry/syssentry.py             |  78 +-
+ 15 files changed, 2001 insertions(+), 10 deletions(-)
+ create mode 100644 config/tasks/hbm_online_repair.mod
+ create mode 100644 src/c/hbm_online_repair/.gitignore
+ create mode 100644 src/c/hbm_online_repair/Makefile
+ create mode 100644 src/c/hbm_online_repair/hbm_online_repair.c
+ create mode 100644 src/c/hbm_online_repair/hbm_online_repair.env
+ create mode 100644 src/c/hbm_online_repair/logger.h
+ create mode 100644 src/c/hbm_online_repair/non-standard-hbm-repair.c
+ create mode 100644 src/c/hbm_online_repair/non-standard-hbm-repair.h
+ create mode 100644 src/c/hbm_online_repair/ras-events.c
+ create mode 100644 src/c/hbm_online_repair/ras-events.h
+ create mode 100644 src/c/hbm_online_repair/ras-non-standard-handler.c
+ create mode 100644 src/c/hbm_online_repair/ras-non-standard-handler.h
+ create mode 100644 src/python/.gitignore
+ create mode 100644 src/python/syssentry/bmc_alarm.py
+
+diff --git a/config/tasks/hbm_online_repair.mod b/config/tasks/hbm_online_repair.mod
+new file mode 100644
+index 0000000..77dd73e
+--- /dev/null
++++ b/config/tasks/hbm_online_repair.mod
+@@ -0,0 +1,9 @@
++[common]
++enabled=yes
++task_start=/usr/bin/hbm_online_repair
++task_stop=kill $pid
++type=period
++interval=180
++onstart=yes
++env_file=/etc/sysconfig/hbm_online_repair.env
++conflict=up
+\ No newline at end of file
+diff --git a/src/c/hbm_online_repair/.gitignore b/src/c/hbm_online_repair/.gitignore
+new file mode 100644
+index 0000000..a577882
+--- /dev/null
++++ b/src/c/hbm_online_repair/.gitignore
+@@ -0,0 +1,6 @@
++*.o
++*.c~
++*.h~
++hbm_online_repair
++
++.vscode/
+diff --git a/src/c/hbm_online_repair/Makefile b/src/c/hbm_online_repair/Makefile
+new file mode 100644
+index 0000000..16ebcd8
+--- /dev/null
++++ b/src/c/hbm_online_repair/Makefile
+@@ -0,0 +1,25 @@
++CC = gcc
++
++CFLAGS = -Wall -o3
++
++LDFLAGS = -ltraceevent
++
++SRC = $(wildcard *.c)
++HDR = $(wildcard *.h)
++
++OBJ = $(SRC:.c=.o)
++
++TARGET = hbm_online_repair
++
++all: $(TARGET)
++
++$(TARGET): $(OBJ)
++	$(CC) $(OBJ) -o $@ $(LDFLAGS)
++
++%.o: %.c $(HDR)
++	$(CC) $(CFLAGS) -c $< -o $@
++
++clean:
++	rm -f $(OBJ) $(TARGET)
++
++.PHONY: all clean
+diff --git a/src/c/hbm_online_repair/hbm_online_repair.c b/src/c/hbm_online_repair/hbm_online_repair.c
+new file mode 100644
+index 0000000..3ace206
+--- /dev/null
++++ b/src/c/hbm_online_repair/hbm_online_repair.c
+@@ -0,0 +1,144 @@
++#include <argp.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++
++#include "logger.h"
++#include "ras-events.h"
++#include "non-standard-hbm-repair.h"
++
++#define DEFAULT_LOG_LEVEL LOG_INFO
++#define DEFAULT_PAGE_ISOLATION_THRESHOLD 128
++
++int global_level_setting;
++int page_isolation_threshold;
++
++int string2int(const char* str, int* value)
++{
++    if (!str) {
++        return -1;
++    }
++    char *endptr;
++    errno = 0;
++    long val = strtol(str, &endptr, 10);
++    if (errno != 0 || *endptr != '\0') {
++        return -1;
++    }
++    *value = (int)val;
++    if (val != (long)*value) {
++        return -1;
++    }
++    return 0;
++}
++
++int execute_command(const char *command)
++{
++    FILE *fp;
++    char buffer[128] = {0};
++    int ret;
++    fp = popen(command, "r");
++    if (!fp) {
++        log(LOG_ERROR, "popen failed\n");
++        return -1;
++    }
++
++    fgets(buffer, sizeof(buffer), fp);
++    log(LOG_DEBUG, "output of command is: %s\n", buffer);
++
++    ret = pclose(fp);
++    if (ret < 0) {
++        log(LOG_ERROR, "pclose failed\n");
++        return -1;
++    }
++
++    if (!WIFEXITED(ret)) {
++        log(LOG_ERROR, "command did not terminate normally\n");
++        return -1;
++    }
++
++    ret = WEXITSTATUS(ret);
++    log(LOG_DEBUG, "command exited with status: %d\n", ret);
++    return ret;
++}
++
++int load_required_driver(void)
++{
++    int ret;
++    ret = execute_command("modprobe hisi_mem_ras 2>&1");
++    if (ret < 0) {
++        log(LOG_ERROR, "load repair driver failed\n");
++        return ret;
++    }
++    ret = execute_command("modprobe page_eject 2>&1");
++    if (ret < 0) {
++        log(LOG_ERROR, "load page driver failed\n");
++        return ret;
++    }
++    log(LOG_INFO, "load required driver success\n");
++    return ret;
++}
++
++void hbm_param_init(void)
++{
++    int ret;
++    char *env;
++
++    env = getenv("HBM_ONLINE_REPAIR_LOG_LEVEL");
++    ret = string2int(env, &global_level_setting);
++    if (ret < 0) {
++        global_level_setting = DEFAULT_LOG_LEVEL;
++        log(LOG_WARNING, "Get log level from config failed, set the default value %d\n", DEFAULT_LOG_LEVEL);
++    } else {
++        log(LOG_INFO, "log level: %d\n", global_level_setting);
++    }
++
++    env = getenv("PAGE_ISOLATION_THRESHOLD");
++    ret = string2int(env, &page_isolation_threshold);
++    if (ret < 0) {
++        page_isolation_threshold = DEFAULT_PAGE_ISOLATION_THRESHOLD;
++        log(LOG_WARNING, "Get page_isolation_threshold from config failed, set the default value %d\n", DEFAULT_PAGE_ISOLATION_THRESHOLD);
++    } else {
++        log(LOG_INFO, "page_isolation_threshold: %d\n", page_isolation_threshold);
++    }
++}
++
++
++int main(int argc, char *argv[])
++{
++    int ret;
++
++    hbm_param_init();
++
++    ret = load_required_driver();
++    if (ret < 0) {
++        log(LOG_DEBUG, "load required driver failed\n");
++        return ret;
++    }
++
++    struct ras_events *ras = init_trace_instance();
++    if (!ras)
++        return -1;
++
++    ret = toggle_ras_event(ras->tracing, "ras", "non_standard_event", 1);
++    if (ret < 0) {
++        log(LOG_WARNING, "unable to enable ras non_standard_event.\n");
++        free(ras);
++        return -1;
++    }
++
++    ret = init_all_flash();
++    if (ret < 0) {
++        log(LOG_ERROR, "flash writer init failed\n");
++    }
++
++    handle_ras_events(ras);
++
++    ret = toggle_ras_event(ras->tracing, "ras", "non_standard_event", 0);
++    if (ret < 0) {
++        log(LOG_WARNING, "unable to disable ras non_standard_event.\n");
++    }
++
++    free(ras);
++    return ret;
++}
+diff --git a/src/c/hbm_online_repair/hbm_online_repair.env b/src/c/hbm_online_repair/hbm_online_repair.env
+new file mode 100644
+index 0000000..de56079
+--- /dev/null
++++ b/src/c/hbm_online_repair/hbm_online_repair.env
+@@ -0,0 +1,2 @@
++HBM_ONLINE_REPAIR_LOG_LEVEL=1
++PAGE_ISOLATION_THRESHOLD=128
+diff --git a/src/c/hbm_online_repair/logger.h b/src/c/hbm_online_repair/logger.h
+new file mode 100644
+index 0000000..ddfa932
+--- /dev/null
++++ b/src/c/hbm_online_repair/logger.h
+@@ -0,0 +1,31 @@
++#ifndef __LOGGER_H
++#define __LOGGER_H
++
++#define TOOL_NAME "hbm_online_repair"
++
++#define LOG_DEBUG   0
++#define LOG_INFO    1
++#define LOG_WARNING 2
++#define LOG_ERROR   3
++
++extern int global_level_setting;
++
++#define log_prefix(level) \
++	(level == LOG_DEBUG ? "DEBUG" : \
++	 level == LOG_INFO ? "INFO" : \
++	 level == LOG_WARNING ? "WARNING" : \
++	 level == LOG_ERROR ? "ERROR" : \
++	 "UNKNOWN_LEVEL")
++
++#define log_fd(level) \
++	(level == LOG_ERROR ? stderr : stdout)
++
++#define log(level, fmt, args...) do {\
++	if (level >= global_level_setting) {\
++		fprintf(log_fd(level), "[%s] %s: ", log_prefix(level), TOOL_NAME);\
++		fprintf(log_fd(level), fmt, ##args);\
++		fflush(log_fd(level));\
++	}\
++} while (0)
++
++#endif
+diff --git a/src/c/hbm_online_repair/non-standard-hbm-repair.c b/src/c/hbm_online_repair/non-standard-hbm-repair.c
+new file mode 100644
+index 0000000..b175e14
+--- /dev/null
++++ b/src/c/hbm_online_repair/non-standard-hbm-repair.c
+@@ -0,0 +1,799 @@
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <dirent.h>
++#include <errno.h>
++#include <fcntl.h>
++#include <unistd.h>
++#include <stdbool.h>
++#include <sys/socket.h>
++#include <sys/un.h>
++#include <linux/fs.h>
++#include <sys/stat.h>
++
++#include "logger.h"
++#include "non-standard-hbm-repair.h"
++
++extern int page_isolation_threshold;
++size_t total_size = 0;
++struct hisi_common_error_section {
++    uint32_t   val_bits;
++    uint8_t    version;
++    uint8_t    soc_id;
++    uint8_t    socket_id;
++    uint8_t    totem_id;
++    uint8_t    nimbus_id;
++    uint8_t    subsystem_id;
++    uint8_t    module_id;
++    uint8_t    submodule_id;
++    uint8_t    core_id;
++    uint8_t    port_id;
++    uint16_t   err_type;
++    struct {
++        uint8_t  function;
++        uint8_t  device;
++        uint16_t segment;
++        uint8_t  bus;
++        uint8_t  reserved[3];
++    }          pcie_info;
++    uint8_t    err_severity;
++    uint8_t    reserved[3];
++    uint32_t   reg_array_size;
++    uint32_t   reg_array[];
++};
++
++struct fault_addr_info {
++    uint32_t processer_id;
++    uint32_t die_id;
++    uint32_t stack_id;
++    uint32_t sid;
++    uint32_t channel_id;
++    uint32_t bankgroup_id;
++    uint32_t bank_id;
++    uint32_t row_id;
++    uint32_t column_id;
++    uint32_t error_type;
++    uint32_t repair_type;
++    uint32_t reserved;
++    uint32_t crc8;
++};
++
++typedef struct {
++    const char    *VariableName;
++    const char    *VendorGuid;
++    uint32_t      DataSize;
++    uint8_t       *Data;
++    uint32_t      Attributes;
++} efi_variable_t;
++
++char* flash_names[FLASH_ENTRY_NUM] = {
++    "repair0000",
++    "repair0001",
++    "repair0100",
++    "repair0101",
++    "repair0200",
++    "repair0201",
++    "repair0300",
++    "repair0301",
++};
++char *flash_guids[FLASH_ENTRY_NUM] = {
++    "CD2FF4D9-D937-4e1d-B810-A1A568C37C01",
++    "DD92CC91-43E6-4c69-A42A-B08F72FCB157",
++    "4A8E0D1E-4CFA-47b2-9359-DA3A0006878B",
++    "733F9979-4ED4-478d-BD6A-E4D0F0390FDB",
++    "9BFBBA1F-5A93-4d36-AD47-D3C2D714D914",
++    "A0920D6F-78B8-4c09-9F61-7CEC845F116C",
++    "0049CE5E-8C18-414c-BDC1-A87E60CEEFD7",
++    "6AED17B4-50C7-4a40-A5A7-48AF55DD8EAC"
++};
++
++static int get_guid_index(uint32_t socket_id, uint32_t error_type) {
++    if (2 * socket_id + error_type >= FLASH_ENTRY_NUM)
++        return -1;
++    return 2 * socket_id + error_type;
++}
++
++static void parse_fault_addr_info(struct fault_addr_info* info_struct, unsigned long long fault_addr)
++{
++    info_struct->processer_id = fault_addr & FAULT_ADDR_PROCESSOR_ID_MASK;
++    fault_addr >>= FAULT_ADDR_PROCESSOR_ID_LEN;
++    info_struct->die_id = fault_addr & FAULT_ADDR_DIE_ID_MASK;
++    fault_addr >>= FAULT_ADDR_DIE_ID_LEN;
++    info_struct->stack_id = fault_addr & FAULT_ADDR_STACK_ID_MASK;
++    fault_addr >>= FAULT_ADDR_STACK_ID_LEN;
++    info_struct->sid = fault_addr & FAULT_ADDR_SID_MASK;
++    fault_addr >>= FAULT_ADDR_SID_LEN;
++    info_struct->channel_id = fault_addr & FAULT_ADDR_CHANNEL_ID_MASK;
++    fault_addr >>= FAULT_ADDR_CHANNEL_ID_LEN;
++    info_struct->bankgroup_id = fault_addr & FAULT_ADDR_BANKGROUP_ID_MASK;
++    fault_addr >>= FAULT_ADDR_BANKGROUP_ID_LEN;
++    info_struct->bank_id = fault_addr & FAULT_ADDR_BANK_ID_MASK;
++    fault_addr >>= FAULT_ADDR_BANK_ID_LEN;
++    info_struct->row_id = fault_addr & FAULT_ADDR_ROW_ID_MASK;
++    fault_addr >>= FAULT_ADDR_ROW_ID_LEN;
++    info_struct->column_id = fault_addr & FAULT_ADDR_COLUMN_ID_MASK;
++    fault_addr >>= FAULT_ADDR_CHANNEL_ID_LEN;
++    info_struct->error_type = fault_addr & FAULT_ADDR_ERROR_TYPE_MASK;
++    fault_addr >>= FAULT_ADDR_ERROR_TYPE_LEN;
++    info_struct->repair_type = fault_addr & FAULT_ADDR_REPAIR_TYPE_MASK;
++    fault_addr >>= FAULT_ADDR_REPAIR_TYPE_LEN;
++    info_struct->reserved = fault_addr & FAULT_ADDR_RESERVED_MASK;
++    fault_addr >>= FAULT_ADDR_RESERVED_LEN;
++    info_struct->crc8 = (uint32_t)fault_addr;
++}
++
++static bool variable_existed(char *name, char *guid)
++{
++    char filename[PATH_MAX];
++    int fd;
++
++    snprintf(filename, PATH_MAX - 1, "%s/%s-%s", EFIVARFS_PATH, name, guid);
++
++    // open var file
++    fd = open(filename, O_RDONLY);
++    if (fd < 0) {
++        log(LOG_WARNING, "open file %s failed\n", filename);
++        return false;
++    }
++    close(fd);
++    return true;
++}
++
++static uint32_t read_variable_attribute(char *name, char *guid) {
++    char filename[PATH_MAX];
++    int fd;
++    size_t readsize;
++    uint32_t attribute = (uint32_t)-1;
++
++    snprintf(filename, PATH_MAX - 1, "%s/%s-%s", EFIVARFS_PATH, name, guid);
++
++    // open var file
++    fd = open(filename, O_RDONLY);
++    if (fd < 0) {
++        log(LOG_ERROR, "open %s failed\n", filename);
++        return attribute;
++    }
++
++    // read attributes from first 4 bytes
++    readsize = read(fd, &attribute, sizeof(uint32_t));
++    if (readsize != sizeof(uint32_t)) {
++        log(LOG_ERROR, "read attribute of %s failed\n", filename);
++    }
++
++    close(fd);
++    return attribute;
++}
++
++static int efivarfs_set_mutable(char *name, char *guid, bool mutable)
++{
++	unsigned long orig_attrs, new_attrs;
++    char filename[PATH_MAX];
++    int fd;
++
++    snprintf(filename, PATH_MAX - 1, "%s/%s-%s", EFIVARFS_PATH, name, guid);
++
++    fd = open(filename, O_RDONLY);
++    if (fd < 0) {
++        log(LOG_ERROR, "open %s failed\n", filename);
++        goto err;
++    }
++
++	if (ioctl(fd, FS_IOC_GETFLAGS, &orig_attrs) == -1) {
++		log(LOG_ERROR, "ioctl FS_IOC_GETFLAGS failed\n");
++		goto err;
++	}
++
++    if (mutable)
++	    new_attrs = orig_attrs & ~(unsigned long)FS_IMMUTABLE_FL;
++    else
++        new_attrs = orig_attrs | FS_IMMUTABLE_FL;
++
++    if (new_attrs == orig_attrs) {
++        close(fd);
++        return 0;
++    }
++
++	if (ioctl(fd, FS_IOC_SETFLAGS, &new_attrs) == -1) {
++		log(LOG_ERROR, "ioctl FS_IOC_SETFLAGS failed\n");
++		goto err;
++	}
++    close(fd);
++	return 0;
++err:
++    if (fd >= 0)
++        close(fd);
++    return -1;
++}
++
++static int write_variable(char *name, char *guid, void *value, unsigned long size, uint32_t attribute) {
++    int fd, mode;
++    size_t writesize;
++    void *buffer;
++    unsigned long total;
++    char filename[PATH_MAX];
++
++    snprintf(filename, PATH_MAX - 1, "%s/%s-%s", EFIVARFS_PATH, name, guid);
++
++    // prepare attributes(size 4 bytes) and data
++    total = size + sizeof(uint32_t);
++    buffer = malloc(total);
++    if (buffer == NULL) {
++        log(LOG_ERROR, "malloc data for %s failed\n", filename);
++        goto err;
++    }
++    memcpy(buffer, &attribute, sizeof(uint32_t));
++    memcpy(buffer + sizeof(uint32_t), value, size);
++
++    // change attr
++    if (efivarfs_set_mutable(name, guid, 1) != 0) {
++        log(LOG_ERROR, "set mutable for %s failed\n", filename);
++        goto err;
++    }
++
++    mode = O_WRONLY;
++    if (attribute & EFI_VARIABLE_APPEND_WRITE)
++        mode |= O_APPEND;
++    else
++        mode |= O_CREAT;
++
++    // open var file
++    fd = open(filename, mode, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
++    if (fd < 0) {
++        log(LOG_ERROR, "open %s failed\n", filename);
++        goto err;
++    }
++
++    // write to var file
++    writesize = write(fd, buffer, total);
++    if (writesize != total) {
++        log(LOG_ERROR, "write %s failed\n", filename);
++        goto err;
++    }
++
++    close(fd);
++    free(buffer);
++    if (efivarfs_set_mutable(name, guid, 0) != 0) {
++        log(LOG_ERROR, "set immutable for %s failed\n", filename);
++    }
++    return 0;
++err:
++    if (fd >= 0)
++        close(fd);
++    if (buffer)
++        free(buffer);
++    if (efivarfs_set_mutable(name, guid, 0) != 0) {
++        log(LOG_ERROR, "set immutable for %s failed\n", filename);
++    }
++    return -1;
++}
++
++static int append_variable(char *name, char *guid, void *data, unsigned long size) {
++    // prepare append attribute
++    uint32_t attribute = read_variable_attribute(name, guid);
++    if (attribute == (uint32_t)-1) {
++        log(LOG_ERROR, "read %s-%s attribute failed\n", name, guid);
++        return -1;
++    }
++    attribute |= EFI_VARIABLE_APPEND_WRITE;
++
++    return write_variable(name, guid, data, size, attribute);
++}
++
++static size_t get_var_size(char *name, char *guid) {
++    char filename[PATH_MAX];
++    int fd;
++    struct stat stat;
++
++    snprintf(filename, PATH_MAX - 1, "%s/%s-%s", EFIVARFS_PATH, name, guid);
++
++    // open var file
++    fd = open(filename, O_RDONLY);
++    if (fd < 0) {
++        log(LOG_WARNING, "open %s failed\n", filename);
++        goto err;
++    }
++    // read stat
++    if (fstat(fd, &stat) != 0) {
++        log(LOG_WARNING, "fstat %s failed\n", filename);
++        goto err;
++    }
++    close(fd);
++    return stat.st_size;
++err:
++    if (fd >= 0)
++        close(fd);
++    return (size_t)-1;
++}
++
++int init_all_flash() {
++    for (int i = 0; i < FLASH_ENTRY_NUM; i++) {
++        // check existed entry
++        if (variable_existed(flash_names[i], flash_guids[i])) {
++            total_size += get_var_size(flash_names[i], flash_guids[i]);
++            continue;
++        }
++        // create new entry
++        uint32_t attribute = EFI_VARIABLE_NON_VOLATILE |
++                             EFI_VARIABLE_BOOTSERVICE_ACCESS |
++                             EFI_VARIABLE_RUNTIME_ACCESS;
++        char *data = "";
++        unsigned long size = 1;
++        int ret = write_variable(flash_names[i], flash_guids[i], data, size, attribute);
++        if (ret) {
++            log(LOG_ERROR, "init %s-%s failed, fault info storage funtion not enabled\n", flash_names[i], flash_guids[i]);
++            return -1;
++        }
++        total_size += sizeof(uint32_t) + 1;
++    }
++    // check total entry size
++    log(LOG_DEBUG, "current fault info total size: %luKB, flash max threshold: %uKB\n",
++           total_size / KB_SIZE, MAX_VAR_SIZE / KB_SIZE);
++    if (total_size > MAX_VAR_SIZE) {
++        log(LOG_ERROR, "fault info storage reach threshold, cannot save new record\n");
++    }
++    return 0;
++}
++
++static int write_fault_info_to_flash(const struct hisi_common_error_section *err) {
++    int ret, guid_index;
++    uint32_t reg_size;
++    uint64_t fault_addr;
++
++    // check flash usage threshold
++    if (total_size + sizeof(uint64_t) > MAX_VAR_SIZE) {
++        log(LOG_WARNING, "fault info storage reach threshold, cannot save new record into flash\n");
++        return -1;
++    }
++
++    // parse physical addr
++    reg_size = err->reg_array_size / sizeof(uint32_t);
++    fault_addr = err->reg_array[reg_size - 1];
++    fault_addr <<= TYPE_UINT32_WIDTH;
++    fault_addr += err->reg_array[reg_size - 2];
++
++    // get guid
++    struct fault_addr_info info_struct;
++    parse_fault_addr_info(&info_struct, fault_addr);
++    guid_index = get_guid_index(info_struct.processer_id, info_struct.error_type);
++    if (guid_index < 0) {
++        log(LOG_ERROR, "invalid fault info\n");
++        return -1;
++    }
++    // record physical addr in flash
++    ret = append_variable(flash_names[guid_index], flash_guids[guid_index], &fault_addr, sizeof(uint64_t));
++    if (ret < 0) {
++        log(LOG_ERROR, "append to %s-%s failed\n", flash_names[guid_index], flash_guids[guid_index]);
++        return -1;
++    }
++    total_size += sizeof(uint64_t);
++    log(LOG_INFO, "write hbm fault info to flash success\n");
++    return 0;
++}
++
++static int write_file(char *path, const char *name, unsigned long long value)
++{
++    char fname[MAX_PATH];
++    char buf[20];
++    int ret;
++    int fd;
++
++    snprintf(fname, MAX_PATH, "%s/%s", path, name);
++
++    fd = open(fname, O_WRONLY);
++    if (fd < 0) {
++        log(LOG_WARNING, "HBM ACLS: Cannot to open '%s': %s\n",
++                    fname, strerror(errno));
++        return -errno;
++    }
++
++    snprintf(buf, sizeof(buf), "0x%llx\n", value);
++    ret = write(fd, buf, strlen(buf));
++    if (ret <= 0)
++        log(LOG_WARNING, "HBM ACLS: Failed to set %s (0x%llx): %s\n",
++                    fname, value, strerror(errno));
++
++    close(fd);
++    return ret > 0 ? 0 : -errno;
++}
++
++static int get_hardware_corrupted_size()
++{
++    FILE *fp;
++    char line[256];
++    int hardware_corrupted_size = -1;
++    char *key = "HardwareCorrupted:";
++
++    fp = fopen("/proc/meminfo", "r");
++    if (fp == NULL) {
++        log(LOG_ERROR, "Failed to open /proc/meminfo\n");
++        return -1;
++    }
++
++    while (fgets(line, sizeof(line), fp) != NULL) {
++        char *pos;
++        if ((pos = strstr(line, key)) != NULL) {
++            sscanf(pos, "HardwareCorrupted: %5d kB\n", &hardware_corrupted_size);
++            break;
++        }
++    }
++
++    fclose(fp);
++    return hardware_corrupted_size;
++}
++
++static uint8_t get_repair_result_code(int ret)
++{
++    if (ret == -ENOSPC) {
++        return REPAIR_FAILED_NO_RESOURCE;
++    } else if (ret == -EIO) {
++        return REPAIR_FAILED_OTHER_REASON;
++    } else if (ret == -ENXIO || ret == -EINVAL) {
++        return REPAIR_FAILED_INVALID_PARAM;
++    }
++    return REPAIR_FAILED_OTHER_REASON;
++}
++
++static int notice_BMC(const struct hisi_common_error_section *err, uint8_t repair_result_code)
++{
++    int sockfd;
++    struct sockaddr_un addr;
++    char bmc_msg[sizeof(BMC_REPORT_FORMAT)] = {0};
++    uint8_t repair_type_code, isolation_type_code;
++    uint32_t repair_type;
++    unsigned long long fault_addr;
++
++    sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
++    if (sockfd < 0) {
++        log(LOG_ERROR, "Failed to create BMC notice socket\n");
++        return -1;
++    }
++
++    memset(&addr, 0, sizeof(struct sockaddr_un));
++    addr.sun_family = AF_UNIX;
++    strncpy(addr.sun_path, BMC_SOCKET_PATH, sizeof(addr.sun_path) - 1);
++    if (connect(sockfd, (struct sockaddr *)&addr, sizeof(struct sockaddr_un)) < 0) {
++        log(LOG_ERROR, "Failed to connect BMC notice socket\n");
++        close(sockfd);
++        return -1;
++    }
++
++    /* assemble bmc specific msg */
++    repair_type_code = 0;
++    isolation_type_code = 0;
++    repair_type = err->reg_array[HBM_REPAIR_REQ_TYPE];
++    if (repair_type & HBM_CE_ACLS) {
++        repair_type_code = 0;
++        isolation_type_code = SINGLE_ADDR_FAULT;
++    } else if (repair_type & HBM_PSUE_ACLS) {
++        repair_type_code = 1;
++        isolation_type_code = SINGLE_ADDR_FAULT;
++    } else if (repair_type & HBM_CE_SPPR) {
++        repair_type_code = 2;
++        isolation_type_code = ROW_FAULT;
++    } else if (repair_type & HBM_PSUE_SPPR) {
++        repair_type_code = 3;
++        isolation_type_code = ROW_FAULT;
++    }
++    
++    const uint32_t reg_size = err->reg_array_size / sizeof(uint32_t);
++
++    fault_addr = err->reg_array[reg_size - 1];
++    fault_addr <<= TYPE_UINT32_WIDTH;
++    fault_addr += err->reg_array[reg_size - 2];
++
++    log(LOG_DEBUG, "Get the fault addr is %llu\n", fault_addr);
++
++    struct fault_addr_info info_struct;
++    parse_fault_addr_info(&info_struct, fault_addr);
++
++    log(LOG_DEBUG, "info_struct.processer_id is %u\n", info_struct.processer_id);
++    log(LOG_DEBUG, "info_struct.die_id is %u\n", info_struct.die_id);
++    log(LOG_DEBUG, "info_struct.stack_id is %u\n", info_struct.stack_id);
++    log(LOG_DEBUG, "info_struct.sid is %u\n", info_struct.sid);
++    log(LOG_DEBUG, "info_struct.channel_id is %u\n", info_struct.channel_id);
++    log(LOG_DEBUG, "info_struct.bankgroup_id is %u\n", info_struct.bankgroup_id);
++    log(LOG_DEBUG, "info_struct.bank_id is %u\n", info_struct.bank_id);
++    log(LOG_DEBUG, "info_struct.row_id is %u\n", info_struct.row_id);
++    log(LOG_DEBUG, "info_struct.column_id is %u\n", info_struct.column_id);
++    log(LOG_DEBUG, "info_struct.error_type is %u\n", info_struct.error_type);
++    log(LOG_DEBUG, "info_struct.repair_type is %u\n", info_struct.repair_type);
++    log(LOG_DEBUG, "info_struct.reserved is %u\n", info_struct.reserved);
++    log(LOG_DEBUG, "info_struct.crc8 is %u\n", info_struct.crc8);
++
++    snprintf(bmc_msg, sizeof(BMC_REPORT_FORMAT), BMC_REPORT_FORMAT,
++        repair_type_code,
++        repair_result_code,
++        isolation_type_code,
++        info_struct.processer_id,
++        info_struct.die_id,
++        info_struct.stack_id,
++        info_struct.sid,
++        info_struct.channel_id,
++        info_struct.bankgroup_id,
++        info_struct.bank_id,
++        info_struct.row_id,
++        info_struct.column_id
++    );
++
++    log(LOG_DEBUG, "Send msg to sysSentry, bmc msg is %s\n", bmc_msg);
++
++    if (write(sockfd, bmc_msg, strlen(bmc_msg)) <= 0) {
++        log(LOG_ERROR, "Failed to send data to BMC notice socket\n");
++        close(sockfd);
++        return -1;
++    }
++
++    close(sockfd);
++    return 0;
++}
++
++static int hbmc_hbm_page_isolate(const struct hisi_common_error_section *err)
++{
++    unsigned long long paddr;
++    int ret;
++    bool is_acls = err->reg_array[HBM_REPAIR_REQ_TYPE] & (HBM_CE_ACLS | HBM_PSUE_ACLS);
++    int required_isolate_size = (is_acls ? HBM_ACLS_ADDR_NUM : HBM_SPPR_ADDR_NUM) * DEFAULT_PAGE_SIZE_KB;
++    int hardware_corrupted_size = get_hardware_corrupted_size();
++    if (hardware_corrupted_size < 0) {
++        log(LOG_ERROR, "Page isolate failed: Get hardware_corrupted_size failed");
++        notice_BMC(err, ISOLATE_FAILED_OTHER_REASON);
++        return -1;
++    }
++    if ((required_isolate_size + hardware_corrupted_size) > page_isolation_threshold) {
++        log(LOG_INFO, "Page isolate failed: the isolation resource is not enough\n");
++        notice_BMC(err, ISOLATE_FAILED_OVER_THRESHOLD);
++        return -1;
++    }
++    if (is_acls) {
++        /* ACLS */
++        paddr = err->reg_array[HBM_ADDH];
++        paddr <<= TYPE_UINT32_WIDTH;
++        paddr += err->reg_array[HBM_ADDL];
++
++        ret = write_file("/sys/kernel/page_eject", "offline_page", paddr);
++        if (ret < 0) {
++            notice_BMC(err, ISOLATE_FAILED_OTHER_REASON);
++            log(LOG_WARNING, "HBM: ACLS offline failed, address is 0x%llx \n", paddr);
++            return ret;
++        }
++    } else {
++        /* SPPR */
++        bool all_success = true;
++        uint32_t i;
++        for (i = 0; i < HBM_SPPR_ADDR_NUM; i++) {
++            paddr = err->reg_array[2 * i + HBM_ADDH];
++            paddr <<= TYPE_UINT32_WIDTH;
++            paddr += err->reg_array[2 * i + HBM_ADDL];
++            ret = write_file("/sys/kernel/page_eject", "offline_page", paddr);
++            if (ret < 0) {
++                all_success = false;
++                log(LOG_WARNING, "HBM: SPPR offline failed, address is 0x%llx \n", paddr);
++                continue;
++            }
++        }
++        if (!all_success) {
++            notice_BMC(err, ISOLATE_FAILED_OTHER_REASON);
++            ret = -1;
++        }
++    }
++    return ret < 0 ? ret : 0;
++}
++
++static int hbmc_hbm_after_repair(bool is_acls, const int repair_ret, const unsigned long long paddr)
++{
++    int ret;
++    if (repair_ret < 0) {
++        log(LOG_WARNING, "HBM %s: Keep page (0x%llx) offline\n", is_acls ? "ACLS" : "SPPR", paddr);
++        /* not much we can do about errors here */
++        (void)write_file("/sys/kernel/page_eject", "remove_page", paddr);
++        return get_repair_result_code(repair_ret);
++    }
++
++    ret = write_file("/sys/kernel/page_eject", "online_page", paddr);
++    if (ret < 0) {
++        log(LOG_WARNING, "HBM %s: Page (0x%llx) online failed\n",is_acls ? "ACLS" : "SPPR", paddr);
++        return ONLINE_PAGE_FAILED;
++    } else {
++        log(LOG_INFO, "HBM %s: Page (0x%llx) repair and online success\n",is_acls ? "ACLS" : "SPPR", paddr);
++        return ISOLATE_REPAIR_ONLINE_SUCCESS;
++    }
++}
++
++static uint8_t hbmc_hbm_repair(const struct hisi_common_error_section *err, char *path)
++{
++    unsigned long long paddr;
++    int ret;
++    uint8_t repair_result_code;
++    bool is_acls;
++
++    /* Both ACLS and SPPR only repair the first address */
++    paddr = err->reg_array[HBM_ADDH];
++    paddr <<= TYPE_UINT32_WIDTH;
++    paddr += err->reg_array[HBM_ADDL];
++
++    is_acls = err->reg_array[HBM_REPAIR_REQ_TYPE] & HBM_CE_ACLS ||
++        err->reg_array[HBM_REPAIR_REQ_TYPE] & HBM_PSUE_ACLS;
++
++    ret = write_file(path, is_acls ? "acls_query" : "sppr_query", paddr);
++    if (ret < 0) {
++        notice_BMC(err, get_repair_result_code(ret));
++        log(LOG_WARNING, "HBM: Address 0x%llx is not supported to %s repair\n", paddr, is_acls ? "ACLS" : "SPPR");
++        return ret;
++    }
++
++    ret = write_file(path, is_acls ? "acls_repair" : "sppr_repair", paddr);
++
++    if (is_acls) {
++        /* ACLS */
++        repair_result_code = hbmc_hbm_after_repair(is_acls, ret, paddr);
++        notice_BMC(err, repair_result_code);
++        return ret;
++    } else {
++        /* SPPR */
++        bool all_online_success = true;
++        uint32_t i;
++        for (i = 0; i < HBM_SPPR_ADDR_NUM; i++) {
++            paddr = err->reg_array[2 * i + HBM_ADDH];
++            paddr <<= TYPE_UINT32_WIDTH;
++            paddr += err->reg_array[2 * i + HBM_ADDL];
++
++            repair_result_code = hbmc_hbm_after_repair(is_acls, ret, paddr);
++            if (repair_result_code != ISOLATE_REPAIR_ONLINE_SUCCESS) {
++                all_online_success = false;
++            }
++        }
++        if (ret < 0) {
++            notice_BMC(err, get_repair_result_code(ret));
++            return ret;
++        } else if (all_online_success) {
++            notice_BMC(err, ISOLATE_REPAIR_ONLINE_SUCCESS);
++            return 0;
++        } else {
++            notice_BMC(err, ONLINE_PAGE_FAILED);
++            return ret;
++        }
++    }
++    /* The final return code is not necessary */
++    return ret < 0 ? ret : 0;
++}
++
++static int hbmc_get_memory_type(char *path)
++{
++    int type = HBM_UNKNOWN;
++    char fname[MAX_PATH];
++    char buf[128];
++    FILE *file;
++
++    snprintf(fname, MAX_PATH, "%s/%s", path, "memory_type");
++    file = fopen(fname, "r");
++    if (!file) {
++        log(LOG_WARNING, "HBM: Cannot to open '%s': %s\n",
++                    fname, strerror(errno));
++        return -errno;
++    }
++
++    if (!fgets(buf, sizeof(buf), file)) {
++        log(LOG_WARNING, "HBM: Failed to read %s\n", fname);
++        goto err;
++    }
++
++    /* Remove the last '\n' */
++    buf[strlen(buf) - 1] = 0;
++
++    if (strcmp(buf, "HBM") == 0)
++        type = HBM_HBM_MEMORY;
++    else if (strcmp(buf, "DDR") == 0)
++        type = HBM_DDR_MEMORY;
++
++err:
++    fclose(file);
++    return type;
++}
++
++static void hbm_repair_handler(const struct hisi_common_error_section *err)
++{
++    log(LOG_DEBUG, "Received ACLS/SPPR flat mode repair request, try to repair\n");
++    char *sys_dev_path = "/sys/devices/platform";
++    char path[MAX_PATH];
++    struct dirent *dent;
++    DIR *dir;
++    int ret;
++    bool find_device = false, find_hbm_mem = false;
++
++    ret = hbmc_hbm_page_isolate(err);
++    if (ret < 0) {
++        return;
++    }
++
++    dir = opendir(sys_dev_path);
++    if (!dir) {
++        log(LOG_WARNING, "Can't read '%s': %s\n",
++                    sys_dev_path, strerror(errno));
++        notice_BMC(err, REPAIR_FAILED_OTHER_REASON);
++        return;
++    }
++
++    while ((dent = readdir(dir))) {
++        if (!strstr(dent->d_name, HBM_MEM_RAS_NAME))
++            continue;
++        find_device = true;
++
++        snprintf(path, MAX_PATH, "%s/%s", sys_dev_path, dent->d_name);
++
++        if (hbmc_get_memory_type(path) == HBM_HBM_MEMORY) {
++            find_hbm_mem = true;
++            ret = hbmc_hbm_repair(err, path);
++            if (ret != -ENXIO)
++                break;
++        }
++    }
++    if (!find_device) {
++        log(LOG_ERROR, "Repair driver is not loaded, skip error, error_type is %u\n",
++                err->reg_array[HBM_REPAIR_REQ_TYPE] & HBM_ERROR_MASK);
++        notice_BMC(err, REPAIR_FAILED_OTHER_REASON);
++    } else if (!find_hbm_mem) {
++        log(LOG_ERROR, "No HBM device memory type found, skip error, error_type is %u\n",
++                err->reg_array[HBM_REPAIR_REQ_TYPE] & HBM_ERROR_MASK);
++        notice_BMC(err, REPAIR_FAILED_OTHER_REASON);
++    }
++
++    closedir(dir);
++}
++
++static bool hbm_repair_validate(const struct hisi_common_error_section *err)
++{
++    if (!((err->val_bits & BIT(COMMON_VALID_MODULE_ID)) &&
++          (err->val_bits & BIT(COMMON_VALID_SUBMODULE_ID)) &&
++          (err->val_bits & BIT(COMMON_VALID_REG_ARRAY_SIZE))
++        )) {
++        log(LOG_DEBUG, "Err val_bits validate failed, val_bits is %u\n", err->val_bits);
++        return false;
++    }
++    log(LOG_DEBUG, "err->module_id: %u\n", err->module_id);
++    log(LOG_DEBUG, "err->submodule_id: %u\n", err->submodule_id);
++    log(LOG_DEBUG, "err->val_bits: 0x%x\n", err->val_bits);
++    log(LOG_DEBUG, "err->reg_array_size: %u\n", err->reg_array_size);
++
++    if (err->module_id != HBMC_MODULE_ID ||
++        err->submodule_id != HBMC_SUBMOD_HBM_REPAIR) {
++        log(LOG_DEBUG, "err module_id or sub_module id doesn't not match\n");
++        return false;
++    }
++
++    uint32_t hbm_repair_reg_type = err->reg_array[HBM_REPAIR_REQ_TYPE] & HBM_ERROR_MASK;
++    bool is_acls_valid = (hbm_repair_reg_type & (HBM_CE_ACLS | HBM_PSUE_ACLS)) &&
++        (err->reg_array_size == HBM_ACLS_ARRAY_SIZE);
++    bool is_sppr_valid = (hbm_repair_reg_type & (HBM_CE_SPPR | HBM_PSUE_SPPR)) &&
++        (err->reg_array_size == HBM_SPPR_ARRAY_SIZE);
++    bool is_cache_mode = (hbm_repair_reg_type & HBM_CACHE_MODE) && 
++        (err->reg_array_size == HBM_CACHE_ARRAY_SIZE);
++
++    if (!(is_acls_valid || is_sppr_valid || is_cache_mode)) {
++        log(LOG_DEBUG, "err type (%u) is unknown or address array length (%u) is invalid\n",
++                    hbm_repair_reg_type, err->reg_array_size);
++        return false;
++    }
++
++    log(LOG_INFO, "Received ACLS/SPPR repair request\n");
++    return true;
++}
++
++static bool hbm_flat_mode_validate(const struct hisi_common_error_section *err)
++{
++    uint32_t hbm_repair_reg_type = err->reg_array[HBM_REPAIR_REQ_TYPE] & HBM_ERROR_MASK;
++    return !(hbm_repair_reg_type & HBM_CACHE_MODE);
++}
++
++int decode_hisi_common_section(struct ras_non_standard_event *event)
++{
++    const struct hisi_common_error_section *err = (struct hisi_common_error_section *)event->error;
++
++    if (hbm_repair_validate(err)) {
++        write_fault_info_to_flash(err);
++        if (hbm_flat_mode_validate(err)) {
++            hbm_repair_handler(err);
++        }
++    }
++
++    return 0;
++}
+diff --git a/src/c/hbm_online_repair/non-standard-hbm-repair.h b/src/c/hbm_online_repair/non-standard-hbm-repair.h
+new file mode 100644
+index 0000000..7e8e448
+--- /dev/null
++++ b/src/c/hbm_online_repair/non-standard-hbm-repair.h
+@@ -0,0 +1,89 @@
++#ifndef __NON_STANDARD_HBM_REPAIR
++#define __NON_STANDARD_HBM_REPAIR
++
++#include "ras-non-standard-handler.h"
++
++#define DEFAULT_PAGE_SIZE_KB   4
++#define HBM_MEM_RAS_NAME   "HISI0521"
++#define HBM_UNKNOWN        0
++#define HBM_HBM_MEMORY     1
++#define HBM_DDR_MEMORY     2
++
++#define TYPE_UINT32_WIDTH    32
++#define HBM_REPAIR_REQ_TYPE  0
++#define HBM_CE_ACLS          BIT(0)
++#define HBM_PSUE_ACLS        BIT(1)
++#define HBM_CE_SPPR          BIT(2)
++#define HBM_PSUE_SPPR        BIT(3)
++#define HBM_CACHE_MODE       (BIT(4) | BIT(5) | BIT(6) | BIT(7))
++#define HBM_ERROR_MASK       0b11111111
++#define HBM_ADDL             1
++#define HBM_ADDH             2
++#define HBM_ERROR_TYPE_SIZE  4
++#define HBM_ADDR_SIZE        8
++#define HBM_ACLS_ADDR_NUM    1
++#define HBM_SPPR_ADDR_NUM    16
++#define HBM_ACLS_ARRAY_SIZE  (HBM_ERROR_TYPE_SIZE + HBM_ADDR_SIZE * HBM_ACLS_ADDR_NUM + HBM_ADDR_SIZE)
++#define HBM_SPPR_ARRAY_SIZE  (HBM_ERROR_TYPE_SIZE + HBM_ADDR_SIZE * HBM_SPPR_ADDR_NUM + HBM_ADDR_SIZE)
++#define HBM_CACHE_ARRAY_SIZE (HBM_ERROR_TYPE_SIZE + HBM_ADDR_SIZE)
++#define HBMC_MODULE_ID              0x28
++#define HBMC_SUBMOD_HBM_REPAIR      6
++#define COMMON_VALID_MODULE_ID      5
++#define COMMON_VALID_SUBMODULE_ID   6
++#define COMMON_VALID_REG_ARRAY_SIZE 12
++
++#define BMC_SOCKET_PATH    "/var/run/sysSentry/bmc.sock"
++#define BMC_REPORT_FORMAT  "REP00%02x%02x%02x0000000000000000%02x%02x%02x00%02x00%02x%02x%02x%08x%08x0000000000"
++
++#define ISOLATE_FAILED_OVER_THRESHOLD 0b10000001
++#define ISOLATE_FAILED_OTHER_REASON   0b10000010
++#define REPAIR_FAILED_NO_RESOURCE     0b10010100
++#define REPAIR_FAILED_INVALID_PARAM   0b10011000
++#define REPAIR_FAILED_OTHER_REASON    0b10011100
++#define ONLINE_PAGE_FAILED            0b10100000
++#define ISOLATE_REPAIR_ONLINE_SUCCESS 0b00000000
++
++#define ROW_FAULT         1
++#define SINGLE_ADDR_FAULT 6
++
++#define FAULT_ADDR_PROCESSOR_ID_LEN  2
++#define FAULT_ADDR_DIE_ID_LEN        1
++#define FAULT_ADDR_STACK_ID_LEN      3
++#define FAULT_ADDR_SID_LEN           3
++#define FAULT_ADDR_CHANNEL_ID_LEN    8
++#define FAULT_ADDR_BANKGROUP_ID_LEN  3
++#define FAULT_ADDR_BANK_ID_LEN       3
++#define FAULT_ADDR_ROW_ID_LEN        17
++#define FAULT_ADDR_COLUMN_ID_LEN     10
++#define FAULT_ADDR_ERROR_TYPE_LEN    2
++#define FAULT_ADDR_REPAIR_TYPE_LEN   2
++#define FAULT_ADDR_RESERVED_LEN      2
++#define FAULT_ADDR_CRC8_LEN          8
++
++#define FAULT_ADDR_PROCESSOR_ID_MASK ((1 << FAULT_ADDR_PROCESSOR_ID_LEN ) - 1)
++#define FAULT_ADDR_DIE_ID_MASK       ((1 << FAULT_ADDR_DIE_ID_LEN       ) - 1)
++#define FAULT_ADDR_STACK_ID_MASK     ((1 << FAULT_ADDR_STACK_ID_LEN     ) - 1)
++#define FAULT_ADDR_SID_MASK          ((1 << FAULT_ADDR_SID_LEN          ) - 1)
++#define FAULT_ADDR_CHANNEL_ID_MASK   ((1 << FAULT_ADDR_CHANNEL_ID_LEN   ) - 1)
++#define FAULT_ADDR_BANKGROUP_ID_MASK ((1 << FAULT_ADDR_BANKGROUP_ID_LEN ) - 1)
++#define FAULT_ADDR_BANK_ID_MASK      ((1 << FAULT_ADDR_BANK_ID_LEN      ) - 1)
++#define FAULT_ADDR_ROW_ID_MASK       ((1 << FAULT_ADDR_ROW_ID_LEN       ) - 1)
++#define FAULT_ADDR_COLUMN_ID_MASK    ((1 << FAULT_ADDR_COLUMN_ID_LEN    ) - 1)
++#define FAULT_ADDR_ERROR_TYPE_MASK   ((1 << FAULT_ADDR_ERROR_TYPE_LEN   ) - 1)
++#define FAULT_ADDR_REPAIR_TYPE_MASK  ((1 << FAULT_ADDR_REPAIR_TYPE_LEN  ) - 1)
++#define FAULT_ADDR_RESERVED_MASK     ((1 << FAULT_ADDR_RESERVED_LEN     ) - 1)
++#define FAULT_ADDR_CRC8_MASK         ((1 << FAULT_ADDR_CRC8_LEN         ) - 1)
++
++#define EFI_VARIABLE_NON_VOLATILE       0x1
++#define EFI_VARIABLE_BOOTSERVICE_ACCESS 0x2
++#define EFI_VARIABLE_RUNTIME_ACCESS     0x4
++#define EFI_VARIABLE_APPEND_WRITE       0x40
++
++#define EFIVARFS_PATH "/sys/firmware/efi/efivars"
++#define MAX_VAR_SIZE (128 * 1024)
++#define FLASH_ENTRY_NUM 8
++#define KB_SIZE 1024
++
++extern int init_all_flash();
++
++#endif
+diff --git a/src/c/hbm_online_repair/ras-events.c b/src/c/hbm_online_repair/ras-events.c
+new file mode 100644
+index 0000000..0b12329
+--- /dev/null
++++ b/src/c/hbm_online_repair/ras-events.c
+@@ -0,0 +1,534 @@
++#include <dirent.h>
++#include <errno.h>
++#include <fcntl.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <stdint.h>
++#include <stdbool.h>
++#include <string.h>
++#include <unistd.h>
++#include <sys/stat.h>
++#include <sys/types.h>
++#include <sys/poll.h>
++#include <signal.h>
++#include <sys/signalfd.h>
++
++#include <traceevent/kbuffer.h>
++#include <traceevent/event-parse.h>
++#include "ras-non-standard-handler.h"
++#include "logger.h"
++
++/*
++ * Polling time, if read() doesn't block. Currently, trace_pipe_raw never
++ * blocks on read(). So, we need to sleep for a while, to avoid spending
++ * too much CPU cycles. A fix for it is expected for 3.10.
++ */
++#define POLLING_TIME 3
++
++/* Test for a little-endian machine */
++#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
++    #define ENDIAN KBUFFER_ENDIAN_LITTLE
++#else
++    #define ENDIAN KBUFFER_ENDIAN_BIG
++#endif
++
++static int get_debugfs_dir(char *debugfs_dir, size_t len)
++{
++    FILE *fp;
++    char line[MAX_PATH + 1 + 256];
++
++    fp = fopen("/proc/mounts","r");
++    if (!fp) {
++        log(LOG_INFO, "Can't open /proc/mounts");
++        return errno;
++    }
++
++    do {
++        char *p, *type, *dir;
++        if (!fgets(line, sizeof(line), fp))
++            break;
++
++        p = strtok(line, " \t");
++        if (!p)
++            break;
++
++        dir = strtok(NULL, " \t");
++        if (!dir)
++            break;
++
++        type = strtok(NULL, " \t");
++        if (!type)
++            break;
++
++        if (!strcmp(type, "debugfs")) {
++            fclose(fp);
++            strncpy(debugfs_dir, dir, len - 1);
++            debugfs_dir[len - 1] = '\0';
++            return 0;
++        }
++    } while(1);
++
++    fclose(fp);
++    log(LOG_INFO, "Can't find debugfs\n");
++    return ENOENT;
++}
++
++
++static int open_trace(char *trace_dir, char *name, int flags)
++{
++    int ret;
++    char fname[MAX_PATH + 1];
++
++    strcpy(fname, trace_dir);
++    strcat(fname, "/");
++    strcat(fname, name);
++
++    ret = open(fname, flags);
++    if (ret < 0)
++        log(LOG_WARNING, "open_trace() failed, fname=%s ret=%d errno=%d\n", fname, ret, errno);
++
++    return ret;
++}
++
++static int create_trace_instance(char *trace_instance_dir)
++{
++    char fname[MAX_PATH + 1];
++    int rc;
++
++    get_debugfs_dir(fname, sizeof(fname));
++    strcat(fname, "/tracing/instances/"TOOL_NAME);
++    rc = mkdir(fname, S_IRWXU);
++    if (rc < 0 && errno != EEXIST) {
++        log(LOG_INFO, "Unable to create " TOOL_NAME " instance at %s\n", fname);
++        return -1;
++    }
++    strcpy(trace_instance_dir, fname);
++    return 0;
++}
++
++struct ras_events *init_trace_instance(void)
++{
++    struct ras_events *ras = calloc(1, sizeof(*ras));
++    if (!ras) {
++        log(LOG_ERROR, "Can't allocate memory for ras struct\n");
++        return NULL;
++    }
++    int rc = create_trace_instance(ras->tracing);
++    if (rc < 0) {
++        free(ras);
++        return NULL;
++    }
++    return ras;
++}
++
++/*
++ * Tracing enable/disable code
++ */
++int toggle_ras_event(char *trace_dir, char *group, char *event, int enable)
++{
++    int fd, rc;
++    char fname[MAX_PATH + 1];
++
++    snprintf(fname, sizeof(fname), "%s%s:%s\n",
++         enable ? "" : "!",
++         group, event);
++
++    /* Enable RAS events */
++    fd = open_trace(trace_dir, "set_event", O_RDWR | O_APPEND);
++    if (fd < 0) {
++        log(LOG_WARNING, "Can't open set_event\n");
++        rc = -errno;
++        goto err;
++    }
++
++    rc = write(fd, fname, strlen(fname));
++    close(fd);
++    if (rc <= 0) {
++        log(LOG_WARNING, "Can't write to set_event\n");
++        rc = -EIO;
++        goto err;
++    }
++
++    log(LOG_INFO, "%s:%s event %s\n",
++        group, event,
++        enable ? "enabled" : "disabled");
++    return 0;
++err:
++    log(LOG_ERROR, "Can't %s %s:%s tracing\n",
++        enable ? "enable" : "disable", group, event);
++    return rc;
++}
++
++static int parse_header_page(struct ras_events *ras, struct tep_handle *pevent)
++{
++    int fd, len, page_size = DEFAULT_PAGE_SIZE;
++    char buf[page_size];
++
++    fd = open_trace(ras->tracing, "events/header_page", O_RDONLY);
++    if (fd < 0) {
++        log(LOG_WARNING, "Open event header page failed\n");
++        return -1;
++    }
++
++    len = read(fd, buf, page_size);
++    close(fd);
++    if (len <= 0) {
++        log(LOG_WARNING, "Read event header page failed\n");
++        return -1;
++    }
++
++    if (tep_parse_header_page(pevent, buf, len, sizeof(long))) {
++        log(LOG_WARNING, "Parse event header page failed\n");
++        return -1;
++    }
++
++    return 0;
++}
++
++static void parse_ras_data(struct pcpu_data *pdata, struct kbuffer *kbuf,
++               void *data, unsigned long long time_stamp)
++{
++    struct tep_record record;
++    struct trace_seq s;
++
++    record.ts = time_stamp;
++    record.size = kbuffer_event_size(kbuf);
++    record.data = data;
++    record.offset = kbuffer_curr_offset(kbuf);
++    record.cpu = pdata->cpu;
++
++    /* note offset is just offset in subbuffer */
++    record.missed_events = kbuffer_missed_events(kbuf);
++    record.record_size = kbuffer_curr_size(kbuf);
++
++    trace_seq_init(&s);
++    tep_print_event(pdata->ras->pevent, &s, &record, "%s-%s-%d-%s", 
++                    TEP_PRINT_NAME, TEP_PRINT_COMM, TEP_PRINT_TIME, TEP_PRINT_INFO);
++    trace_seq_do_printf(&s);
++    fflush(stdout);
++    trace_seq_destroy(&s);
++}
++
++static int get_num_cpus()
++{
++    return sysconf(_SC_NPROCESSORS_ONLN);
++}
++
++static int set_buffer_percent(struct ras_events *ras, int percent)
++{
++    int res = 0;
++    int fd;
++
++    fd = open_trace(ras->tracing, "buffer_percent", O_WRONLY);
++    if (fd >= 0) {
++        char buf[16];
++        ssize_t size;
++        snprintf(buf, sizeof(buf), "%d", percent);
++        size = write(fd, buf, strlen(buf));
++        if (size <= 0) {
++            log(LOG_WARNING, "can't write to buffer_percent\n");
++            res = -1;
++        }
++        close(fd);
++    } else {
++        log(LOG_WARNING, "Can't open buffer_percent\n");
++        res = -1;
++    }
++
++    return res;
++}
++
++static int read_ras_event_all_cpus(struct pcpu_data *pdata,
++                   unsigned n_cpus)
++{
++    ssize_t size;
++    unsigned long long time_stamp;
++    void *data;
++    int ready, i, count_nready;
++    struct kbuffer *kbuf;
++    void *page;
++    struct pollfd fds[n_cpus + 1];
++    struct signalfd_siginfo fdsiginfo;
++    sigset_t mask;
++    int warnonce[n_cpus];
++    char pipe_raw[PATH_MAX];
++
++    memset(&warnonce, 0, sizeof(warnonce));
++
++    page = malloc(pdata[0].ras->page_size);
++    if (!page) {
++        log(LOG_ERROR, "Can't allocate page\n");
++        return -ENOMEM;
++    }
++
++    kbuf = kbuffer_alloc(KBUFFER_LSIZE_8, ENDIAN);
++    if (!kbuf) {
++        log(LOG_ERROR, "Can't allocate kbuf\n");
++        free(page);
++        return -ENOMEM;
++    }
++
++    /* Fix for poll() on the per_cpu trace_pipe and trace_pipe_raw blocks
++     * indefinitely with the default buffer_percent in the kernel trace system,
++     * which is introduced by the following change in the kernel.
++     * https://lore.kernel.org/all/20221020231427.41be3f26@gandalf.local.home/T/#u.
++     * Set buffer_percent to 0 so that poll() will return immediately
++     * when the trace data is available in the ras per_cpu trace pipe_raw
++     */
++    if (set_buffer_percent(pdata[0].ras, 0))
++        log(LOG_WARNING, "Set buffer_percent failed\n");
++
++    for (i = 0; i < (n_cpus + 1); i++)
++        fds[i].fd = -1;
++
++    for (i = 0; i < n_cpus; i++) {
++        fds[i].events = POLLIN;
++
++        snprintf(pipe_raw, sizeof(pipe_raw),
++            "per_cpu/cpu%d/trace_pipe_raw", i);
++
++        fds[i].fd = open_trace(pdata[0].ras->tracing, pipe_raw, O_RDONLY);
++        if (fds[i].fd < 0) {
++            log(LOG_ERROR, "Can't open trace_pipe_raw\n");
++            goto error;
++        }
++    }
++
++    sigemptyset(&mask);
++    sigaddset(&mask, SIGINT);
++    sigaddset(&mask, SIGTERM);
++    sigaddset(&mask, SIGHUP);
++    sigaddset(&mask, SIGQUIT);
++    if (sigprocmask(SIG_BLOCK, &mask, NULL) == -1)
++        log(LOG_WARNING, "sigprocmask\n");
++    fds[n_cpus].events = POLLIN;
++    fds[n_cpus].fd = signalfd(-1, &mask, 0);
++    if (fds[n_cpus].fd < 0) {
++        log(LOG_WARNING, "signalfd\n");
++        goto error;
++    }
++
++    log(LOG_INFO, "Listening to events for cpus 0 to %u\n", n_cpus - 1);
++
++    do {
++        ready = poll(fds, (n_cpus + 1), -1);
++        if (ready < 0) {
++            log(LOG_WARNING, "poll\n");
++        }
++
++        /* check for the signal */
++        if (fds[n_cpus].revents & POLLIN) {
++            size = read(fds[n_cpus].fd, &fdsiginfo,
++                    sizeof(struct signalfd_siginfo));
++            if (size != sizeof(struct signalfd_siginfo)) {
++                log(LOG_WARNING, "signalfd read\n");
++                continue;
++            }
++
++            if (fdsiginfo.ssi_signo == SIGINT ||
++                fdsiginfo.ssi_signo == SIGTERM ||
++                fdsiginfo.ssi_signo == SIGHUP ||
++                fdsiginfo.ssi_signo == SIGQUIT) {
++                log(LOG_INFO, "Recevied signal=%d\n",
++                    fdsiginfo.ssi_signo);
++                goto error;
++            } else {
++                log(LOG_INFO,
++                    "Received unexpected signal=%d\n",
++                    fdsiginfo.ssi_signo);
++                continue;
++            }
++        }
++
++        count_nready = 0;
++        for (i = 0; i < n_cpus; i++) {
++            if (fds[i].revents & POLLERR) {
++                if (!warnonce[i]) {
++                    log(LOG_INFO,
++                        "Error on CPU %i\n", i);
++                    warnonce[i]++;
++                }
++                continue;
++            }
++            if (!(fds[i].revents & POLLIN)) {
++                count_nready++;
++                continue;
++            }
++            size = read(fds[i].fd, page, pdata[i].ras->page_size);
++            if (size < 0) {
++                log(LOG_WARNING, "read\n");
++                goto error;
++            } else if (size > 0) {
++                log(LOG_DEBUG, "cpu %d receive %ld bytes data\n", i, size);
++                kbuffer_load_subbuffer(kbuf, page);
++
++                while ((data = kbuffer_read_event(kbuf, &time_stamp))) {
++                    if (kbuffer_curr_size(kbuf) < 0) {
++                        log(LOG_ERROR, "invalid kbuf data, discard\n");
++                        break;
++                    }
++
++                    log(LOG_DEBUG, "parse_ras_data\n");
++                    parse_ras_data(&pdata[i],
++                               kbuf, data, time_stamp);
++
++                    /* increment to read next event */
++                    log(LOG_DEBUG, "kbuffer_next_event\n");
++                    kbuffer_next_event(kbuf, NULL);
++                }
++            } else {
++                count_nready++;
++            }
++        }
++
++        /*
++         * If count_nready == n_cpus, there is no cpu fd in POLLIN state,
++         * so we need to break the cycle
++         */
++        if (count_nready == n_cpus) {
++            log(LOG_ERROR, "no cpu fd in POLLIN state, stop running\n");
++            break;
++        }
++    } while (1);
++
++error:
++    kbuffer_free(kbuf);
++    free(page);
++    sigprocmask(SIG_UNBLOCK, &mask, NULL);
++
++    for (i = 0; i < (n_cpus + 1); i++) {
++        if (fds[i].fd > 0)
++            close(fds[i].fd);
++    }
++
++    return -1;
++}
++
++static int init_header_page(struct ras_events *ras, struct tep_handle *pevent)
++{
++    int rc;
++
++    rc = parse_header_page(ras, pevent);
++    if (rc) {
++        log(LOG_ERROR, "cannot read trace header_page: %d\n", rc);
++        return rc;
++    }
++    return 0;
++}
++
++static int init_event_format(struct ras_events *ras, struct tep_handle *pevent,
++                 char *group, char *event)
++{
++    char *page, fname[MAX_PATH + 1];
++    int fd, size, rc, page_size = DEFAULT_PAGE_SIZE;
++
++    // read one page from format
++    snprintf(fname, sizeof(fname), "events/%s/%s/format", group, event);
++    fd = open_trace(ras->tracing, fname, O_RDONLY);
++    if (fd < 0) {
++        log(LOG_ERROR,
++            "Can't get %s:%s traces. Perhaps this feature is not supported on your system.\n",
++            group, event);
++        return errno;
++    }
++
++    log(LOG_INFO, "page_size: %d\n", page_size);
++    ras->page_size = page_size;
++    page = malloc(page_size);
++    if (!page) {
++        log(LOG_ERROR, "Can't allocate page to read %s:%s format\n",
++            group, event);
++        rc = errno;
++        close(fd);
++        return rc;
++    }
++
++    size = read(fd, page, page_size);
++    close(fd);
++    if (size < 0) {
++        log(LOG_ERROR, "Can't read format\n");
++        free(page);
++        return size;
++    }
++
++    // parse event format
++    rc = tep_parse_event(pevent, page, size, group);
++    if (rc) {
++        log(LOG_ERROR, "Can't parse event %s:%s\n", group, event);
++        free(page);
++        return EINVAL;
++    }
++    return 0;
++}
++
++static int add_event_handler(struct ras_events *ras, struct tep_handle *pevent,
++                 char *group, char *event,
++                 tep_event_handler_func func)
++{
++    int rc;
++
++    rc = init_event_format(ras, pevent, group, event);
++    if (rc) {
++        log(LOG_ERROR, "init_event_format for %s:%s failed\n", group, event);
++        return rc;
++    }
++
++    /* Registers the special event handlers */
++    rc = tep_register_event_handler(pevent, -1, group, event, func, ras);
++    if (rc < 0) {
++        log(LOG_ERROR, "Can't register event handler for %s:%s\n",
++            group, event);
++        return EINVAL;
++    }
++
++    return 0;
++}
++
++int handle_ras_events(struct ras_events *ras)
++{
++    int rc, i;
++    unsigned cpus;
++    struct tep_handle *pevent = NULL;
++    struct pcpu_data *data = NULL;
++
++    pevent = tep_alloc();
++    if (!pevent) {
++        log(LOG_ERROR, "Can't allocate pevent\n");
++        rc = errno;
++        goto err;
++    }
++    ras->pevent = pevent;
++
++    rc = init_header_page(ras, pevent);
++    if (rc) {
++        log(LOG_ERROR, "init_header_page failed\n");
++        goto err;
++    }
++
++    rc = add_event_handler(ras, pevent, "ras", "non_standard_event",
++                ras_non_standard_event_handler);
++    if (rc) {
++        log(LOG_ERROR, "Can't get traces from %s:%s\n",
++            "ras", "non_standard_event");
++        goto err;
++    }
++    log(LOG_INFO, "add_event_handler done\n");
++
++    cpus = get_num_cpus();
++    data = calloc(sizeof(*data), cpus);
++    if (!data)
++        goto err;
++
++    for (i = 0; i < cpus; i++) {
++        data[i].ras = ras;
++        data[i].cpu = i;
++    }
++    rc = read_ras_event_all_cpus(data, cpus);
++
++err:
++    if (data)
++        free(data);
++    if (pevent)
++        tep_free(pevent);
++    return rc;
++}
+diff --git a/src/c/hbm_online_repair/ras-events.h b/src/c/hbm_online_repair/ras-events.h
+new file mode 100644
+index 0000000..4218d93
+--- /dev/null
++++ b/src/c/hbm_online_repair/ras-events.h
+@@ -0,0 +1,28 @@
++#ifndef __RAS_EVENTS_H
++#define __RAS_EVENTS_H
++
++#include <stdint.h>
++#include <time.h>
++
++#define MAX_PATH 1024
++
++#define DEFAULT_PAGE_SIZE  4096
++
++struct ras_events {
++    char              tracing[MAX_PATH + 1];
++    struct tep_handle *pevent;
++    int               page_size;
++};
++
++struct pcpu_data {
++    struct tep_handle *pevent;
++    struct ras_events *ras;
++    int               cpu;
++};
++
++/* Function prototypes */
++int toggle_ras_event(char *trace_dir, char *group, char *event, int enable);
++int handle_ras_events(struct ras_events *ras);
++struct ras_events *init_trace_instance(void);
++
++#endif
+diff --git a/src/c/hbm_online_repair/ras-non-standard-handler.c b/src/c/hbm_online_repair/ras-non-standard-handler.c
+new file mode 100644
+index 0000000..1d1fd04
+--- /dev/null
++++ b/src/c/hbm_online_repair/ras-non-standard-handler.c
+@@ -0,0 +1,81 @@
++#include <stdio.h>
++#include <stdlib.h>
++#include <stdbool.h>
++#include <string.h>
++#include <unistd.h>
++#include <traceevent/kbuffer.h>
++#include "ras-non-standard-handler.h"
++#include "logger.h"
++
++static char *uuid_le(const char *uu)
++{
++    static char uuid[sizeof("xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")];
++    if (!uu) {
++        log(LOG_ERROR, "uuid_le failed: uu is empty");
++        return uuid;
++    }
++    size_t uu_len = strlen(uu);
++    if (uu_len < SECTION_TYPE_UUID_LEN) {
++        log(LOG_ERROR, "uuid_le failed: uu is too short");
++        return uuid;
++    }
++
++    char *p = uuid;
++    int i;
++    static const unsigned char le[16] = {3,2,1,0,5,4,7,6,8,9,10,11,12,13,14,15};
++
++    for (i = 0; i < 16; i++) {
++        p += sprintf(p, "%.2x", (unsigned char) uu[le[i]]);
++        switch (i) {
++        case 3:
++        case 5:
++        case 7:
++        case 9:
++            *p++ = '-';
++            break;
++        }
++    }
++
++    *p = 0;
++
++    return uuid;
++}
++
++int ras_non_standard_event_handler(struct trace_seq *s,
++             struct tep_record *record,
++             struct tep_event *event, void *context)
++{
++    int len;
++    unsigned long long val;
++    struct ras_non_standard_event ev;
++
++    ev.sec_type = tep_get_field_raw(s, event, "sec_type",
++                       record, &len, 1);
++    if(!ev.sec_type) {
++        log(LOG_WARNING, "get event section type failed");
++        return -1;
++    }
++
++    trace_seq_printf(s, "\n");
++    trace_seq_printf(s, "sec_type: %s\n", uuid_le(ev.sec_type));
++
++    if (tep_get_field_val(s, event, "len", record, &val, 1) < 0) {
++        log(LOG_WARNING, "tep get field val failed");
++        return -1;
++    }
++
++    ev.length = val;
++    trace_seq_printf(s, "length: %d\n", ev.length);
++
++    ev.error = tep_get_field_raw(s, event, "buf", record, &len, 1);
++    if(!ev.error || ev.length != len) {
++        log(LOG_WARNING, "get event error failed");
++        return -1;
++    }
++
++    if (strcmp(uuid_le(ev.sec_type), HISI_COMMON_SECTION_TYPE_UUID) == 0) {
++        decode_hisi_common_section(&ev);
++    }
++
++    return 0;
++}
+diff --git a/src/c/hbm_online_repair/ras-non-standard-handler.h b/src/c/hbm_online_repair/ras-non-standard-handler.h
+new file mode 100644
+index 0000000..0272dc1
+--- /dev/null
++++ b/src/c/hbm_online_repair/ras-non-standard-handler.h
+@@ -0,0 +1,25 @@
++#ifndef __RAS_NON_STANDARD_HANDLER_H
++#define __RAS_NON_STANDARD_HANDLER_H
++
++#include <traceevent/event-parse.h>
++#include "ras-events.h"
++
++#define BIT(nr) (1UL << (nr))
++
++#define SECTION_TYPE_UUID_LEN         16
++#define HISI_COMMON_SECTION_TYPE_UUID "c8b328a8-9917-4af6-9a13-2e08ab2e7586"
++
++struct ras_non_standard_event {
++    char timestamp[64];
++    const char *sec_type;
++    const uint8_t *error;
++    uint32_t length;
++};
++
++int ras_non_standard_event_handler(struct trace_seq *s,
++            struct tep_record *record,
++            struct tep_event *event, void *context);
++
++int decode_hisi_common_section(struct ras_non_standard_event *event);
++
++#endif
+diff --git a/src/python/.gitignore b/src/python/.gitignore
+new file mode 100644
+index 0000000..58200d4
+--- /dev/null
++++ b/src/python/.gitignore
+@@ -0,0 +1 @@
++__pycache__/
+diff --git a/src/python/syssentry/bmc_alarm.py b/src/python/syssentry/bmc_alarm.py
+new file mode 100644
+index 0000000..5956538
+--- /dev/null
++++ b/src/python/syssentry/bmc_alarm.py
+@@ -0,0 +1,159 @@
++import logging
++import socket
++from enum import Enum
++
++from .utils import execute_command
++
++HEX_CHAR_LEN = 2
++SOCKET_RECEIVE_LEN = 128
++BMC_DATA_HEAD = "REP"
++BMC_REPORT_TYPE_BIT = 0
++HBMC_REPAIR_TYPE_BIT = 1
++HBMC_REPAIR_RESULT_BIT = 2
++HBMC_ISOLATION_TYPE_BIT = 3
++HBMC_SEND_HEAD_LEN = 4 # "ipmtool", "raw", "0x30", "0x92"
++HBMC_SEND_ROW_BIT = 26 + HBMC_SEND_HEAD_LEN
++HBMC_SEND_COL_BIT = 30 + HBMC_SEND_HEAD_LEN
++HBMC_REPAIR_TYPE_OFFSET = 7
++
++HBMC_SEND_SUCCESS_CODE = "db 07 00"
++
++
++class ReportType(Enum):
++    HBMC_REPAIR_BMC = 0x00
++
++
++class HBMCRepairType(Enum):
++    CE_ACLS = 7
++    PS_UCE_ACLS = 8
++    CE_SPPR = 9
++    PS_UCE_SPPR = 10
++
++
++class HBMCRepairResultType(Enum):
++    ISOLATE_FAILED_OVER_THRESHOLD = 0b10000001
++    ISOLATE_FAILED_OTHER_REASON   = 0b10000010
++    REPAIR_FAILED_NO_RESOURCE     = 0b10010100
++    REPAIR_FAILED_INVALID_PARAM   = 0b10011000
++    REPAIR_FAILED_OTHER_REASON	  = 0b10011100
++    ONLINE_PAGE_FAILED            = 0b10100000
++    ISOLATE_REPAIR_ONLINE_SUCCESS = 0b00000000
++
++
++class HBMCIsolationType(Enum):
++    ROW_FAULT = 1
++    SINGLE_ADDR_FAULT = 6
++
++
++def find_value_is_in_enum(value: int, enum: Enum):
++    for item in enum:
++        if value == item.value:
++            return True
++    return False
++
++
++def convert_hex_char_to_int(data, bit):
++    if len(data) < (bit+1)*HEX_CHAR_LEN:
++        logging.error(f"Data {data} len is too short, current convert bit is {bit}")
++    char = data[bit*HEX_CHAR_LEN:(bit+1)*HEX_CHAR_LEN]
++    try:
++        value = int(char, 16)
++    except ValueError:
++        logging.error(f"Cannot convert char [{char}] to int")
++        raise ValueError
++    return value
++
++
++def reverse_byte(data):
++    return data[3], data[2], data[1], data[0]
++
++
++def parse_hbmc_report(data: str):
++    logging.debug(f"bmc receive raw data is {data}")
++    repair_type = convert_hex_char_to_int(data, HBMC_REPAIR_TYPE_BIT)
++    repair_type += HBMC_REPAIR_TYPE_OFFSET
++    if not find_value_is_in_enum(repair_type, HBMCRepairType):
++        logging.warning(f"HBMC msg repair type ({repair_type}) is unknown")
++        raise ValueError
++
++    repair_result = convert_hex_char_to_int(data, HBMC_REPAIR_RESULT_BIT)
++    if not find_value_is_in_enum(repair_result, HBMCRepairResultType):
++        logging.warning(f"HBMC msg repair result ({repair_result}) is unknown")
++        raise ValueError
++
++    isolation_type = convert_hex_char_to_int(data, HBMC_ISOLATION_TYPE_BIT)
++    if not find_value_is_in_enum(isolation_type, HBMCIsolationType):
++        logging.warning(f"HBMC msg isolation type ({isolation_type}) is unknown")
++        raise ValueError
++
++    cmd_list = [
++        "ipmitool",
++        "raw",
++        "0x30", # Netfn
++        "0x92", # cmd
++        "0xdb",
++        "0x07",
++        "0x00",
++        "0x65", # sub command
++        "0x01", # SystemId
++        "0x00", # LocalSystemId
++        "{:#04X}".format(repair_type),
++        "{:#04X}".format(repair_result),
++        "{:#04X}".format(isolation_type),
++    ]
++    # send the remain data directly
++    data = data[(HBMC_ISOLATION_TYPE_BIT + 1) * HEX_CHAR_LEN:]
++    other_info_str = []
++    for i in range(len(data) // 2):
++        other_info_str.append("{:#04X}".format(convert_hex_char_to_int(data, i)))
++    cmd_list.extend(other_info_str)
++
++    cmd_list[HBMC_SEND_ROW_BIT:HBMC_SEND_ROW_BIT + 4] = reverse_byte(cmd_list[HBMC_SEND_ROW_BIT:HBMC_SEND_ROW_BIT + 4])
++    cmd_list[HBMC_SEND_COL_BIT:HBMC_SEND_COL_BIT + 4] = reverse_byte(cmd_list[HBMC_SEND_COL_BIT:HBMC_SEND_COL_BIT + 4])
++
++    logging.info(f"Send bmc alarm command is {cmd_list}")
++
++    ret = execute_command(cmd_list)
++    if HBMC_SEND_SUCCESS_CODE not in ret:
++        logging.warning(f"Send bmc alarm failed, error code is {ret}")
++        raise ValueError
++    logging.debug("Send bmc alarm success")
++
++
++PARSE_REPORT_MSG_FUNC_DICT = {
++    ReportType.HBMC_REPAIR_BMC.value: parse_hbmc_report,
++}
++
++
++def bmc_recv(server_socket: socket.socket):
++    logging.debug("Get hbm socket connection request")
++    try:
++        client_socket, _ = server_socket.accept()
++        logging.debug("cpu alarm fd listen ok")
++
++        data = client_socket.recv(SOCKET_RECEIVE_LEN)
++        data = data.decode()
++
++        data_head = data[0:len(BMC_DATA_HEAD)]
++        if data_head != BMC_DATA_HEAD:
++            logging.warning(f"The head of the msg is incorrect, head is {data_head}")
++            raise ValueError
++
++        # remove the data head
++        data = data[len(BMC_DATA_HEAD):]
++        logging.info(f"Remove head data is {data}")
++
++        report_type = convert_hex_char_to_int(data, BMC_REPORT_TYPE_BIT)
++        if report_type not in PARSE_REPORT_MSG_FUNC_DICT.keys():
++            logging.warning(f"The type of the msg ({report_type}) is unknown")
++            raise ValueError
++
++        PARSE_REPORT_MSG_FUNC_DICT[report_type](data)
++
++    except socket.error:
++        logging.error("socket error")
++        return
++    except (ValueError, OSError, UnicodeError, TypeError, NotImplementedError):
++        logging.error("server recv bmc msg failed!")
++        client_socket.close()
++        return
+diff --git a/src/python/syssentry/syssentry.py b/src/python/syssentry/syssentry.py
+index ea09095..3829849 100644
+--- a/src/python/syssentry/syssentry.py
++++ b/src/python/syssentry/syssentry.py
+@@ -48,6 +48,12 @@ try:
+ except ImportError:
+     CPU_EXIST = False
+ 
++BMC_EXIST = True
++try:
++    from .bmc_alarm import bmc_recv
++except ImportError:
++    BMC_EXIST = False
++
+ 
+ INSPECTOR = None
+ 
+@@ -89,6 +95,9 @@ RESULT_SOCKET_PATH = "/var/run/sysSentry/result.sock"
+ 
+ CPU_ALARM_SOCKET_PATH = "/var/run/sysSentry/report.sock"
+ 
++BMC_SOCKET_PATH = "/var/run/sysSentry/bmc.sock"
++
++fd_list = []
+ 
+ def msg_data_process(msg_data):
+     """message data process"""
+@@ -334,6 +343,41 @@ def cpu_alarm_fd_create():
+ 
+     return cpu_alarm_fd
+ 
++def bmc_fd_create():
++    """create bmc fd"""
++    if not os.path.exists(SENTRY_RUN_DIR):
++        logging.debug("%s not exist", SENTRY_RUN_DIR)
++        return None
++
++    try:
++        bmc_fd = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
++    except socket.error:
++        logging.error("bmc fd create failed")
++        return None
++
++    bmc_fd.setblocking(False)
++    if os.path.exists(BMC_SOCKET_PATH):
++        os.remove(BMC_SOCKET_PATH)
++
++    try:
++        bmc_fd.bind(BMC_SOCKET_PATH)
++    except OSError:
++        logging.error("bmc fd bind failed")
++        bmc_fd.close()
++        return None
++
++    os.chmod(BMC_SOCKET_PATH, 0o600)
++    try:
++        bmc_fd.listen(5)
++    except OSError:
++        logging.error("bmc fd listen failed")
++        bmc_fd.close()
++        return None
++
++    logging.debug("%s bind and listen", BMC_SOCKET_PATH)
++
++    return bmc_fd
++
+ 
+ def server_result_recv(server_socket: socket.socket):
+     """server result receive"""
+@@ -407,35 +451,47 @@ def server_result_fd_create():
+     return server_result_fd
+ 
+ 
++def close_all_fd():
++    for fd in fd_list:
++        fd.close()
++
++
+ def main_loop():
+     """main loop"""
++
+     server_fd = server_fd_create()
+     if not server_fd:
++        close_all_fd()
+         return
++    fd_list.append(server_fd)
+ 
+     server_result_fd = server_result_fd_create()
+     if not server_result_fd:
+-        server_fd.close()
++        close_all_fd()
+         return
++    fd_list.append(server_result_fd)
+ 
+     heartbeat_fd = heartbeat_fd_create()
+     if not heartbeat_fd:
+-        server_fd.close()
+-        server_result_fd.close()
++        close_all_fd()
+         return
++    fd_list.append(heartbeat_fd)
+ 
+     cpu_alarm_fd = cpu_alarm_fd_create()
+     if not cpu_alarm_fd:
+-        server_fd.close()
+-        heartbeat_fd.close()
+-        server_result_fd.close()
++        close_all_fd()
++        return
++    fd_list.append(cpu_alarm_fd)
++
++    bmc_fd = bmc_fd_create()
++    if not bmc_fd:
++        close_all_fd()
+         return
++    fd_list.append(bmc_fd)
+ 
+     epoll_fd = select.epoll()
+-    epoll_fd.register(server_fd.fileno(), select.EPOLLIN)
+-    epoll_fd.register(server_result_fd.fileno(), select.EPOLLIN)
+-    epoll_fd.register(heartbeat_fd.fileno(), select.EPOLLIN)
+-    epoll_fd.register(cpu_alarm_fd.fileno(), select.EPOLLIN)
++    for fd in fd_list:
++        epoll_fd.register(fd.fileno(), select.EPOLLIN)
+ 
+     logging.debug("start main loop")
+     # onstart_tasks_handle()
+@@ -458,6 +514,8 @@ def main_loop():
+                     heartbeat_recv(heartbeat_fd)
+                 elif CPU_EXIST and event_fd == cpu_alarm_fd.fileno():
+                     cpu_alarm_recv(cpu_alarm_fd)
++                elif BMC_EXIST and event_fd == bmc_fd.fileno():
++                    bmc_recv(bmc_fd)
+                 else:
+                     continue
+ 
+-- 
+2.27.0
+
