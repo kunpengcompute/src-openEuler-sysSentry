@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 59
+Release: 60
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -81,8 +81,7 @@ BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
 BuildRequires: json-c-devel
 BuildRequires: chrpath
-BuildRequires: elfutils-devel clang libbpf-devel llvm kernel-source
-Requires:      libxalarm = %{version}
+BuildRequires: elfutils-devel clang libbpf-devel llvm kernel-source kernel-devel
 Requires:      libbpf
 Requires:      pyxalarm = %{version}
 
@@ -348,6 +347,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin*
 
 %changelog
+* Sat Oct 26 2024 zhangnan <zhangnan134@huawei.com> - 1.0.2-60
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DES:modify dependency
+
 * Fri Oct 25 2024 heyouzhi <heyouzhi@huawei.com> - 1.0.2-59
 - Type:bugfix    
 - CVE:NA    
