@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 60
+Release: 61
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -76,6 +76,7 @@ Patch63:   ai_block_io-support-iodump.patch
 Patch64:   fix-get_alarm-error.patch
 Patch65:   ai_block_io-support-absolute-threshold-lower-limit.patch
 Patch66:   ai_block_io-fix-some-config-parameters-parse-bug.patch
+Patch67:   fix-alarm_info-newline-break-error.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -347,6 +348,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin*
 
 %changelog
+* Sat Oct 26 2024 jinsaihang <jinsaihang@h-partners.com> - 1.0.2-61
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DES:fix newline break error
+
 * Sat Oct 26 2024 zhangnan <zhangnan134@huawei.com> - 1.0.2-60
 - Type:bugfix
 - CVE:NA
