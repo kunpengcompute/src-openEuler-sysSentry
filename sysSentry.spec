@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 16
+Release: 17
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -27,6 +27,7 @@ Patch14:   over-threshold-should-be-warn-level-log-in-cat-cli.patch
 Patch15:   add-separator-to-err-info.patch
 Patch16:   remove-threshold-max-cpu-cores.patch
 Patch17:   add-hbm-online-repair.patch
+Patch18:   fix-hbm-online-repair-notice-and-efi-create.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -216,6 +217,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/syssentry/bmc_alarm.py
 
 %changelog
+* Mon Oct 28 2024 luckky <guodashun1@huawei.com> - 1.0.2-17
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix hbm_online_repair notice BMC function and create efi fd
+
 * Mon Oct 21 2024 luckky <guodashun1@huawei.com> - 1.0.2-16
 - Type:requirement
 - CVE:NA
