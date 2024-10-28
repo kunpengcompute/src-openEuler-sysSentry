@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 51
+Release: 52
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -71,6 +71,7 @@ Patch58:   fix-frequency-param-check-bug.patch
 Patch59:   ai_block_io-support-iodump.patch
 Patch60:   fix-get_alarm-error.patch
 Patch61:   fix-alarm_info-newline-break-error.patch
+Patch62:   add-hbm-online-repair.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -147,6 +148,16 @@ Requires:       sysSentry = %{version}-%{release}
 %description -n pysentry_collect
 This package provides Supports collect for plugins
 
+%package -n hbm_online_repair
+Summary:        hbm_online_repair for the sysSentry
+Provides:       hbm_online_repair = %{version}
+BuildRequires:  libtraceevent-devel
+Requires:       libtraceevent ipmitool
+Requires:       sysSentry = %{version}-%{release}
+
+%description -n hbm_online_repair
+This package provides hbm_online_repair for the sysSentry.
+
 %prep
 %autosetup -n %{name}-%{version} -p1
 
@@ -164,6 +175,11 @@ cmake -B ./build/ -S . -D CMAKE_INSTALL_PREFIX=/usr/local -D CMAKE_BUILD_TYPE=Re
 pushd build
 make
 popd
+popd
+
+# hbm_online_repair
+pushd src/c/hbm_online_repair
+make
 popd
 
 %install
@@ -208,6 +224,12 @@ install config/plugins/avg_block_io.ini %{buildroot}/etc/sysSentry/plugins/avg_b
 # ai_block_io
 install config/tasks/ai_block_io.mod %{buildroot}/etc/sysSentry/tasks/
 install config/plugins/ai_block_io.ini %{buildroot}/etc/sysSentry/plugins/ai_block_io.ini
+
+# hbm_online_repair
+mkdir -p %{buildroot}/etc/sysconfig/
+install config/tasks/hbm_online_repair.mod %{buildroot}/etc/sysSentry/tasks/
+install src/c/hbm_online_repair/hbm_online_repair %{buildroot}%{_bindir}
+install src/c/hbm_online_repair/hbm_online_repair.env %{buildroot}/etc/sysconfig/hbm_online_repair.env
 
 pushd src/python
 python3 setup.py install -O1 --root=$RPM_BUILD_ROOT --record=SENTRY_FILES
@@ -291,6 +313,11 @@ rm -rf %{buildroot}
 %exclude %{python3_sitelib}/sentryCollector/collect_plugin.py
 %exclude %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin*
 
+# hbm repair module
+%exclude %{_sysconfdir}/sysSentry/tasks/hbm_online_repair.mod
+%exclude %{python3_sitelib}/syssentry/bmc_*
+%exclude %{python3_sitelib}/syssentry/*/bmc_*
+
 %files -n libxalarm
 %attr(0550,root,root) %{_libdir}/libxalarm.so
 
@@ -331,7 +358,19 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryCollector/collect_plugin.py
 %attr(0550,root,root) %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin*
 
+%files -n hbm_online_repair
+%attr(0550,root,root) %{_bindir}/hbm_online_repair
+%attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysconfig/hbm_online_repair.env
+%attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/hbm_online_repair.mod
+%attr(0550,root,root) %{python3_sitelib}/syssentry/bmc_alarm.py
+
 %changelog
+* Sat Oct 26 2024 luckky <guodashun1@huawei.com> - 1.0.2-52
+- Type:requirement
+- CVE:NA
+- SUG:NA
+- DESC:add hbm_online_repair
+
 * Sat Oct 26 2024 jinsaihang <jinsaihang@h-partners.com> - 1.0.2-51
 - Type:bugfix     
 - CVE:NA       
