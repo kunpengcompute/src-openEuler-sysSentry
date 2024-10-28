@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 51
+Release: 52
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -70,7 +70,8 @@ Patch57:   update-collect-plugin-period-max.patch
 Patch58:   fix-frequency-param-check-bug.patch
 Patch59:   ai_block_io-support-iodump.patch
 Patch60:   fix-get_alarm-error.patch
-Patch61:   add-hbm-online-repair.patch
+Patch61:   fix-alarm_info-newline-break-error.patch
+Patch62:   add-hbm-online-repair.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -364,11 +365,17 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/syssentry/bmc_alarm.py
 
 %changelog
-* Sat Oct 26 2024 luckky <guodashun1@huawei.com> - 1.0.2-51
+* Sat Oct 26 2024 luckky <guodashun1@huawei.com> - 1.0.2-52
 - Type:requirement
 - CVE:NA
 - SUG:NA
 - DESC:add hbm_online_repair
+
+* Sat Oct 26 2024 jinsaihang <jinsaihang@h-partners.com> - 1.0.2-51
+- Type:bugfix     
+- CVE:NA       
+- SUG:NA     
+- DES:fix newline break error
 
 * Sat Oct 26 2024 zhangnan <zhangnan134@huawei.com> - 1.0.2-50
 - Type:bugfix

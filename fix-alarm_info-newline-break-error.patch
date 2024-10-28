@@ -1,0 +1,48 @@
+From fe1bb401c1f77860616e74c1dbf5fe6aa862b17d Mon Sep 17 00:00:00 2001
+From: jinsaihang <jinsaihang@h-partners.com>
+Date: Sat, 26 Oct 2024 07:18:16 +0000
+Subject: [PATCH] fix alarm_info newline break error
+
+Signed-off-by: jinsaihang <jinsaihang@h-partners.com>
+---
+ sysSentry-1.0.2/src/python/syssentry/alarm.py | 23 +++++++++++++++++++
+ 1 file changed, 23 insertions(+)
+
+diff --git a/src/python/syssentry/alarm.py b/src/python/syssentry/alarm.py
+index 2575307..b35a126 100644
+--- a/src/python/syssentry/alarm.py
++++ b/src/python/syssentry/alarm.py
+@@ -180,7 +180,30 @@ def get_alarm_result(task_name: str, time_range: int, detailed: bool) -> List[Di
+                 if 'details' in alarm_info:
+                     alarm_info.pop('details', None)
+             alarm.pop('msg1', None)
++
++            # dump each {key,value} of details in one line
++            if 'details' in alarm_info and isinstance(alarm_info['details'], dict):
++                for key in alarm_info['details']:
++                    alarm_info['details'][key] = json.dumps(alarm_info['details'][key], indent=None)
++
+             alarm['alarm_info'] = alarm_info
++        alarm_list = [alarm for alarm in alarm_list if 'alarm_source' in alarm['alarm_info'] and alarm['alarm_info']['alarm_source'] == task_name]
++
++        alarm_level_mapping = { 
++                1: 'MINOR_ALM',
++                2: 'MAJOR_ALM',
++                3: 'CRITICAL_ALM'
++                }   
++
++        alarm_type_mapping = { 
++                1: 'ALARM_TYPE_OCCUR',
++                2: 'ALARM_TYPE_RECOVER'
++                }   
++
++        for alarm in alarm_list:
++            alarm['alarm_level'] = alarm_level_mapping.get(alarm['alarm_level'], 'UNKNOWN_LEVEL')
++            alarm['alarm_type'] = alarm_type_mapping.get(alarm['alarm_type'], 'UNKNOWN_TYPE')
+         return alarm_list
++
+     finally:
+         alarm_list_lock.release()
+-- 
+2.27.0
+
