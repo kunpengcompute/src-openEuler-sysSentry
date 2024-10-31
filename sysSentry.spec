@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 63
+Release: 64
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -79,6 +79,7 @@ Patch66:   ai_block_io-fix-some-config-parameters-parse-bug.patch
 Patch67:   fix-alarm_info-newline-break-error.patch
 Patch68:   get_alarm-d-abnomal-display.patch
 Patch69:   modify-logrotate-rule.patch
+Patch70:   fix-excessive-CPU-usage.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -350,6 +351,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin*
 
 %changelog
+* Thu Oct 31 2024 jinsaihang <jinsaihang@h-partners.com> - 1.0.2-64
+- Type:bugfix    
+- CVE:NA         
+- SUG:NA         
+- DES:excessive CPU usage
+
 * Mon Oct 28 2024 zhangnan <zhangnan134@huawei.com> - 1.0.2-63
 - Type:bugfix
 - CVE:NA
