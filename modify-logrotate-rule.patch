@@ -1,0 +1,27 @@
+From 0d3323d13797f3f9d3124e3938787d2573bf249d Mon Sep 17 00:00:00 2001
+From: zhangnan <zhangnan134@huawei.com>
+Date: Mon, 28 Oct 2024 17:32:49 +0800
+Subject: [PATCH] modify logrotate rule
+
+---
+ config/logrotate | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/config/logrotate b/config/logrotate
+index f54e7b3..e855118 100644
+--- a/config/logrotate
++++ b/config/logrotate
+@@ -1,8 +1,9 @@
+ /var/log/sysSentry/*.log {
+-	nocompress
++	compress
+ 	missingok
+ 	notifempty
+ 	copytruncate
+ 	rotate 2
+ 	size +4096k
++	hourly
+ }
+-- 
+2.33.0
+
