@@ -1,0 +1,26 @@
+From 132334913c4afebefd6afa835f790fa8a5fbf123 Mon Sep 17 00:00:00 2001
+From: jinsaihang <jinsaihang@h-partners.com>
+Date: Mon, 28 Oct 2024 09:22:53 +0800
+Subject: [PATCH] get_alarm -d abnomal display
+
+Signed-off-by: jinsaihang <jinsaihang@h-partners.com>
+---
+ sysSentry-1.0.2/src/python/syssentry/alarm.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/python/syssentry/alarm.py b/src/python/syssentry/alarm.py
+index b35a126..e5cc313 100644
+--- a/src/python/syssentry/alarm.py
++++ b/src/python/syssentry/alarm.py
+@@ -184,7 +184,7 @@ def get_alarm_result(task_name: str, time_range: int, detailed: bool) -> List[Di
+             # dump each {key,value} of details in one line
+             if 'details' in alarm_info and isinstance(alarm_info['details'], dict):
+                 for key in alarm_info['details']:
+-                    alarm_info['details'][key] = json.dumps(alarm_info['details'][key], indent=None)
++                    alarm_info['details'][key] = str(alarm_info['details'][key])
+ 
+             alarm['alarm_info'] = alarm_info
+         alarm_list = [alarm for alarm in alarm_list if 'alarm_source' in alarm['alarm_info'] and alarm['alarm_info']['alarm_source'] == task_name]
+-- 
+2.27.0
+
