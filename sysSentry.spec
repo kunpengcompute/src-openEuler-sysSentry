@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 56
+Release: 57
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -76,6 +76,7 @@ Patch63:   fix-hbm-online-repair-notice-and-efi-create.patch
 Patch64:   get_alarm-d-abnomal-display.patch
 Patch65:   modify-logrotate-rule.patch
 Patch66:   fix-excessive-CPU-usage.patch
+Patch67:   fix-uint8-bug-and-change-isolation-default-value.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -369,6 +370,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/syssentry/bmc_alarm.py
 
 %changelog
+* Fri Nov 1 2024 luckky <guodashun1@huawei.com> - 1.0.2-57
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix uint8 bug and change page isolation threshold default value
+
 * Fri Nov 1 2024 jinsaihang <jinsaihang@h-partners.com> - 1.0.2-56
 - Type:bugfix                    
 - CVE:NA          
