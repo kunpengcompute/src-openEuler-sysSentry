@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 57
+Release: 58
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -77,6 +77,7 @@ Patch64:   get_alarm-d-abnomal-display.patch
 Patch65:   modify-logrotate-rule.patch
 Patch66:   fix-excessive-CPU-usage.patch
 Patch67:   fix-uint8-bug-and-change-isolation-default-value.patch
+Patch68:   fix-write-file-return-code-bug.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -370,6 +371,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/syssentry/bmc_alarm.py
 
 %changelog
+* Mon Nov 4 2024 luckky <guodashun1@huawei.com> - 1.0.2-58
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix write file return code bug
+
 * Fri Nov 1 2024 luckky <guodashun1@huawei.com> - 1.0.2-57
 - Type:bugfix
 - CVE:NA
