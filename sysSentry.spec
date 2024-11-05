@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 58
+Release: 59
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -78,6 +78,7 @@ Patch65:   modify-logrotate-rule.patch
 Patch66:   fix-excessive-CPU-usage.patch
 Patch67:   fix-uint8-bug-and-change-isolation-default-value.patch
 Patch68:   fix-write-file-return-code-bug.patch
+Patch69:   change-avg_block_io-config.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -371,6 +372,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/syssentry/bmc_alarm.py
 
 %changelog
+* Tue Nov 5 2024 gaoruoshu <gaoruoshu@huawei.com> - 1.0.2-59
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:change avg_block_io config
+
 * Mon Nov 4 2024 luckky <guodashun1@huawei.com> - 1.0.2-58
 - Type:bugfix
 - CVE:NA
