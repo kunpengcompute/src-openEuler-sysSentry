@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 60
+Release: 61
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -82,6 +82,7 @@ Patch69:   change-avg_block_io-config.patch
 Patch70:   ai_block_io-support-absolute-threshold-lower-limit.patch
 Patch71:   ai_block_io-fix-some-config-parameters-parse-bug.patch
 Patch72:   update-nvme-config.patch
+Patch73:   make-debug-msg-clear.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -375,6 +376,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/syssentry/bmc_alarm.py
 
 %changelog
+* Tue Nov 5 2024 luckky <guodashun1@huawei.com> - 1.0.2-61
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:make debug msg clear
+
 * Tue Nov 5 2024 zhangnan <zhangnan134@huawei.com> - 1.0.2-60
 - Type:bugfix
 - CVE:NA
