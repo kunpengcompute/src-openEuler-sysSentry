@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 19
+Release: 20
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -30,6 +30,7 @@ Patch17:   add-hbm-online-repair.patch
 Patch18:   fix-hbm-online-repair-notice-and-efi-create.patch
 Patch19:   fix-uint8-bug-and-change-isolation-default-value.patch
 Patch20:   fix-write-file-return-code-bug.patch
+Patch21:   update-the-commit-of-the-log-level-and-format-of-sys.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -219,6 +220,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/syssentry/bmc_alarm.py
 
 %changelog
+* Tue Nov 5 2024 luckky <guodashun1@huawei.com> - 1.0.2-20
+- Type:enhancement
+- CVE:NA
+- SUG:NA
+- DESC: update the commit of the log level and format function of sysSentry
+
 * Mon Nov 4 2024 luckky <guodashun1@huawei.com> - 1.0.2-19
 - Type:bugfix
 - CVE:NA

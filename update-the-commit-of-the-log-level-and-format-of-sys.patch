@@ -1,0 +1,172 @@
+From 273ef60bd4263add69c1171202c9804d40a992ea Mon Sep 17 00:00:00 2001
+From: luckky <guodashun1@huawei.com>
+Date: Tue, 5 Nov 2024 18:53:49 +0800
+Subject: [PATCH] update the commit of the log level and format of syssentry
+
+---
+ config/inspect.conf                         |  5 +++-
+ config/tasks/hbm_online_repair.mod          |  2 +-
+ src/c/hbm_online_repair/hbm_online_repair.c |  8 +++---
+ src/python/syssentry/sentry_config.py       | 28 +++++++++++++++++++++
+ src/python/syssentry/syssentry.py           | 16 +++++++-----
+ 5 files changed, 47 insertions(+), 12 deletions(-)
+
+diff --git a/config/inspect.conf b/config/inspect.conf
+index 071cca1..f451d9e 100644
+--- a/config/inspect.conf
++++ b/config/inspect.conf
+@@ -1,2 +1,5 @@
+ [inspect]
+-Interval=3
+\ No newline at end of file
++Interval=3
++
++[log]
++level=info
+diff --git a/config/tasks/hbm_online_repair.mod b/config/tasks/hbm_online_repair.mod
+index 77dd73e..4dcef43 100644
+--- a/config/tasks/hbm_online_repair.mod
++++ b/config/tasks/hbm_online_repair.mod
+@@ -3,7 +3,7 @@ enabled=yes
+ task_start=/usr/bin/hbm_online_repair
+ task_stop=kill $pid
+ type=period
+-interval=180
++interval=10
+ onstart=yes
+ env_file=/etc/sysconfig/hbm_online_repair.env
+ conflict=up
+\ No newline at end of file
+diff --git a/src/c/hbm_online_repair/hbm_online_repair.c b/src/c/hbm_online_repair/hbm_online_repair.c
+index b3b2742..943f201 100644
+--- a/src/c/hbm_online_repair/hbm_online_repair.c
++++ b/src/c/hbm_online_repair/hbm_online_repair.c
+@@ -9,7 +9,7 @@
+ #include "non-standard-hbm-repair.h"
+ 
+ #define DEFAULT_LOG_LEVEL LOG_INFO
+-#define DEFAULT_PAGE_ISOLATION_THRESHOLD 128
++#define DEFAULT_PAGE_ISOLATION_THRESHOLD 3355443
+ 
+ int global_level_setting;
+ int page_isolation_threshold;
+@@ -44,7 +44,7 @@ int execute_command(const char *command)
+     }
+ 
+     fgets(buffer, sizeof(buffer), fp);
+-    log(LOG_DEBUG, "output of command is: %s\n", buffer);
++    log(LOG_DEBUG, "output of command %s is: %s\n", command, buffer);
+ 
+     ret = pclose(fp);
+     if (ret < 0) {
+@@ -53,12 +53,12 @@ int execute_command(const char *command)
+     }
+ 
+     if (!WIFEXITED(ret)) {
+-        log(LOG_ERROR, "command did not terminate normally\n");
++        log(LOG_ERROR, "command %s did not terminate normally\n", command);
+         return -1;
+     }
+ 
+     ret = WEXITSTATUS(ret);
+-    log(LOG_DEBUG, "command exited with status: %d\n", ret);
++    log(LOG_DEBUG, "command %s exited with status: %d\n", command, ret);
+     return ret;
+ }
+ 
+diff --git a/src/python/syssentry/sentry_config.py b/src/python/syssentry/sentry_config.py
+index a0e7b79..1169887 100644
+--- a/src/python/syssentry/sentry_config.py
++++ b/src/python/syssentry/sentry_config.py
+@@ -21,6 +21,34 @@ import sys
+ DEFAULT_INSPECT_DELAY = 3
+ INSPECT_CONF_PATH = "/etc/sysSentry/inspect.conf"
+ 
++CONF_LOG = 'log'
++CONF_LOG_LEVEL = 'level'
++LogLevel = {
++    "debug": logging.DEBUG,
++    "info": logging.INFO,
++    "warning": logging.WARNING,
++    "error": logging.ERROR,
++    "critical": logging.CRITICAL
++}
++
++
++def get_log_level(filename=INSPECT_CONF_PATH):
++    if not os.path.exists(filename):
++        return logging.INFO
++
++    try:
++        config = configparser.ConfigParser()
++        config.read(filename)
++        if not config.has_option(CONF_LOG, CONF_LOG_LEVEL):
++            return logging.INFO
++        log_level = config.get(CONF_LOG, CONF_LOG_LEVEL)
++
++        if log_level.lower() in LogLevel:
++            return LogLevel.get(log_level.lower())
++        return logging.INFO
++    except configparser.Error:
++        return logging.INFO
++
+ 
+ class SentryConfig:
+     """
+diff --git a/src/python/syssentry/syssentry.py b/src/python/syssentry/syssentry.py
+index debff4e..0956e1e 100644
+--- a/src/python/syssentry/syssentry.py
++++ b/src/python/syssentry/syssentry.py
+@@ -23,7 +23,7 @@ import fcntl
+ 
+ import select
+ 
+-from .sentry_config import SentryConfig
++from .sentry_config import SentryConfig, get_log_level
+ 
+ from .task_map import TasksMap
+ from .global_values import SENTRY_RUN_DIR, CTL_SOCKET_PATH, SENTRY_RUN_DIR_PERM
+@@ -112,15 +112,16 @@ def msg_data_process(msg_data):
+ 
+     cmd_type = data_struct['type']
+     if cmd_type not in type_func and cmd_type not in type_func_void:
+-        logging.error("recv invaild cmd type: %s", cmd_type)
+-        return "Invaild cmd type"
++        logging.error("recv invalid cmd type: %s", cmd_type)
++        return "Invalid cmd type"
+ 
+     cmd_param = data_struct['data']
+-    logging.debug("msg_data_process cmd_type:%s cmd_param:%s", cmd_type, cmd_param)
++    logging.debug("msg_data_process cmd_type:%s cmd_param:%s", cmd_type, str(cmd_param))
+     if cmd_type in type_func:
+         ret, res_data = type_func[cmd_type](cmd_param)
+     else:
+         ret, res_data = type_func_void[cmd_type]()
++    logging.debug("msg_data_process res_data:%s",str(res_data))
+     res_msg_struct = {"ret": ret, "data": res_data}
+     res_msg = json.dumps(res_msg_struct)
+ 
+@@ -414,7 +415,7 @@ def server_result_recv(server_socket: socket.socket):
+     try:
+         client_socket.send(process_plugins_result.encode())
+     except OSError:
+-        logging.warning("server send reponse to plugins failed")
++        logging.warning("server send response to plugins failed")
+     finally:
+         client_socket.close()
+     return
+@@ -621,7 +622,10 @@ def main():
+         os.mkdir(SENTRY_RUN_DIR)
+         os.chmod(SENTRY_RUN_DIR, mode=SENTRY_RUN_DIR_PERM)
+ 
+-    logging.basicConfig(filename=SYSSENTRY_LOG_FILE, level=logging.INFO)
++    log_level = get_log_level()
++    log_format = "%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s"
++
++    logging.basicConfig(filename=SYSSENTRY_LOG_FILE, level=log_level, format=log_format)
+     os.chmod(SYSSENTRY_LOG_FILE, 0o600)
+ 
+     if not chk_and_set_pidfile():
+-- 
+2.43.0
+
