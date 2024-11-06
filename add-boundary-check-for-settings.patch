@@ -1,0 +1,39 @@
+From abf36bf0351efde388c089245aed9f6d8d2e6d3b Mon Sep 17 00:00:00 2001
+From: luckky <guodashun1@huawei.com>
+Date: Wed, 6 Nov 2024 11:42:53 +0800
+Subject: [PATCH] add boundary check for settings
+1. add two boundary checks for page_isolation_threshold and hbm_online_repair_log_level
+(0 <= page_isolation_threshold)
+(0(LOG_DEBUG) <= hbm_online_repair_log_level <= 3(LOG_ERROR))
+
+---
+ src/c/hbm_online_repair/hbm_online_repair.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/c/hbm_online_repair/hbm_online_repair.c b/src/c/hbm_online_repair/hbm_online_repair.c
+index 943f201..00c9c0b 100644
+--- a/src/c/hbm_online_repair/hbm_online_repair.c
++++ b/src/c/hbm_online_repair/hbm_online_repair.c
+@@ -89,6 +89,9 @@ void hbm_param_init(void)
+     if (ret < 0) {
+         global_level_setting = DEFAULT_LOG_LEVEL;
+         log(LOG_WARNING, "Get log level from config failed, set the default value %d\n", DEFAULT_LOG_LEVEL);
++    } else if (global_level_setting < LOG_DEBUG || global_level_setting > LOG_ERROR) {
++        log(LOG_WARNING, "The log level value %d in config is out of range, set the default value %d\n", global_level_setting, DEFAULT_LOG_LEVEL);
++        global_level_setting = DEFAULT_LOG_LEVEL;
+     } else {
+         log(LOG_INFO, "log level: %d\n", global_level_setting);
+     }
+@@ -98,6 +101,9 @@ void hbm_param_init(void)
+     if (ret < 0) {
+         page_isolation_threshold = DEFAULT_PAGE_ISOLATION_THRESHOLD;
+         log(LOG_WARNING, "Get page_isolation_threshold from config failed, set the default value %d\n", DEFAULT_PAGE_ISOLATION_THRESHOLD);
++    } else if (page_isolation_threshold < 0) {
++        log(LOG_WARNING, "The page_isolation_threshold %d in config is out of range, set the default value %d\n", page_isolation_threshold, DEFAULT_PAGE_ISOLATION_THRESHOLD);
++        page_isolation_threshold = DEFAULT_PAGE_ISOLATION_THRESHOLD;
+     } else {
+         log(LOG_INFO, "page_isolation_threshold: %d\n", page_isolation_threshold);
+     }
+-- 
+2.43.0
+
