@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 21
+Release: 22
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -32,6 +32,7 @@ Patch19:   fix-uint8-bug-and-change-isolation-default-value.patch
 Patch20:   fix-write-file-return-code-bug.patch
 Patch21:   update-the-commit-of-the-log-level-and-format-of-sys.patch
 Patch22:   add-boundary-check-for-settings.patch
+Patch23:   fix-xalarm-not-reject-alarm-msg-exceeds-max-length.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -221,6 +222,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/syssentry/bmc_alarm.py
 
 %changelog
+* Thu Nov 7 2024 caixiaomeng <caixiaomeng2@huawei.com> - 1.0.2-22
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC: fix xalarm not reject alarm msg exceeds max length
+
 * Wed Nov 6 2024 luckky <guodashun1@huawei.com> - 1.0.2-21
 - Type:bugfix
 - CVE:NA
