@@ -1,0 +1,29 @@
+From 91110be161465814c44fea6f3e3280f8648df597 Mon Sep 17 00:00:00 2001
+From: caixiaomeng <caixiaomeng2@huawei.com>
+Date: Thu, 7 Nov 2024 11:44:26 +0800
+Subject: [PATCH] fix xalarm not reject alarm msg exceeds max length
+
+---
+ src/libso/xalarm/register_xalarm.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/libso/xalarm/register_xalarm.c b/src/libso/xalarm/register_xalarm.c
+index fe15dc8..1e05c6b 100644
+--- a/src/libso/xalarm/register_xalarm.c
++++ b/src/libso/xalarm/register_xalarm.c
+@@ -353,6 +353,11 @@ int xalarm_Report(unsigned short usAlarmId, unsigned char ucAlarmLevel,
+         return -1;
+     }
+ 
++    if (pucParas == NULL || (int)strlen(pucParas) > MAX_PARAS_LEN) {
++        fprintf(stderr, "%s: alarm info invalid\n", __func__);
++        return -1;
++    }
++
+     if (memset(&info, 0, sizeof(struct alarm_info)) == NULL) {
+         fprintf(stderr, "%s: memset info failed, ret: %d\n", __func__, ret);
+         return -1;
+-- 
+2.33.0
+
+
