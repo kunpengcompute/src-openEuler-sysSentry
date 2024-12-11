@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 64
+Release: 65
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -86,6 +86,7 @@ Patch73:   make-debug-msg-clear.patch
 Patch74:   add-boundary-check-for-settings.patch
 Patch75:   change-status-of-period-task-and-sort-mod-file.patch
 Patch76:   uniform-avg_block_io-log-and-ai_block_io-log.patch
+Patch77:   set-logrotate.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -213,12 +214,10 @@ install config/tasks/rasdaemon.mod %{buildroot}/etc/sysSentry/tasks/
 
 # xalarm
 sh build/build.sh -i %{buildroot}%{_libdir}
-mkdir -p %{buildroot}%{_sysconfdir}/logrotate.d
 install -m 600 config/xalarm.conf %{buildroot}%{_sysconfdir}/sysSentry
 install -d %{buildroot}%{_libdir}
 install -d %{buildroot}%{_includedir}/xalarm
 install -m 600 service/xalarmd.service %{buildroot}%{_unitdir}
-install -m 600 config/logrotate %{buildroot}%{_sysconfdir}/logrotate.d/sysSentry
 install -m 644 src/libso/xalarm/register_xalarm.h %{buildroot}%{_includedir}/xalarm/register_xalarm.h
 
 # sentryCollector
@@ -247,6 +246,12 @@ mkdir -p %{buildroot}/etc/sysconfig/
 install config/tasks/hbm_online_repair.mod %{buildroot}/etc/sysSentry/tasks/
 install src/c/hbm_online_repair/hbm_online_repair %{buildroot}%{_bindir}
 install src/c/hbm_online_repair/hbm_online_repair.env %{buildroot}/etc/sysconfig/hbm_online_repair.env
+
+# logrotate
+mkdir -p %{buildroot}%{_localstatedir}/lib/logrotate-syssentry
+mkdir -p %{buildroot}%{_sysconfdir}/cron.hourly
+install -m 0600 config/logrotate-sysSentry.conf %{buildroot}%{_sysconfdir}/logrotate-sysSentry.conf
+install -m 0500 src/sh/logrotate-sysSentry.cron %{buildroot}%{_sysconfdir}/cron.hourly/logrotate-sysSentry
 
 pushd src/python
 python3 setup.py install -O1 --root=$RPM_BUILD_ROOT --record=SENTRY_FILES
@@ -298,9 +303,13 @@ rm -rf %{buildroot}
 
 # xalarm
 %attr(0550,root,root) %{_bindir}/xalarmd
-%attr(0600,root,root) %config(noreplace) %{_sysconfdir}/logrotate.d/sysSentry
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/xalarm.conf
 %attr(0600,root,root) %{_unitdir}/xalarmd.service
+
+# logrotate
+%dir %{_localstatedir}/lib/logrotate-syssentry
+%attr(0600,root,root) %config(noreplace) %{_sysconfdir}/logrotate-sysSentry.conf
+%attr(0500,root,root) %{_sysconfdir}/cron.hourly/logrotate-sysSentry
 
 # cpu inspection module
 %exclude %{_sysconfdir}/sysSentry/tasks/cpu_sentry.mod
@@ -383,6 +392,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/syssentry/bmc_alarm.py
 
 %changelog
+* Wed Dec 18 2024 shixuantong <shixuantong@huawei.com> - 1.0.2-65
+- Type:enhancement
+- CVE:NA
+- SUG:NA
+- DESC:set logrotate
+
 * Wed Dec 18 2024 jinsaihang <jinsaihang@h-partners.com> - 1.0.2-64
 - Type:bugfix
 - CVE:NA
