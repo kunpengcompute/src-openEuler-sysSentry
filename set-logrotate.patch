@@ -1,0 +1,53 @@
+From 962fd4079fa3af24a839c5fa00e591bf11e93c68 Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Mon, 16 Dec 2024 09:43:04 +0800
+Subject: [PATCH] set logrotate
+
+---
+ config/{logrotate => logrotate-sysSentry.conf} |  5 +++--
+ src/sh/logrotate-sysSentry.cron                | 13 +++++++++++++
+ 2 files changed, 16 insertions(+), 2 deletions(-)
+ rename config/{logrotate => logrotate-sysSentry.conf} (73%)
+ create mode 100644 src/sh/logrotate-sysSentry.cron
+
+diff --git a/config/logrotate b/config/logrotate-sysSentry.conf
+similarity index 73%
+rename from config/logrotate
+rename to config/logrotate-sysSentry.conf
+index f54e7b3..32f063f 100644
+--- a/config/logrotate
++++ b/config/logrotate-sysSentry.conf
+@@ -1,8 +1,9 @@
+ /var/log/sysSentry/*.log {
+-	nocompress
++	create
++	compress
+ 	missingok
+ 	notifempty
+ 	copytruncate
+-	rotate 2
++	rotate 4
+ 	size +4096k
+ }
+diff --git a/src/sh/logrotate-sysSentry.cron b/src/sh/logrotate-sysSentry.cron
+new file mode 100644
+index 0000000..64d02f9
+--- /dev/null
++++ b/src/sh/logrotate-sysSentry.cron
+@@ -0,0 +1,13 @@
++#!/bin/sh
++
++TMPF=`mktemp /tmp/logrotate-sysSentry.XXXXXXXXX`
++
++/usr/sbin/logrotate /etc/logrotate-sysSentry.conf -v --log=$TMPF -s /var/lib/logrotate-syssentry/logrotate.status
++EXITVALUE=$?
++if [ $EXITVALUE != 0 ]; then
++	/bin/logger -t logrotate "ALERT exited abnormally with [$EXITVALUE], for details, see /var/log/sysSentry/logrotate.log"
++	/bin/logger -t logrotate -f $TMPF
++fi
++rm -rf $TMPF
++rm -rf /var/lib/logrotate-syssentry/logrotate.status
++exit $EXITVALUE
+-- 
+2.27.0
+
