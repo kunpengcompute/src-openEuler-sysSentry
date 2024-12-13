@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 22
+Release: 23
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -33,6 +33,7 @@ Patch20:   fix-write-file-return-code-bug.patch
 Patch21:   update-the-commit-of-the-log-level-and-format-of-sys.patch
 Patch22:   add-boundary-check-for-settings.patch
 Patch23:   fix-xalarm-not-reject-alarm-msg-exceeds-max-length.patch
+Patch24:   change-status-of-period-task-and-sort-mod-file.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -115,6 +116,9 @@ install -d -m 700 %{buildroot}/etc/sysSentry/plugins/
 install -m 600 config/inspect.conf %{buildroot}%{_sysconfdir}/sysSentry
 install -m 600 service/sysSentry.service %{buildroot}%{_unitdir}
 
+# rasdaemon
+install config/tasks/rasdaemon.mod %{buildroot}/etc/sysSentry/tasks/
+
 # xalarm
 sh build/build.sh -i %{buildroot}%{_libdir}
 mkdir -p %{buildroot}%{_sysconfdir}/logrotate.d
@@ -178,6 +182,7 @@ rm -rf %{buildroot}
 %attr(0750,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks
 %attr(0750,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/plugins
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/inspect.conf
+%attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/rasdaemon.mod
 %attr(0600,root,root) %{_unitdir}/sysSentry.service
 
 # xalarm
@@ -222,6 +227,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/syssentry/bmc_alarm.py
 
 %changelog
+* Fri Dec 13 2024 zhuofeng <zhuofeng2@huawei.com> - 1.0.2-23
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC: change status of period task and sort mod file
+
 * Thu Nov 7 2024 caixiaomeng <caixiaomeng2@huawei.com> - 1.0.2-22
 - Type:bugfix
 - CVE:NA

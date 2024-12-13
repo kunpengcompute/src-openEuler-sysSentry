@@ -1,0 +1,37 @@
+From 8cc13a422ed29e48b0c5b86b2da2a5dc8ad4aa59 Mon Sep 17 00:00:00 2001
+From: zhuofeng <zhuofeng6@huawei.com>
+Date: Fri, 13 Dec 2024 11:20:55 +0800
+Subject: [PATCH] change status of period task and sort mod file
+
+---
+ src/python/syssentry/cron_process.py | 1 +
+ src/python/syssentry/load_mods.py    | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/src/python/syssentry/cron_process.py b/src/python/syssentry/cron_process.py
+index 50780b3..5543d67 100644
+--- a/src/python/syssentry/cron_process.py
++++ b/src/python/syssentry/cron_process.py
+@@ -144,6 +144,7 @@ def period_tasks_handle():
+ 
+         if not task.onstart:
+             logging.debug("period onstart not enabled, task: %s", task.name)
++            task.runtime_status = EXITED_STATUS
+             continue
+ 
+         if task.runtime_status == WAITING_STATUS and \
+diff --git a/src/python/syssentry/load_mods.py b/src/python/syssentry/load_mods.py
+index 48d7e66..5be5540 100644
+--- a/src/python/syssentry/load_mods.py
++++ b/src/python/syssentry/load_mods.py
+@@ -224,6 +224,7 @@ def load_tasks():
+         return "failed", ""
+ 
+     mod_files = os.listdir(TASKS_STORAGE_PATH)
++    mod_files.sort()
+     for mod_file in mod_files:
+         logging.debug("find mod, path is %s", mod_file)
+         if not mod_file.endswith(MOD_FILE_SUFFIX):
+-- 
+2.33.0
+
