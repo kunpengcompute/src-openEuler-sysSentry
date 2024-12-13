@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 67
+Release: 68
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -83,6 +83,7 @@ Patch70:   fix-excessive-CPU-usage.patch
 Patch71:   change-avg_block_io-config.patch
 Patch72:   update-nvme-config.patch
 Patch73:   fix-absolute-threshold-not-be-used.patch
+Patch74:   add-debug-log-and-modify-disk-type-for-ebpf.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -354,6 +355,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin*
 
 %changelog
+* Fri Dec 13 2024 zhuofeng <zhuofeng2@huawei.com> - 1.0.2-68
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DES:add debug log and modify disk type for ebpf
+
 * Fri Nov 15 2024 heyouzhi <heyouzhi@huawei.com> - 1.0.2-67
 - Type:bugfix    
 - CVE:NA         
