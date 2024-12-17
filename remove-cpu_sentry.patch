@@ -1,0 +1,24 @@
+From 07f4a32803070c8b736fac22f0203db9daf91e5f Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Mon, 16 Dec 2024 20:49:47 +0800
+Subject: [PATCH] remove cpu_sentry
+
+---
+ src/python/setup.py | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/src/python/setup.py b/src/python/setup.py
+index 9e26a10..d332e36 100644
+--- a/src/python/setup.py
++++ b/src/python/setup.py
+@@ -29,7 +29,6 @@ setup(
+     ],
+     entry_points={
+         'console_scripts': [
+-            'cpu_sentry=syssentry.cpu_sentry:main',
+             'syssentry=syssentry.syssentry:main',
+             'xalarmd=xalarm.xalarm_daemon:alarm_process_create',
+             'sentryCollector=sentryCollector.collectd:main',
+-- 
+2.27.0
+
