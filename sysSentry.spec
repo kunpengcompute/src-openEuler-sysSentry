@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 2
+Release: 3
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -12,6 +12,7 @@ BuildRoot: %{_builddir}/%{name}-root
 
 Patch1:    fix-version-in-setup.py.patch
 Patch2:    fix-xalarm-not-reject-alarm-msg-exceeds-max-length.patch
+Patch3:    set-logrotate.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -80,12 +81,10 @@ install -m 600 service/sysSentry.service %{buildroot}%{_unitdir}
 
 # xalarm
 sh build/build.sh -i %{buildroot}%{_libdir}
-mkdir -p %{buildroot}%{_sysconfdir}/logrotate.d
 install -m 600 config/xalarm.conf %{buildroot}%{_sysconfdir}/sysSentry
 install -d %{buildroot}%{_libdir}
 install -d %{buildroot}%{_includedir}/xalarm
 install -m 600 service/xalarmd.service %{buildroot}%{_unitdir}
-install -m 600 config/logrotate %{buildroot}%{_sysconfdir}/logrotate.d/sysSentry
 install -m 644 src/libso/xalarm/register_xalarm.h %{buildroot}%{_includedir}/xalarm/register_xalarm.h
 
 # cpu sentry
@@ -93,6 +92,12 @@ install config/tasks/cpu_sentry.mod %{buildroot}/etc/sysSentry/tasks/
 install config/plugins/cpu_sentry.ini %{buildroot}/etc/sysSentry/plugins/cpu_sentry.ini
 install src/c/catcli/catlib/build/cat-cli %{buildroot}%{_bindir}/cat-cli
 install src/c/catcli/catlib/build/plugin/cpu_patrol/libcpu_patrol.so %{buildroot}%{_libdir}
+
+# logrotate
+mkdir -p %{buildroot}%{_localstatedir}/lib/logrotate-syssentry
+mkdir -p %{buildroot}%{_sysconfdir}/cron.hourly
+install -m 0600 config/logrotate-sysSentry.conf %{buildroot}%{_sysconfdir}/logrotate-sysSentry.conf
+install -m 0500 src/sh/logrotate-sysSentry.cron %{buildroot}%{_sysconfdir}/cron.hourly/logrotate-sysSentry
 
 pushd src/python
 python3 setup.py install -O1 --root=$RPM_BUILD_ROOT --record=SENTRY_FILES
@@ -136,9 +141,13 @@ rm -rf %{buildroot}
 
 # xalarm
 %attr(0550,root,root) %{_bindir}/xalarmd
-%attr(0600,root,root) %config(noreplace) %{_sysconfdir}/logrotate.d/sysSentry
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/xalarm.conf
 %attr(0600,root,root) %{_unitdir}/xalarmd.service
+
+# logrotate
+%dir %{_localstatedir}/lib/logrotate-syssentry
+%attr(0600,root,root) %config(noreplace) %{_sysconfdir}/logrotate-sysSentry.conf
+%attr(0500,root,root) %{_sysconfdir}/cron.hourly/logrotate-sysSentry
 
 # cpu inspection module
 %exclude %{_sysconfdir}/sysSentry/tasks/cpu_sentry.mod
@@ -165,6 +174,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/syssentry/cpu_*
 
 %changelog
+* Wed Dec 18 2024 shixuantong <shixuantong@huawei.com> - 1.0.2-3
+- Type:enhancement
+- CVE:NA
+- SUG:NA
+- DESC:set logrotate
+
 * Thu Nov 7 2024 caixiaomeng <caixiaomeng2@huawei.com> - 1.0.2-2
 - Type:bugfix
 - CVE:NA
