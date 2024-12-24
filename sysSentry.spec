@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 24
+Release: 25
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -35,6 +35,7 @@ Patch22:   add-boundary-check-for-settings.patch
 Patch23:   fix-xalarm-not-reject-alarm-msg-exceeds-max-length.patch
 Patch24:   change-status-of-period-task-and-sort-mod-file.patch
 Patch25:   set-logrotate.patch
+Patch26:   hbm_online_repair-add-unload-driver.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -236,6 +237,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/syssentry/bmc_alarm.py
 
 %changelog
+* Wed Dec 18 2024 luckky <guodashun1@huawei.com> - 1.0.2-25
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC: add boundary check for settings
+
 * Wed Dec 18 2024 shixuantong <shixuantong@huawei.com> - 1.0.2-24
 - Type:enhancement
 - CVE:NA
