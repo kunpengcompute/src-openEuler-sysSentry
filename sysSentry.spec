@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 66
+Release: 67
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -88,11 +88,15 @@ Patch75:   change-status-of-period-task-and-sort-mod-file.patch
 Patch76:   uniform-avg_block_io-log-and-ai_block_io-log.patch
 Patch77:   set-logrotate.patch
 Patch78:   hbm_online_repair-add-unload-driver.patch
+Patch79:   fix-test_ai_block_io-fail.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
 BuildRequires: json-c-devel
 BuildRequires: chrpath
+# for test
+BuildRequires: python3-numpy python3-pytest
+
 Requires:      pyxalarm = %{version}
 
 %description
@@ -260,6 +264,9 @@ cat SENTRY_FILES | grep -v register_xalarm.* | grep -v sentry_notify.*  > SENTRY
 mv SENTRY_FILES.tmp SENTRY_FILES
 popd
 
+%check
+PYTHONPATH=%{buildroot}%{python3_sitelib} %{__python3} -m pytest selftest/test/
+
 %pre
 
 %post
@@ -393,6 +400,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/syssentry/bmc_alarm.py
 
 %changelog
+* Sat Dec 28 2024 shixuantong <shixuantong@huawei.com> - 1.0.2-67
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix test_ai_block_io fail
+
 * Wed Dec 18 2024 luckky <guodashun1@huawei.com> - 1.0.2-66
 - Type:bugfix
 - CVE:NA
