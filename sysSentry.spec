@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 72
+Release: 73
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -88,12 +88,16 @@ Patch75:   remove-cpu_sentry.patch
 Patch76:   uniform-avg_block_io-log-and-ai_block_io-log.patch
 Patch77:   set-logrotate.patch
 Patch78:   ebpf-adpat-to-the-kylin-platform.patch
+Patch79:   fix-test_ai_block_io-fail.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
 BuildRequires: json-c-devel
 BuildRequires: chrpath
 BuildRequires: elfutils-devel clang libbpf-devel llvm kernel-source kernel-devel
+# for test
+BuildRequires: python3-numpy python3-pytest
+
 Requires:      libbpf
 Requires:      pyxalarm = %{version}
 
@@ -226,6 +230,9 @@ cat SENTRY_FILES | grep -v register_xalarm.* | grep -v sentry_notify.*  > SENTRY
 mv SENTRY_FILES.tmp SENTRY_FILES
 popd
 
+%check
+PYTHONPATH=%{buildroot}%{python3_sitelib} %{__python3} -m pytest selftest/test/test_ai_block_io.py
+
 %pre
 
 %post
@@ -337,6 +344,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin*
 
 %changelog
+* Sat Dec 28 2024 shixuantong <shixuantong@huawei.com> - 1.0.2-73
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix test_ai_block_io fail
+
 * Fri Dec 20 2024 zhuofeng <zhuofeng2@huawei.com> - 1.0.2-72
 - Type:bugfix
 - CVE:NA
