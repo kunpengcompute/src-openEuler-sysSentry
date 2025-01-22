@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 73
+Release: 74
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -221,7 +221,7 @@ install config/plugins/ai_block_io.ini %{buildroot}/etc/sysSentry/plugins/ai_blo
 # logrotate
 mkdir -p %{buildroot}%{_localstatedir}/lib/logrotate-syssentry
 mkdir -p %{buildroot}%{_sysconfdir}/cron.hourly
-install -m 0600 config/logrotate-sysSentry.conf %{buildroot}%{_sysconfdir}/logrotate-sysSentry.conf
+install -m 0600 config/logrotate-sysSentry.conf %{buildroot}%{_sysconfdir}/sysSentry/logrotate-sysSentry.conf
 install -m 0500 src/sh/logrotate-sysSentry.cron %{buildroot}%{_sysconfdir}/cron.hourly/logrotate-sysSentry
 
 pushd src/python
@@ -283,7 +283,7 @@ rm -rf %{buildroot}
 
 # logrotate
 %dir %{_localstatedir}/lib/logrotate-syssentry
-%attr(0600,root,root) %config(noreplace) %{_sysconfdir}/logrotate-sysSentry.conf
+%attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/logrotate-sysSentry.conf
 %attr(0500,root,root) %{_sysconfdir}/cron.hourly/logrotate-sysSentry
 
 # cpu inspection module
@@ -344,6 +344,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin*
 
 %changelog
+* Wed Jan 22 2025 shixuantong <shixuantong@huawei.com> - 1.0.2-74
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:move logrotate-sysSentry.conf from /etc/ to /etc/sysSentry/
+
 * Sat Dec 28 2024 shixuantong <shixuantong@huawei.com> - 1.0.2-73
 - Type:bugfix
 - CVE:NA
