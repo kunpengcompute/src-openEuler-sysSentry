@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 27
+Release: 28
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -37,6 +37,7 @@ Patch24:   change-status-of-period-task-and-sort-mod-file.patch
 Patch25:   set-logrotate.patch
 Patch26:   hbm_online_repair-add-unload-driver.patch
 Patch27:   add-pyxalarm-and-pySentryNotify-add-multi-users-supp.patch
+Patch28:   adapt_5.10_kenel_for_syssentry.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -238,6 +239,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/syssentry/bmc_alarm.py
 
 %changelog
+* Fri Jan 24 2025 jinsaihang <jinsaihang@h-partners.com> - 1.0.2-28
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:adapt get_alarm for kenel 5.10
+
 * Wed Jan 22 2025 shixuantong <shixuantong@huawei.com> - 1.0.2-27
 - Type:bugfix
 - CVE:NA
