@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 28
+Release: 29
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -38,12 +38,15 @@ Patch25:   set-logrotate.patch
 Patch26:   hbm_online_repair-add-unload-driver.patch
 Patch27:   add-pyxalarm-and-pySentryNotify-add-multi-users-supp.patch
 Patch28:   adapt_5.10_kenel_for_syssentry.patch
+Patch29:   collect-module-adapt-to-the-5.10-kernel.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
 BuildRequires: json-c-devel
 BuildRequires: chrpath
+BuildRequires: elfutils-devel clang libbpf-devel bpftool
 Requires:      libxalarm = %{version}
+Requires:      libbpf
 
 %description
 sysSentry provides framework tools for system inspection.
@@ -73,6 +76,13 @@ Recommends:     ipmitool
 
 %description -n cpu_sentry
 This package provides CPU fault detection
+
+%package -n pysentry_collect
+Summary:        Supports collect in python immplementation
+Requires:       sysSentry = %{version}-%{release}
+
+%description -n pysentry_collect
+This package provides Supports collect for plugins
 
 %package -n hbm_online_repair
 Summary:        hbm_online_repair for the sysSentry
@@ -108,6 +118,10 @@ pushd src/c/hbm_online_repair
 make
 popd
 
+pushd src/c/ebpf_collector
+make
+popd
+
 %install
 # sysSentry
 mkdir -p %{buildroot}%{_bindir}
@@ -119,6 +133,7 @@ install -d -m 700 %{buildroot}/etc/sysSentry/tasks/
 install -d -m 700 %{buildroot}/etc/sysSentry/plugins/
 install -m 600 config/inspect.conf %{buildroot}%{_sysconfdir}/sysSentry
 install -m 600 service/sysSentry.service %{buildroot}%{_unitdir}
+install -m 755 src/c/ebpf_collector/ebpf_collector %{buildroot}%{_bindir}
 
 # rasdaemon
 install config/tasks/rasdaemon.mod %{buildroot}/etc/sysSentry/tasks/
@@ -130,6 +145,10 @@ install -d %{buildroot}%{_libdir}
 install -d %{buildroot}%{_includedir}/xalarm
 install -m 600 service/xalarmd.service %{buildroot}%{_unitdir}
 install -m 644 src/libso/xalarm/register_xalarm.h %{buildroot}%{_includedir}/xalarm/register_xalarm.h
+
+# sentryCollector
+install -m 600 config/collector.conf %{buildroot}%{_sysconfdir}/sysSentry
+install -m 600 service/sentryCollector.service %{buildroot}%{_unitdir}
 
 # cpu sentry
 install config/tasks/cpu_sentry.mod %{buildroot}/etc/sysSentry/tasks/
@@ -167,6 +186,8 @@ if [ "$1" = "0" ]; then
     systemctl disable xalarmd.service
     systemctl stop sysSentry.service
     systemctl disable sysSentry.service
+    systemctl stop sentryCollector.service
+    systemctl disable sentryCollector.service
 fi
 rm -rf /var/run/xalarm | :
 rm -rf /var/run/sysSentry | :
@@ -181,6 +202,7 @@ rm -rf %{buildroot}
 %defattr(0550,root,root)
 %attr(0550,root,root) %{python3_sitelib}/xalarm
 %attr(0550,root,root) %{python3_sitelib}/syssentry
+%attr(0550,root,root) %{python3_sitelib}/sentryCollector
 
 # sysSentry
 %attr(0500,root,root) %{_bindir}/sentryctl
@@ -192,11 +214,21 @@ rm -rf %{buildroot}
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/inspect.conf
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/rasdaemon.mod
 %attr(0600,root,root) %{_unitdir}/sysSentry.service
+%attr(0755,root,root) %{_bindir}/ebpf_collector
 
 # xalarm
 %attr(0550,root,root) %{_bindir}/xalarmd
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/xalarm.conf
 %attr(0600,root,root) %{_unitdir}/xalarmd.service
+
+# sentryCollector
+%attr(0550,root,root) %{_bindir}/sentryCollector
+%attr(0600,root,root) %{_sysconfdir}/sysSentry/collector.conf
+%attr(0600,root,root) %{_unitdir}/sentryCollector.service
+
+# pysentry_collect
+%exclude %{python3_sitelib}/sentryCollector/collect_plugin.py
+%exclude %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin*
 
 # logrotate
 %dir %{_localstatedir}/lib/logrotate-syssentry
@@ -238,7 +270,17 @@ rm -rf %{buildroot}
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/hbm_online_repair.mod
 %attr(0550,root,root) %{python3_sitelib}/syssentry/bmc_alarm.py
 
+%files -n pysentry_collect
+%attr(0550,root,root) %{python3_sitelib}/sentryCollector/collect_plugin.py
+%attr(0550,root,root) %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin*
+
 %changelog
+* Sun Jan 26 2025 zhuofeng <zhuofeng2@huawei.com> - 1.0.2-29
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:collect module adapt to the 5.10 kernel
+
 * Fri Jan 24 2025 jinsaihang <jinsaihang@h-partners.com> - 1.0.2-28
 - Type:bugfix
 - CVE:NA
