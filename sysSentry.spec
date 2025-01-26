@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 29
+Release: 30
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -39,12 +39,14 @@ Patch26:   hbm_online_repair-add-unload-driver.patch
 Patch27:   add-pyxalarm-and-pySentryNotify-add-multi-users-supp.patch
 Patch28:   adapt_5.10_kenel_for_syssentry.patch
 Patch29:   collect-module-adapt-to-the-5.10-kernel.patch
+Patch30:   add-avg_block_io-and-ai_block_io.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
 BuildRequires: json-c-devel
 BuildRequires: chrpath
 BuildRequires: elfutils-devel clang libbpf-devel bpftool
+BuildRequires: python3-numpy python3-pytest
 Requires:      libxalarm = %{version}
 Requires:      libbpf
 
@@ -67,6 +69,39 @@ Provides:       libxalarm-devel = %{version}
 
 %description -n libxalarm-devel
 This package provides developer tools for the libxalarm.
+
+%package -n avg_block_io
+Summary:        Supports slow I/O detection
+Requires:       sysSentry = %{version}-%{release}
+Requires:       pysentry_notify = %{version}-%{release}
+Requires:       pysentry_collect = %{version}-%{release}
+
+%description -n avg_block_io
+This package provides Supports slow I/O detection based on EBPF
+
+%package -n ai_block_io
+Summary:        Supports slow I/O detection
+Requires:       python3-numpy
+Requires:       sysSentry = %{version}-%{release}
+Requires:       pysentry_notify = %{version}-%{release}
+Requires:       pysentry_collect = %{version}-%{release}
+
+%description -n ai_block_io
+This package provides Supports slow I/O detection based on AI
+
+%package -n pyxalarm
+Summary:        Supports xalarm api in python immplementation
+Requires:       sysSentry = %{version}-%{release}
+
+%description -n pyxalarm
+This package provides Supports xalarm api for users
+
+%package -n pysentry_notify
+Summary:        Supports xalarm report in python immplementation
+Requires:       sysSentry = %{version}-%{release}
+
+%description -n pysentry_notify
+This package provides Supports xalarm report for plugins
 
 %package -n cpu_sentry
 Summary:        CPU fault inspection program
@@ -165,6 +200,14 @@ install src/c/hbm_online_repair/hbm_online_repair.env %{buildroot}/etc/sysconfig
 chrpath -d %{buildroot}%{_bindir}/cat-cli
 chrpath -d %{buildroot}%{_libdir}/libcpu_patrol.so
 
+# avg_block_io
+install config/tasks/avg_block_io.mod %{buildroot}/etc/sysSentry/tasks/
+install config/plugins/avg_block_io.ini %{buildroot}/etc/sysSentry/plugins/avg_block_io.ini
+
+# ai_block_io
+install config/tasks/ai_block_io.mod %{buildroot}/etc/sysSentry/tasks/
+install config/plugins/ai_block_io.ini %{buildroot}/etc/sysSentry/plugins/ai_block_io.ini
+
 # logrotate
 mkdir -p %{buildroot}%{_localstatedir}/lib/logrotate-syssentry
 mkdir -p %{buildroot}%{_sysconfdir}/cron.hourly
@@ -173,6 +216,8 @@ install -m 0500 src/sh/logrotate-sysSentry.cron %{buildroot}%{_sysconfdir}/cron.
 
 pushd src/python
 python3 setup.py install -O1 --root=$RPM_BUILD_ROOT --record=SENTRY_FILES
+cat SENTRY_FILES | grep -v register_xalarm.* | grep -v sentry_notify.*  > SENTRY_FILES.tmp
+mv SENTRY_FILES.tmp SENTRY_FILES
 popd
 
 %pre
@@ -221,6 +266,18 @@ rm -rf %{buildroot}
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/xalarm.conf
 %attr(0600,root,root) %{_unitdir}/xalarmd.service
 
+# avg block io
+%exclude %{_sysconfdir}/sysSentry/tasks/avg_block_io.mod
+%exclude %{_sysconfdir}/sysSentry/plugins/avg_block_io.ini
+%exclude %{_bindir}/avg_block_io
+%exclude %{python3_sitelib}/sentryPlugins/*
+
+# ai_block_io
+%exclude %{_sysconfdir}/sysSentry/tasks/ai_block_io.mod
+%exclude %{_sysconfdir}/sysSentry/plugins/ai_block_io.ini
+%exclude %{_bindir}/ai_block_io
+%exclude %{python3_sitelib}/sentryPlugins/*
+
 # sentryCollector
 %attr(0550,root,root) %{_bindir}/sentryCollector
 %attr(0600,root,root) %{_sysconfdir}/sysSentry/collector.conf
@@ -248,6 +305,23 @@ rm -rf %{buildroot}
 %exclude %{python3_sitelib}/syssentry/bmc_*
 %exclude %{python3_sitelib}/syssentry/*/bmc_*
 
+%files -n avg_block_io
+%attr(0500,root,root) %{_bindir}/avg_block_io
+%attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/avg_block_io.mod
+%attr(0600,root,root) %{_sysconfdir}/sysSentry/plugins/avg_block_io.ini
+%attr(0550,root,root) %{python3_sitelib}/sentryPlugins/avg_block_io
+
+%files -n ai_block_io
+%attr(0500,root,root) %{_bindir}/ai_block_io
+%attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/ai_block_io.mod
+%attr(0600,root,root) %{_sysconfdir}/sysSentry/plugins/ai_block_io.ini
+%attr(0550,root,root) %{python3_sitelib}/sentryPlugins/ai_block_io
+
+# hbm repair module
+%exclude %{_sysconfdir}/sysSentry/tasks/hbm_online_repair.mod
+%exclude %{python3_sitelib}/syssentry/bmc_*
+%exclude %{python3_sitelib}/syssentry/*/bmc_*
+
 %files -n libxalarm
 %attr(0550,root,root) %{_libdir}/libxalarm.so
 
@@ -255,6 +329,14 @@ rm -rf %{buildroot}
 %dir %{_includedir}/xalarm
 %attr(0550,root,root) %{_includedir}/xalarm
 %attr(0550,root,root) %{_includedir}/xalarm/register_xalarm.h
+
+%files -n pyxalarm
+%attr(0550,root,root) %{python3_sitelib}/xalarm/register_xalarm.py
+%attr(0550,root,root) %{python3_sitelib}/xalarm/__pycache__/register_xalarm*
+
+%files -n pysentry_notify
+%attr(0550,root,root) %{python3_sitelib}/xalarm/sentry_notify.py
+%attr(0550,root,root) %{python3_sitelib}/xalarm/__pycache__/sentry_notify*
 
 %files -n cpu_sentry
 %attr(0500,root,root) %{_bindir}/cat-cli
@@ -275,6 +357,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin*
 
 %changelog
+* Sun Jan 26 2025 zhuofeng <zhuofeng2@huawei.com> - 1.0.2-30
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:add avg_block_io and ai_block_io
+
 * Sun Jan 26 2025 zhuofeng <zhuofeng2@huawei.com> - 1.0.2-29
 - Type:bugfix
 - CVE:NA
