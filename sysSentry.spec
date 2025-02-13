@@ -4,10 +4,12 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 1
+Release: 2
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
+
+Patch1:    add-bidirectional-communication-for-xalarm.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -204,6 +206,12 @@ rm -rf /var/run/sysSentry | :
 %attr(0550,root,root) %{python3_sitelib}/syssentry/bmc_alarm.py
 
 %changelog
+* Sat Feb 8 2025 caixiaomeng <caixiaomeng2@huawei.com> - 1.0.3-2
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC: add bidirectional communication for libxalarm
+
 * Mon Jan 20 2025 zhuofeng <zhuofeng2@huawei.com> - 1.0.3-1
 - Type:bugfix
 - CVE:NA
