@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 4
+Release: 5
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -12,6 +12,7 @@ Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{n
 Patch1:    add-bidirectional-communication-for-xalarm.patch
 Patch2:    fix-some-test-cases.patch
 Patch3:    add-log-for-xalarmd-and-fix-delete-on-iter-problem.patch
+Patch4:    fix-xalarm-log-not-print-and-add-on-iter-problem.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -208,6 +209,12 @@ rm -rf /var/run/sysSentry | :
 %attr(0550,root,root) %{python3_sitelib}/syssentry/bmc_alarm.py
 
 %changelog
+* Tue Feb 18 2025 caixiaomeng <caixiaomeng2@huawei.com> - 1.0.3-5
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC: fix xalarm log not print and add on iter problem
+
 * Tue Feb 18 2025 caixiaomeng <caixiaomeng2@huawei.com> - 1.0.3-4
 - Type:bugfix
 - CVE:NA
