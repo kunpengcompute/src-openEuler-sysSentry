@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 5
+Release: 6
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -13,6 +13,7 @@ Patch1:    add-bidirectional-communication-for-xalarm.patch
 Patch2:    fix-some-test-cases.patch
 Patch3:    add-log-for-xalarmd-and-fix-delete-on-iter-problem.patch
 Patch4:    fix-xalarm-log-not-print-and-add-on-iter-problem.patch
+Patch5:    add-new-func-for-ebpf-in-the-rq_driver-stage.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -209,6 +210,12 @@ rm -rf /var/run/sysSentry | :
 %attr(0550,root,root) %{python3_sitelib}/syssentry/bmc_alarm.py
 
 %changelog
+* Sat Feb 22 2025 zhuofeng <zhuofeng2@huawei.com> - 1.0.3-6
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC: add new func for ebpf in the rq_driver stage
+
 * Tue Feb 18 2025 caixiaomeng <caixiaomeng2@huawei.com> - 1.0.3-5
 - Type:bugfix
 - CVE:NA
