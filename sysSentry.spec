@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 6
+Release: 7
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -14,6 +14,7 @@ Patch2:    fix-some-test-cases.patch
 Patch3:    add-log-for-xalarmd-and-fix-delete-on-iter-problem.patch
 Patch4:    fix-xalarm-log-not-print-and-add-on-iter-problem.patch
 Patch5:    add-new-func-for-ebpf-in-the-rq_driver-stage.patch
+Patch6:    fix-the-sentryCollector-service-can-t-be-stopped-for.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -210,6 +211,12 @@ rm -rf /var/run/sysSentry | :
 %attr(0550,root,root) %{python3_sitelib}/syssentry/bmc_alarm.py
 
 %changelog
+* Mon Feb 24 2025 zhuofeng <zhuofeng2@huawei.com> - 1.0.3-7
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC: fix the sentryCollector service can't be stopped for a long
+
 * Sat Feb 22 2025 zhuofeng <zhuofeng2@huawei.com> - 1.0.3-6
 - Type:bugfix
 - CVE:NA
