@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 8
+Release: 9
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -16,6 +16,7 @@ Patch4:    fix-xalarm-log-not-print-and-add-on-iter-problem.patch
 Patch5:    add-new-func-for-ebpf-in-the-rq_driver-stage.patch
 Patch6:    fix-the-sentryCollector-service-can-t-be-stopped-for.patch
 Patch7:    add-dfx-for-xalarmd-to-rebuild-connection-after-comm.patch
+Patch8:    fix-an-issue-with-printing-error.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -212,6 +213,12 @@ rm -rf /var/run/sysSentry | :
 %attr(0550,root,root) %{python3_sitelib}/syssentry/bmc_alarm.py
 
 %changelog
+* Wed Mar 12 2025 zhuofeng <zhuofeng2@huawei.com> - 1.0.3-9
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC: fix an issue with printing error
+
 * Fri Feb 28 2025 caixiaomeng <caixiaomeng2@huawei.com> - 1.0.3-8
 - Type:bugfix
 - CVE:NA
