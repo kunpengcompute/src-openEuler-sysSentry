@@ -1,0 +1,69 @@
+From b1fdf6495d7f2a7afa313d1510cb8f65aa42c369 Mon Sep 17 00:00:00 2001
+From: luckky <guodashun1@huawei.com>
+Date: Thu, 13 Mar 2025 11:38:34 +0800
+Subject: [PATCH] ai block io: exit when stage is not supported
+
+---
+ .../ai_block_io/config_parser.py              | 32 +++++++++++++++++--
+ 1 file changed, 30 insertions(+), 2 deletions(-)
+
+diff --git a/src/python/sentryPlugins/ai_block_io/config_parser.py b/src/python/sentryPlugins/ai_block_io/config_parser.py
+index 1bbb609..612fe9f 100644
+--- a/src/python/sentryPlugins/ai_block_io/config_parser.py
++++ b/src/python/sentryPlugins/ai_block_io/config_parser.py
+@@ -32,6 +32,12 @@ ALL_STAGE_LIST = [
+     "rq_driver",
+     "bio",
+ ]
++EBPF_STAGE_LIST = [
++    "wbt",
++    "rq_driver",
++    "bio",
++    "gettag"
++]
+ ALL_IOTPYE_LIST = ["read", "write"]
+ DISK_TYPE_MAP = {
+     0: "nvme_ssd",
+@@ -312,15 +318,37 @@ class ConfigParser:
+         if len(stage_list) == 1 and stage_list[0] == "":
+             logging.critical("stage value not allow is empty, exiting...")
+             exit(1)
++
++        # check if kernel or ebpf is supported (code is from collector)
++        valid_stage_list = ALL_STAGE_LIST
++        base_path = '/sys/kernel/debug/block'
++        all_disk = []
++        for disk_name in os.listdir(base_path):
++            disk_path = os.path.join(base_path, disk_name)
++            blk_io_hierarchy_path = os.path.join(disk_path, 'blk_io_hierarchy')
++
++            if not os.path.exists(blk_io_hierarchy_path):
++                logging.warning("no blk_io_hierarchy directory found in %s, skipping.", disk_name)
++                continue
++
++            for file_name in os.listdir(blk_io_hierarchy_path):
++                if file_name == 'stats':
++                    all_disk.append(disk_name)
++        
++        if len(all_disk) == 0:
++            logging.debug("no blk_io_hierarchy disk, it is not lock-free collection")
++            valid_stage_list = EBPF_STAGE_LIST
++
+         if len(stage_list) == 1 and stage_list[0] == "default":
+             logging.warning(
+                 "stage will enable default value: %s",
+                 self.DEFAULT_CONF["common"]["stage"],
+             )
+-            self._conf["common"]["stage"] = ALL_STAGE_LIST
++            self._conf["common"]["stage"] = valid_stage_list
+             return
++
+         for stage in stage_list:
+-            if stage not in ALL_STAGE_LIST:
++            if stage not in valid_stage_list:
+                 logging.critical(
+                     "stage: %s is not valid stage, ai_block_io will exit...", stage
+                 )
+-- 
+2.43.0
+
