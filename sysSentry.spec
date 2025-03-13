@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 31
+Release: 32
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -41,6 +41,7 @@ Patch28:   adapt_5.10_kenel_for_syssentry.patch
 Patch29:   collect-module-adapt-to-the-5.10-kernel.patch
 Patch30:   add-avg_block_io-and-ai_block_io.patch
 Patch31:   fix-bug-of-ebpf-and-ai_block_io.patch
+Patch32:   fix-the-sentryCollector-service-can-t-be-stopped-for.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -358,6 +359,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin*
 
 %changelog
+* Thu Mar 13 2025 zhuofeng <zhuofeng2@huawei.com> - 1.0.2-32
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix the sentryCollector service can't be stopped for a long
+
 * Fri Feb 14 2025 zhuofeng <zhuofeng2@huawei.com> - 1.0.2-31
 - Type:bugfix
 - CVE:NA
