@@ -1,0 +1,45 @@
+From bfe11a3c1d9ee11a34ee000509eb328b1e50f193 Mon Sep 17 00:00:00 2001
+From: zhuofeng <1107893276@qq.com>
+Date: Wed, 12 Mar 2025 02:57:35 +0000
+Subject: [PATCH] fix ai_block_io bug and an issue with printing error
+
+Signed-off-by: zhuofeng <1107893276@qq.com>
+---
+ src/python/sentryPlugins/ai_block_io/detector.py | 3 ++-
+ src/python/syssentry/global_values.py            | 2 +-
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/python/sentryPlugins/ai_block_io/detector.py b/src/python/sentryPlugins/ai_block_io/detector.py
+index 27fb7f7..2688cb1 100644
+--- a/src/python/sentryPlugins/ai_block_io/detector.py
++++ b/src/python/sentryPlugins/ai_block_io/detector.py
+@@ -55,11 +55,12 @@ class Detector:
+         detection_result = self._slidingWindow.is_slow_io_event(metric_value)
+         # 检测到慢周期，由Detector负责打印info级别日志
+         if detection_result[0][1]:
++            ai_threshold = "None" if detection_result[2] is None else round(detection_result[2], 3)
+             logging.info(f'[abnormal_period]: disk: {self._metric_name.disk_name}, '
+                          f'stage: {self._metric_name.stage_name}, '
+                          f'iotype: {self._metric_name.io_access_type_name}, '
+                          f'type: {self._metric_name.metric_name}, '
+-                         f'ai_threshold: {round(detection_result[2], 3)}, '
++                         f'ai_threshold: {ai_threshold}, '
+                          f'curr_val: {metric_value}')
+         else:
+             logging.debug(f'Detection result: {str(detection_result)}')
+diff --git a/src/python/syssentry/global_values.py b/src/python/syssentry/global_values.py
+index b123b2d..9c7800b 100644
+--- a/src/python/syssentry/global_values.py
++++ b/src/python/syssentry/global_values.py
+@@ -114,7 +114,7 @@ class InspectTask:
+             try:
+                 child = subprocess.Popen(cmd_list, stdout=logfile, stderr=subprocess.STDOUT, close_fds=True)
+             except OSError:
+-                logging.error("task %s start Popen error, invalid cmd")
++                logging.error("task %s start Popen error, invalid cmd", cmd_list)
+                 self.result_info["result"] = ResultLevel.FAIL.name
+                 self.result_info["error_msg"] = RESULT_LEVEL_ERR_MSG_DICT.get(ResultLevel.FAIL.name)
+                 self.runtime_status = "FAILED"
+-- 
+2.43.0
+

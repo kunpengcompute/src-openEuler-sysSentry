@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 74
+Release: 75
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -89,6 +89,7 @@ Patch76:   uniform-avg_block_io-log-and-ai_block_io-log.patch
 Patch77:   set-logrotate.patch
 Patch78:   ebpf-adpat-to-the-kylin-platform.patch
 Patch79:   fix-test_ai_block_io-fail.patch
+Patch80:   fix-ai_block_io-bug-and-an-issue-with-printing-error.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -344,6 +345,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin*
 
 %changelog
+* Thu Mar 13 2025 zhuofeng <zhuofeng2@huawei.com> - 1.0.2-75
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix ai_block_io bug and an issue with printing error
+
 * Wed Jan 22 2025 shixuantong <shixuantong@huawei.com> - 1.0.2-74
 - Type:bugfix
 - CVE:NA
