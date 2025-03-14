@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 8
+Release: 9
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -16,6 +16,7 @@ Patch4:    fix-xalarm-log-not-print-and-add-on-iter-problem.patch
 Patch5:    add-new-func-for-ebpf-in-the-rq_driver-stage.patch
 Patch6:    fix-the-sentryCollector-service-can-t-be-stopped-for.patch
 Patch7:    ai-block-io-exit-when-stage-is-not-supported.patch
+Patch8:    add-log-utils-for-c.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -171,7 +172,9 @@ rm -rf /var/run/sysSentry | :
 %attr(0550,root,root) %{_bindir}/sentryCollector
 %attr(0600,root,root) %{_sysconfdir}/sysSentry/collector.conf
 %attr(0600,root,root) %{_unitdir}/sentryCollector.service
+%attr(0550,root,root) %{_libdir}/libsentry_log.so
 
+%exclude %{_includedir}/libsentry/log_utils.h
 %exclude %{_sysconfdir}/sysSentry/tasks/hbm_online_repair.mod
 %exclude %{python3_sitelib}/syssentry/bmc_*
 %exclude %{python3_sitelib}/syssentry/*/bmc_*
@@ -212,6 +215,12 @@ rm -rf /var/run/sysSentry | :
 %attr(0550,root,root) %{python3_sitelib}/syssentry/bmc_alarm.py
 
 %changelog
+* Fri Mar 14 2025 shixuantong <shixuantong1@huawei.com> - 1.0.3-9
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:add log utils for c
+
 * Thu Mar 13 2025 luckky <guodashun1@huawei.com> - 1.0.3-8
 - Type:bugfix
 - CVE:NA
