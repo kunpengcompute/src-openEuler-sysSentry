@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 11
+Release: 12
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -19,6 +19,8 @@ Patch7:    add-dfx-for-xalarmd-to-rebuild-connection-after-comm.patch
 Patch8:    fix-an-issue-with-printing-error.patch
 Patch9:    ai-block-io-exit-when-stage-is-not-supported.patch
 Patch10:   add-log-utils-for-c.patch
+Patch11:   add-sentry-msg-monitor.patch
+Patch12:   add-oom-event-report.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -103,6 +105,14 @@ Requires:       sysSentry = %{version}-%{release}
 %description -n hbm_online_repair
 This package provides hbm_online_repair for the sysSentry.
 
+%package -n sentry_msg_monitor
+Summary:        A plugin for sysSentry to listening specific messages
+Requires:       sysSentry = %{version}-%{release}
+Provides:       sentry_msg_monitor = %{version}
+
+%description -n sentry_msg_monitor
+This package provides a plugin for sysSentry to listening specific messages
+
 %prep
 %autosetup -n %{name}-%{version} -p1
 
@@ -177,9 +187,14 @@ rm -rf /var/run/sysSentry | :
 %attr(0600,root,root) %{_sysconfdir}/sysSentry/collector.conf
 %attr(0600,root,root) %{_unitdir}/sentryCollector.service
 
+# hbm_online_repair
 %exclude %{_sysconfdir}/sysSentry/tasks/hbm_online_repair.mod
 %exclude %{python3_sitelib}/syssentry/bmc_*
 %exclude %{python3_sitelib}/syssentry/*/bmc_*
+
+# sentry_msg_monitor
+%exclude %{_sysconfdir}/sysconfig/sentry_msg_monitor.env
+%exclude %{_sysconfdir}/sysSentry/tasks/sentry_msg_monitor.mod
 
 %files -n libxalarm
 %attr(0550,root,root) %{_libdir}/libxalarm.so
@@ -216,7 +231,18 @@ rm -rf /var/run/sysSentry | :
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/hbm_online_repair.mod
 %attr(0550,root,root) %{python3_sitelib}/syssentry/bmc_alarm.py
 
+%files -n sentry_msg_monitor
+%attr(0550,root,root) %{_bindir}/sentry_msg_monitor
+%attr(0600,root,root) %{_sysconfdir}/sysconfig/sentry_msg_monitor.env
+%attr(0600,root,root) %{_sysconfdir}/sysSentry/tasks/sentry_msg_monitor.mod
+
 %changelog
+* Fri Mar 14 2025 luckky <guodashun1@huawei.com> - 1.0.3-12
+- Type:feature
+- CVE:NA
+- SUG:NA
+- DESC: add sentry msg monitor & add oom event report
+
 * Fri Mar 14 2025 shixuantong <shixuantong1@huawei.com> - 1.0.3-11
 - Type:bugfix
 - CVE:NA
