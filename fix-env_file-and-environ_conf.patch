@@ -1,0 +1,56 @@
+From 71fe4393402427b3fbcd147626406cbd70186046 Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Sat, 29 Mar 2025 11:06:47 +0800
+Subject: [PATCH] fix env_file and environ_conf
+
+---
+ src/python/syssentry/global_values.py | 13 +++++--------
+ 1 file changed, 5 insertions(+), 8 deletions(-)
+
+diff --git a/src/python/syssentry/global_values.py b/src/python/syssentry/global_values.py
+index 9c7800b..48a9f2d 100644
+--- a/src/python/syssentry/global_values.py
++++ b/src/python/syssentry/global_values.py
+@@ -75,6 +75,8 @@ class InspectTask:
+         self.onstart = False
+         # ccnfig env_file
+         self.env_file = ""
++        # env conf to popen arg
++        self.environ_conf = None
+         # start mode
+         self.conflict = "up"
+         # alarm id
+@@ -112,7 +114,7 @@ class InspectTask:
+                 logging.error("task %s log_file %s open failed", self.name, self.log_file)
+                 logfile = subprocess.PIPE
+             try:
+-                child = subprocess.Popen(cmd_list, stdout=logfile, stderr=subprocess.STDOUT, close_fds=True)
++                child = subprocess.Popen(cmd_list, stdout=logfile, stderr=subprocess.STDOUT, close_fds=True, env=self.environ_conf)
+             except OSError:
+                 logging.error("task %s start Popen error, invalid cmd", cmd_list)
+                 self.result_info["result"] = ResultLevel.FAIL.name
+@@ -199,7 +201,7 @@ class InspectTask:
+             return
+ 
+         # read config
+-        environ_conf = {}
++        self.environ_conf = dict(os.environ)
+         with open(self.env_file, 'r') as file:
+             for line in file:
+                 line = line.strip()
+@@ -210,11 +212,6 @@ class InspectTask:
+                 if not key or not value:
+                     logging.error("env_file = %s format is error, use default environ", self.env_file)
+                     return
+-                environ_conf[key] = value
+-
+-        # set environ
+-        for key, value in environ_conf.items():
+-            logging.debug("environ key=%s, value=%s", key, value)
+-            os.environ[key] = value
++                self.environ_conf[key] = value
+ 
+         logging.debug("the subprocess=[%s] begin to run", self.name)
+-- 
+2.27.0
+
