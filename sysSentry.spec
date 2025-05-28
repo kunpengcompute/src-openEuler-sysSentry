@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 34
+Release: 35
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -45,6 +45,7 @@ Patch32:   fix-the-sentryCollector-service-can-t-be-stopped-for.patch
 Patch33:   ai-block-io-exit-when-stage-is-not-supported.patch
 Patch34:   fix-period-task-some-bugs.patch
 Patch35:   fix-env_file-and-environ_conf.patch
+Patch36:   fix-cpu_sentry-result-when-found_fault_cores_number-.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -362,6 +363,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin*
 
 %changelog
+* Sat May 17 2025 shixuantong <shixuantong1@huawei.com> - 1.0.2-35
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix cpu_sentry result when found_fault_cores_number != isolated_cores_number
+
 * Sat Mar 29 2025 shixuantong <shixuantong1@huawei.com> - 1.0.2-34
 - Type:bugfix
 - CVE:NA
