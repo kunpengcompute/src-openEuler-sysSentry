@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 35
+Release: 36
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -46,6 +46,7 @@ Patch33:   ai-block-io-exit-when-stage-is-not-supported.patch
 Patch34:   fix-period-task-some-bugs.patch
 Patch35:   fix-env_file-and-environ_conf.patch
 Patch36:   fix-cpu_sentry-result-when-found_fault_cores_number-.patch
+Patch37:   add-huge-page-aggregation.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -363,6 +364,12 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin*
 
 %changelog
+* Tue Sep 09 2025 zhuo <1107893276@qq.com> - 1.0.2-36
+- Type:requirement
+- CVE:NA
+- SUG:NA
+- DESC:add huge page aggregation
+
 * Sat May 17 2025 shixuantong <shixuantong1@huawei.com> - 1.0.2-35
 - Type:bugfix
 - CVE:NA
