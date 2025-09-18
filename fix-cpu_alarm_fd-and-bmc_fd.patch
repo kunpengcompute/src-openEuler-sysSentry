@@ -1,0 +1,47 @@
+From 46c6023ed11bd6adfe1627a6901057c4b90060fd Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Tue, 25 Feb 2025 15:20:46 +0800
+Subject: [PATCH] fix cpu_alarm_fd and bmc_fd
+
+---
+ src/services/syssentry/syssentry.py | 24 +++++++++++++-----------
+ 1 file changed, 13 insertions(+), 11 deletions(-)
+
+diff --git a/src/services/syssentry/syssentry.py b/src/services/syssentry/syssentry.py
+index 625da9a..def3ed7 100644
+--- a/src/services/syssentry/syssentry.py
++++ b/src/services/syssentry/syssentry.py
+@@ -477,17 +477,19 @@ def main_loop():
+         return
+     fd_list.append(heartbeat_fd)
+ 
+-    cpu_alarm_fd = cpu_alarm_fd_create()
+-    if not cpu_alarm_fd:
+-        close_all_fd()
+-        return
+-    fd_list.append(cpu_alarm_fd)
+-
+-    bmc_fd = bmc_fd_create()
+-    if not bmc_fd:
+-        close_all_fd()
+-        return
+-    fd_list.append(bmc_fd)
++    if CPU_EXIST:
++        cpu_alarm_fd = cpu_alarm_fd_create()
++        if not cpu_alarm_fd:
++            close_all_fd()
++            return
++        fd_list.append(cpu_alarm_fd)
++
++    if BMC_EXIST:
++        bmc_fd = bmc_fd_create()
++        if not bmc_fd:
++            close_all_fd()
++            return
++        fd_list.append(bmc_fd)
+ 
+     epoll_fd = select.epoll()
+     for fd in fd_list:
+-- 
+2.27.0
+

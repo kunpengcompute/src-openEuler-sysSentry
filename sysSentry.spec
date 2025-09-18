@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 12
+Release: 13
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -21,6 +21,11 @@ Patch9:    ai-block-io-exit-when-stage-is-not-supported.patch
 Patch10:   add-log-utils-for-c.patch
 Patch11:   add-sentry-msg-monitor.patch
 Patch12:   add-oom-event-report.patch
+Patch13:   fix-cpu_alarm_fd-and-bmc_fd.patch
+Patch14:   fix-period-task-some-bugs.patch
+Patch15:   fix-env-for-subprocess.Popen.patch
+Patch16:   Use-malloc-to-allocate-memory-as-much-as-possible.patch
+Patch17:   fix-cpu_sentry-result-when-found_fault_cores_number-.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -237,6 +242,16 @@ rm -rf /var/run/sysSentry | :
 %attr(0600,root,root) %{_sysconfdir}/sysSentry/tasks/sentry_msg_monitor.mod
 
 %changelog
+* Thu Sep 18 2025 shixuantong <shixuantong1@h-partners.com> - 1.0.3-13
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix period task some bugs
+       fix env for subprocess.Popen
+       Use malloc to allocate memory as much as possible
+       fix cpu_sentry result when found_fault_cores_number != isolated_cores_number
+       fix cpu_alarm_fd and bmc_fd
+
 * Fri Mar 14 2025 luckky <guodashun1@huawei.com> - 1.0.3-12
 - Type:feature
 - CVE:NA
