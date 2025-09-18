@@ -1,0 +1,51 @@
+From 60366c62a26fbdff116f0b24a7dd6e61637ebfb9 Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Sat, 17 May 2025 15:02:39 +0800
+Subject: [PATCH] fix cpu_sentry result when found_fault_cores_number !=
+ isolated_cores_number
+
+---
+ selftest/test/test_cpu_sentry.py           | 2 ++
+ src/sentryPlugins/cpu_sentry/cpu_sentry.py | 6 ++++++
+ 2 files changed, 8 insertions(+)
+
+diff --git a/selftest/test/test_cpu_sentry.py b/selftest/test/test_cpu_sentry.py
+index 47e366b..c9af184 100644
+--- a/selftest/test/test_cpu_sentry.py
++++ b/selftest/test/test_cpu_sentry.py
+@@ -20,6 +20,7 @@ class TestCaseCpuSentry:
+                 ("1-", []),
+                 ("-1", []),
+                 ("", []),
++                (" ", []),
+                 ("1-3,5-8", [1,2,3,5,6,7,8]),
+                 ("1-3,8", [1,2,3,8]),
+                 ("11", [11]),
+@@ -53,6 +54,7 @@ class TestCaseCpuSentry:
+                 ("0, 2-4", False),
+                 ("1-3-6", False),
+                 ("", False),
++                (" ", False),
+                 ("xxx", False),
+                 ("1-3,,", False),
+                 ("1-3,,6", False),
+diff --git a/src/sentryPlugins/cpu_sentry/cpu_sentry.py b/src/sentryPlugins/cpu_sentry/cpu_sentry.py
+index 0c66fd2..e7a34ad 100644
+--- a/src/sentryPlugins/cpu_sentry/cpu_sentry.py
++++ b/src/sentryPlugins/cpu_sentry/cpu_sentry.py
+@@ -142,6 +142,12 @@ class CpuSentry:
+             self.send_result["details"]["code"] = 1002
+             self.send_result["result"] = ResultLevel.MINOR_ALM
+             self.send_result["details"]["msg"] = "Some CPUs are faulty. The faulty cores are isolated successfully."
++        else:
++            found_fault_cores_set = set(found_fault_cores_list)
++            isolated_cpu_set = set(CpuSentry.cpu_format_convert_to_list(self.send_result["details"]["isolated_cpu_list"]))
++            self.send_result["details"]["code"] = 1002
++            self.send_result["result"] = ResultLevel.MINOR_ALM
++            self.send_result["details"]["msg"] = "Some cores are isolated successfully and some cores ({}) fail to be isolated.".format(list(found_fault_cores_set - isolated_cpu_set))
+ 
+     def cpu_report_result(self):
+         """report result to sysSentry"""
+-- 
+2.27.0
+
