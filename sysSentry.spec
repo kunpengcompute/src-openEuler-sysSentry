@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 13
+Release: 14
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -26,6 +26,7 @@ Patch14:   fix-period-task-some-bugs.patch
 Patch15:   fix-env-for-subprocess.Popen.patch
 Patch16:   Use-malloc-to-allocate-memory-as-much-as-possible.patch
 Patch17:   fix-cpu_sentry-result-when-found_fault_cores_number-.patch
+Patch18:   fix-some-code-bugs.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -147,7 +148,7 @@ rm -rf /var/run/sysSentry | :
 
 %files
 %defattr(0550,root,root)
-%attr(0550,root,root) %{python3_sitelib}/xalarm
+%attr(0555,root,root) %{python3_sitelib}/xalarm
 %attr(0550,root,root) %{python3_sitelib}/syssentry
 %attr(0550,root,root) %{python3_sitelib}/%{PKGVER}
 %attr(0550,root,root) %{python3_sitelib}/sentryCollector
@@ -202,13 +203,13 @@ rm -rf /var/run/sysSentry | :
 %exclude %{_sysconfdir}/sysSentry/tasks/sentry_msg_monitor.mod
 
 %files -n libxalarm
-%attr(0550,root,root) %{_libdir}/libxalarm.so
+%attr(0555,root,root) %{_libdir}/libxalarm.so
 
 %files -n libxalarm-devel
-%attr(0550,root,root) %{_includedir}/xalarm/register_xalarm.h
+%attr(0555,root,root) %{_includedir}/xalarm/register_xalarm.h
 
 %files -n pyxalarm
-%attr(0550,root,root) %{python3_sitelib}/xalarm/register_xalarm.py
+%attr(0555,root,root) %{python3_sitelib}/xalarm/register_xalarm.py
 
 %files -n pysentry_notify
 %attr(0550,root,root) %{python3_sitelib}/xalarm/sentry_notify.py
@@ -242,6 +243,15 @@ rm -rf /var/run/sysSentry | :
 %attr(0600,root,root) %{_sysconfdir}/sysSentry/tasks/sentry_msg_monitor.mod
 
 %changelog
+* Mon Sep 22 2025 hewanhan <hewanhan@h-partners.com> - 1.0.3-14
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix alarm register permissions error
+       fix ai_block_io SlidingWindow is_abnormal func error
+       fix ai_block_io log format error
+       fix collector sdd&hdd disk type error
+
 * Thu Sep 18 2025 shixuantong <shixuantong1@h-partners.com> - 1.0.3-13
 - Type:bugfix
 - CVE:NA

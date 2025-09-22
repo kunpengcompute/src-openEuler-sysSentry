@@ -1,0 +1,209 @@
+From a39c254b30422b00ebfecb78ea521ff7b2c75570 Mon Sep 17 00:00:00 2001
+From: hewanhan <hewanhan@h-partners.com>
+Date: Fri, 19 Sep 2025 15:21:20 +0800
+Subject: [PATCH] fix some code bugs.
+
+---
+ Makefile                                             | 12 ++++++------
+ selftest/test/test_ai_threshold_slow_io_detection.py |  6 +++---
+ src/libs/libxalarm/register_xalarm.c                 |  8 ++------
+ src/libs/pyxalarm/register_xalarm.py                 |  2 +-
+ .../python/pySentryCollector/collect_plugin.py       |  4 ++--
+ src/sentryPlugins/ai_block_io/ai_block_io.py         |  2 +-
+ src/sentryPlugins/ai_block_io/sliding_window.py      |  7 +++++--
+ src/services/xalarm/xalarm_daemon.py                 |  2 +-
+ src/services/xalarm/xalarm_server.py                 |  4 ++--
+ 9 files changed, 23 insertions(+), 24 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index 1906dcb..ca2b836 100644
+--- a/Makefile
++++ b/Makefile
+@@ -73,7 +73,7 @@ isentry:
+ 	install -d -m 700 $(LOGSAVEDIR)/sysSentry
+ 	install -d -m 700 $(VARLIB)/logrotate-syssentry
+ 	install -d -m 700 $(PYDIR)/syssentry
+-	install -d -m 700 $(PYDIR)/xalarm
++	install -d -m 755 $(PYDIR)/xalarm
+ 	install -d -m 700 $(PYDIR)/sentryCollector
+ 	install -d -m 700 $(PYDIR)/$(PKGVEREGG)
+ 	install -d -m 700 $(ETCDIR)/sysconfig
+@@ -94,7 +94,7 @@ isentry:
+ 	
+ 	## 安装python源代码文件到相应的目录
+ 	install -m 550 src/build/usr/lib/$(PYNAME)/site-packages/services/syssentry/* $(PYDIR)/syssentry
+-	install -m 550 src/build/usr/lib/$(PYNAME)/site-packages/services/xalarm/* $(PYDIR)/xalarm
++	install -m 555 src/build/usr/lib/$(PYNAME)/site-packages/services/xalarm/* $(PYDIR)/xalarm
+ 	install -m 550 src/build/usr/lib/$(PYNAME)/site-packages/services/sentryCollector/* $(PYDIR)/sentryCollector
+ 	install -m 550 src/build/usr/lib/$(PYNAME)/site-packages/$(PKGVEREGG)/* $(PYDIR)/$(PKGVEREGG)
+ 	
+@@ -138,15 +138,15 @@ isentry:
+ 	install -m 550 src/libsentry/python/pySentryCollector/collect_plugin.py $(PYDIR)/sentryCollector
+ 
+ 	# libxalarm
+-	install -m 550 $(CURLIBDIR)/build/libxalarm/libxalarm.so $(LIBINSTALLDIR)
++	install -m 555 $(CURLIBDIR)/build/libxalarm/libxalarm.so $(LIBINSTALLDIR)
+ 
+ 	# libxalarm-devel
+-	install -d -m 700 $(INCLUDEDIR)/xalarm
++	install -d -m 755 $(INCLUDEDIR)/xalarm
+ 	install -m 644 $(CURLIBDIR)/libxalarm/register_xalarm.h $(INCLUDEDIR)/xalarm/
+ 
+ 	# pyxalarm
+-	install -m 550 src/libs/pyxalarm/register_xalarm.py $(PYDIR)/xalarm
+-	
++	install -m 555 src/libs/pyxalarm/register_xalarm.py $(PYDIR)/xalarm
++
+ 	# log utils
+ 	install -d -m 700 $(INCLUDEDIR)/libsentry
+ 	install -m 644 $(CURSRCDIR)/libsentry/c/log/log_utils.h $(INCLUDEDIR)/libsentry/
+diff --git a/selftest/test/test_ai_threshold_slow_io_detection.py b/selftest/test/test_ai_threshold_slow_io_detection.py
+index c762c82..a14d01c 100644
+--- a/selftest/test/test_ai_threshold_slow_io_detection.py
++++ b/selftest/test/test_ai_threshold_slow_io_detection.py
+@@ -91,7 +91,7 @@ class Test(unittest.TestCase):
+         self.assertEqual(_get_n_sigma_threshold(data_list, 3), n_sigma_threshold)
+ 
+     def test_not_continuous_sliding_window(self):
+-        not_continuous = NotContinuousSlidingWindow(5, 3)
++        not_continuous = NotContinuousSlidingWindow(5, 3, 40, 15)
+         boxplot_threshold = BoxplotThreshold(1.5, 10, 8)
+         boxplot_threshold.attach_observer(not_continuous)
+         data_list1 = [19, 20, 20, 20, 20, 20, 22, 24, 23, 20]
+@@ -114,7 +114,7 @@ class Test(unittest.TestCase):
+         self.assertEqual(25.625, boxplot_threshold.get_threshold())
+ 
+     def test_continuous_sliding_window(self):
+-        continuous = ContinuousSlidingWindow(5, 3)
++        continuous = ContinuousSlidingWindow(5, 3, 40, 15)
+         boxplot_threshold = BoxplotThreshold(1.5, 10, 8)
+         boxplot_threshold.attach_observer(continuous)
+         data_list = [19, 20, 20, 20, 20, 20, 22, 24, 23, 20]
+@@ -131,7 +131,7 @@ class Test(unittest.TestCase):
+         self.assertTrue(continuous.is_slow_io_event(25)[0][0])
+ 
+     def test_median_sliding_window(self):
+-        median = MedianSlidingWindow(5, 3)
++        median = MedianSlidingWindow(5, 3, 40, 15)
+         absolute_threshold = AbsoluteThreshold(10, 8)
+         absolute_threshold.attach_observer(median)
+         absolute_threshold.set_threshold(24.5)
+diff --git a/src/libs/libxalarm/register_xalarm.c b/src/libs/libxalarm/register_xalarm.c
+index 1ddd0ae..4204fce 100644
+--- a/src/libs/libxalarm/register_xalarm.c
++++ b/src/libs/libxalarm/register_xalarm.c
+@@ -31,8 +31,8 @@
+ #define DIR_XALARM "/var/run/xalarm"
+ #define PATH_REG_ALARM "/var/run/xalarm/alarm"
+ #define PATH_REPORT_ALARM "/var/run/xalarm/report"
+-#define ALARM_DIR_PERMISSION 0750
+-#define ALARM_SOCKET_PERMISSION 0600
++#define ALARM_DIR_PERMISSION 0755
++#define ALARM_SOCKET_PERMISSION 0666
+ #define TIME_UNIT_MILLISECONDS 1000
+ 
+ #define MAX_PARAS_LEN 8191
+@@ -121,10 +121,6 @@ static int create_unix_socket(const char *path)
+         printf("create_unix_socket:  connect alarm_addr failed, ret: %d\n", ret);
+         goto release_socket;
+     }
+-    if (chmod(path, ALARM_SOCKET_PERMISSION) < 0) {
+-        printf("chmod %s failed: %s\n", path, strerror(errno));
+-        goto release_socket;
+-    }
+ 
+     return fd;
+ 
+diff --git a/src/libs/pyxalarm/register_xalarm.py b/src/libs/pyxalarm/register_xalarm.py
+index 7416478..91debf7 100644
+--- a/src/libs/pyxalarm/register_xalarm.py
++++ b/src/libs/pyxalarm/register_xalarm.py
+@@ -16,7 +16,7 @@ MAX_ALARM_ID = (MIN_ALARM_ID + MAX_NUM_OF_ALARM_ID - 1)
+ DIR_XALARM = "/var/run/xalarm"
+ PATH_REG_ALARM = "/var/run/xalarm/alarm"
+ PATH_REPORT_ALARM = "/var/run/xalarm/report"
+-ALARM_DIR_PERMISSION = 0o0750
++ALARM_DIR_PERMISSION = 0o0755
+ ALARM_REG_SOCK_PERMISSION = 0o0700
+ ALARM_SOCKET_PERMISSION = 0o0700
+ TIME_UNIT_MILLISECONDS = 1000
+diff --git a/src/libsentry/python/pySentryCollector/collect_plugin.py b/src/libsentry/python/pySentryCollector/collect_plugin.py
+index 9495d8b..3395f89 100644
+--- a/src/libsentry/python/pySentryCollector/collect_plugin.py
++++ b/src/libsentry/python/pySentryCollector/collect_plugin.py
+@@ -326,9 +326,9 @@ def get_disk_type(disk):
+         try:
+             with open(disk_file, 'r') as file:
+                 num = int(file.read())
+-                if num == 1:
++                if num == 0:
+                     result['message'] = str(DiskType.TYPE_SATA_SSD)
+-                elif num == 0:
++                elif num == 1:
+                     result['message'] = str(DiskType.TYPE_SATA_HDD)
+                 else:
+                     logging.error("disk %s is not support, num = %d", disk, num)
+diff --git a/src/sentryPlugins/ai_block_io/ai_block_io.py b/src/sentryPlugins/ai_block_io/ai_block_io.py
+index abf264d..f7b8226 100644
+--- a/src/sentryPlugins/ai_block_io/ai_block_io.py
++++ b/src/sentryPlugins/ai_block_io/ai_block_io.py
+@@ -209,7 +209,7 @@ class SlowIODetection:
+                 del tmp_alarm_content["details"]
+                 logging.warning("[SLOW IO] " + str(tmp_alarm_content))
+                 logging.warning(f'[SLOW IO] disk: {str(tmp_alarm_content.get("driver_name"))}, '
+-                        f'stage: {str(tmp_alarm_content.get("driver_name"))}, '
++                        f'stage: {str(tmp_alarm_content.get("block_stack"))}, '
+                         f'iotype: {str(tmp_alarm_content.get("io_type"))}, '
+                         f'type: {str(tmp_alarm_content.get("alarm_type"))}, '
+                         f'reason: {str(tmp_alarm_content.get("reason"))}')
+diff --git a/src/sentryPlugins/ai_block_io/sliding_window.py b/src/sentryPlugins/ai_block_io/sliding_window.py
+index a13033f..b174d94 100644
+--- a/src/sentryPlugins/ai_block_io/sliding_window.py
++++ b/src/sentryPlugins/ai_block_io/sliding_window.py
+@@ -33,10 +33,13 @@ class SlidingWindow:
+     def is_abnormal(self, data):
+         if self._avg_lim is not None and data < self._avg_lim:
+             return False
+-        if self._ai_threshold is not None and data > self._ai_threshold:
+-            return True
++        if self._avg_lim is not None and self._ai_threshold is not None:
++            threshold = max(self._avg_lim, self._ai_threshold)
++            if data > threshold:
++                return True
+         if self._abs_threshold is not None and data > self._abs_threshold:
+             return True
++        return False
+ 
+     def push(self, data: float):
+         if len(self._io_data_queue) == self._queue_length:
+diff --git a/src/services/xalarm/xalarm_daemon.py b/src/services/xalarm/xalarm_daemon.py
+index 3ab211c..14a41cd 100644
+--- a/src/services/xalarm/xalarm_daemon.py
++++ b/src/services/xalarm/xalarm_daemon.py
+@@ -25,7 +25,7 @@ from .xalarm_config import config_init, get_log_level
+ from .xalarm_server import server_loop, SOCK_FILE
+ 
+ ALARM_DIR = "/var/run/xalarm"
+-ALARM_DIR_PERMISSION = 0o750
++ALARM_DIR_PERMISSION = 0o755
+ ALARM_LOGFILE = '/var/log/sysSentry/xalarm.log'
+ XALARMD_PID_FILE = "/var/run/xalarm/xalarmd.pid"
+ PID_FILE_FLOCK = None
+diff --git a/src/services/xalarm/xalarm_server.py b/src/services/xalarm/xalarm_server.py
+index 3ed0a24..0ada5ca 100644
+--- a/src/services/xalarm/xalarm_server.py
++++ b/src/services/xalarm/xalarm_server.py
+@@ -35,8 +35,8 @@ ALARM_DIR = "/var/run/xalarm"
+ USER_RECV_SOCK = "/var/run/xalarm/alarm"
+ SOCK_FILE = "/var/run/xalarm/report"
+ ALARM_REPORT_LEN = 8216
+-ALARM_DIR_PERMISSION = 0o750
+-SOCKET_FILE_PERMISSON = 0o600
++ALARM_DIR_PERMISSION = 0o755
++SOCKET_FILE_PERMISSON = 0o666
+ PERMISION_MASK = 0o777
+ PEROID_CHECK_TIME = 3
+ ALARM_LISTEN_QUEUE_LEN = 5
+-- 
+2.48.1
+
