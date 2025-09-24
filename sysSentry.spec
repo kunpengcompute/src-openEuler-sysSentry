@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 14
+Release: 15
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -27,6 +27,7 @@ Patch15:   fix-env-for-subprocess.Popen.patch
 Patch16:   Use-malloc-to-allocate-memory-as-much-as-possible.patch
 Patch17:   fix-cpu_sentry-result-when-found_fault_cores_number-.patch
 Patch18:   fix-some-code-bugs.patch
+Patch19:   add-bmc_block_io.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -119,6 +120,16 @@ Provides:       sentry_msg_monitor = %{version}
 %description -n sentry_msg_monitor
 This package provides a plugin for sysSentry to listening specific messages
 
+%package -n bmc_block_io
+Summary:        bmc_block_io for the sysSentry
+Provides:       bmc_block_io = %{version}
+BuildRequires:  json-c-devel libxalarm-devel
+Requires:       libxalarm ipmitool json-c
+Requires:       sysSentry = %{version}-%{release}
+
+%description -n bmc_block_io
+This package provides bmc_block_io for the sysSentry.
+
 %prep
 %autosetup -n %{name}-%{version} -p1
 
@@ -177,6 +188,8 @@ rm -rf /var/run/sysSentry | :
 %exclude %{_sysconfdir}/sysSentry/plugins/ai_block_io.ini
 %exclude %{_sysconfdir}/sysSentry/tasks/avg_block_io.mod
 %exclude %{_sysconfdir}/sysSentry/plugins/avg_block_io.ini
+%exclude %{_sysconfdir}/sysSentry/tasks/bmc_block_io.mod
+%exclude %{_sysconfdir}/sysSentry/plugins/bmc_block_io.ini
 
 # xalarm
 %attr(0550,root,root) %{_bindir}/xalarmd
@@ -242,7 +255,18 @@ rm -rf /var/run/sysSentry | :
 %attr(0600,root,root) %{_sysconfdir}/sysconfig/sentry_msg_monitor.env
 %attr(0600,root,root) %{_sysconfdir}/sysSentry/tasks/sentry_msg_monitor.mod
 
+%files -n bmc_block_io
+%attr(0550,root,root) %{_bindir}/bmc_block_io
+%attr(0600,root,root) %{_sysconfdir}/sysSentry/plugins/bmc_block_io.ini
+%attr(0600,root,root) %{_sysconfdir}/sysSentry/tasks/bmc_block_io.mod
+
 %changelog
+* Wed Sep 24 2025 hewanhan <hewanhan@h-partners.com> - 1.0.3-15
+- Type:feature
+- CVE:NA
+- SUG:NA
+- DESC:add bmc_block_io
+
 * Mon Sep 22 2025 hewanhan <hewanhan@h-partners.com> - 1.0.3-14
 - Type:bugfix
 - CVE:NA
