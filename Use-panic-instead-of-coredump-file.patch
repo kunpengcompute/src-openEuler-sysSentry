@@ -1,0 +1,78 @@
+From 9b631cf00449a9e16373600b70031df534a8ff1d Mon Sep 17 00:00:00 2001
+From: Yihang Li <liyihang9@h-partners.com>
+Date: Thu, 31 Jul 2025 15:01:20 +0800
+Subject: [PATCH 6/9] sysSentry: Use panic instead of coredump file
+
+driver inclusion
+category: feature
+bugzilla: https://gitee.com/src-openeuler/sysSentry/issues/ID1UOY
+CVE: NA
+
+----------------------------------------------------------------------
+
+Prior to this, when the post-processing flag was configured to 1,
+detecting an error would generate a coredump file, which was not as
+expected. Instead, a panic should be used to replace the coredump file.
+
+Additionally, some formatting errors were cleaned up.
+
+Signed-off-by: Yihang Li <liyihang9@h-partners.com>
+Signed-off-by: Qizhi Zhang <zhangqizhi3@h-partners.com>
+---
+ .../soc_ring_sentry/tc_ring_one.c             | 23 ++++++++++++++++---
+ 1 file changed, 20 insertions(+), 3 deletions(-)
+
+diff --git a/src/sentryPlugins/soc_ring_sentry/tc_ring_one.c b/src/sentryPlugins/soc_ring_sentry/tc_ring_one.c
+index e8740c0..5101070 100755
+--- a/src/sentryPlugins/soc_ring_sentry/tc_ring_one.c
++++ b/src/sentryPlugins/soc_ring_sentry/tc_ring_one.c
+@@ -441,6 +441,22 @@ out:
+     return ret;
+ }
+ 
++static void tc_ring_one_execute_panic(void)
++{
++    FILE *file = fopen("/proc/sysrq-trigger", "w");
++
++    if (file == NULL) {
++        logging_error("Failed to open /proc/sysrq-trigger");
++        return;
++    }
++
++    if (fwrite("c", sizeof(char), 1, file) != 1) {
++        logging_error("Failed to write to /proc/sysrq-trigger");
++    }
++
++    fclose(file);
++}
++
+ void tc_ring_one_post_process(uint64_t err_handle, int result)
+ {
+     if (result == TC_RING_ONE_SUCCESS) {
+@@ -451,19 +467,20 @@ void tc_ring_one_post_process(uint64_t err_handle, int result)
+                 logging_error("the system administrator must handle this error!!!\n");
+                 break;
+             case TC_ERROR_HANDLE_SHUTDOWN:
+-                    logging_error("Execute 'shutdown'\n");
++                logging_error("Execute 'shutdown'\n");
+                 if (reboot(RB_POWER_OFF) < 0) {
+                     logging_error("ERROR: Failed to execute 'shutdown'\n");
+                 }
+                 break;
+             case TC_ERROR_HANDLE_REBOOT:
+-                    logging_error("Execute 'reboot'\n");
++                logging_error("Execute 'reboot'\n");
+                 if (reboot(RB_AUTOBOOT) < 0) {
+                     logging_error("ERROR: Failed to execute 'reboot'\n");
+                 }
+                 break;
+             default: // panic
+-                abort();
++                logging_error("Execute 'panic'\n");
++                tc_ring_one_execute_panic();
+                 break;
+         }
+     } else {
+-- 
+2.33.0
+
