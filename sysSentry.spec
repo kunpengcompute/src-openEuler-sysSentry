@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 10
+Release: 11
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -19,6 +19,15 @@ Patch7:    ai-block-io-exit-when-stage-is-not-supported.patch
 Patch8:    add-log-utils-for-c.patch
 Patch9:    fix-env-for-subprocess.Popen.patch
 Patch10:   fix-period-task-some-bugs.patch
+Patch11:   Add-SOC-Ring-sentry-function.patch
+Patch12:   Add-testcase-tc_ring-for-SOC-Ring-sentry.patch
+Patch13:   testcase-tc_ring-cleancode.patch
+Patch14:   Fix-issue-cores-with-isolcpus-set-blacklis.patch
+Patch15:   Fix-issue-inconsistent-status-and-result-a.patch
+Patch16:   Use-panic-instead-of-coredump-file.patch
+Patch17:   Fix-Security-Scan-Warning.patch
+Patch18:   Fix-two-code-review-comments.patch
+Patch19:   Add-MulanV2-License-statement.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -26,6 +35,7 @@ BuildRequires: json-c-devel
 BuildRequires: chrpath
 BuildRequires: elfutils-devel clang libbpf-devel bpftool
 BuildRequires: python3-numpy python3-pytest
+BuildRequires: numactl-libs numactl-devel
 
 Requires:      pyxalarm = %{version}
 Requires:      libbpf
@@ -102,6 +112,15 @@ Requires:       sysSentry = %{version}-%{release}
 
 %description -n hbm_online_repair
 This package provides hbm_online_repair for the sysSentry.
+
+%package -n soc_ring_sentry
+Summary:        soc_ring_sentry for the sysSentry
+Provides:       soc_ring_sentry = %{version}
+BuildRequires:  numactl-libs numactl-devel
+Requires:       sysSentry = %{version}-%{release}
+
+%description -n soc_ring_sentry
+This package provides soc_ring_sentry for the sysSentry.
 
 %prep
 %autosetup -n %{name}-%{version} -p1
@@ -181,6 +200,10 @@ rm -rf /var/run/sysSentry | :
 %exclude %{python3_sitelib}/syssentry/bmc_*
 %exclude %{python3_sitelib}/syssentry/*/bmc_*
 
+# soc_ring_sentry
+%exclude %{_sysconfdir}/sysconfig/soc_ring_sentry.env
+%exclude %{_sysconfdir}/sysSentry/tasks/sentry_msg_monitor.mod
+
 %files -n libxalarm
 %attr(0550,root,root) %{_libdir}/libxalarm.so
 
@@ -216,7 +239,25 @@ rm -rf /var/run/sysSentry | :
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/hbm_online_repair.mod
 %attr(0550,root,root) %{python3_sitelib}/syssentry/bmc_alarm.py
 
+%files -n soc_ring_sentry
+%attr(0750,root,root) %{_bindir}/soc_ring_sentry
+%attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysconfig/soc_ring_sentry.env
+
 %changelog
+* Fri Oct 17 2025 Qizhi Zhang <zhangqizhi3@h-partners.com> - 1.0.3-11
+- Type:feature
+- CVE:NA
+- SUG:NA
+- DESC:Add SOC Ring sentry function
+       Add testcase tc_ring for SOC Ring sentry
+       testcase tc_ring cleancode
+       Fix issue cores with isolcpus set blacklist failed
+       Fix issue inconsistent status and result after single inspection
+       Use panic instead of coredump file
+       Fix Security Scan Warning
+       Fix two code review comments
+       Add MulanV2 License statement
+
 * Sat Mar 29 2025 shixuantong <shixuantong1@huawei.com> - 1.0.3-10
 - Type:bugfix
 - CVE:NA
