@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 16
+Release: 17
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -236,7 +236,7 @@ rm -rf /var/run/sysSentry | :
 
 # soc_ring_sentry
 %exclude %{_sysconfdir}/sysconfig/soc_ring_sentry.env
-%exclude %{_sysconfdir}/sysSentry/tasks/sentry_msg_monitor.mod
+%exclude %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %files -n libxalarm
 %attr(0555,root,root) %{_libdir}/libxalarm.so
@@ -286,8 +286,15 @@ rm -rf /var/run/sysSentry | :
 %files -n soc_ring_sentry
 %attr(0750,root,root) %{_bindir}/soc_ring_sentry
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysconfig/soc_ring_sentry.env
+%attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Tue Oct 21 2025 Qizhi Zhang <zhangqizhi3@h-partners.com> - 1.0.3-17
+- Type:feature
+- CVE:NA
+- SUG:NA
+- DESC:Fix the syssentry.spec file that was incorrectly filed out by soc_ring_sentry
+
 * Thu Oct 16 2025 Qizhi Zhang <zhangqizhi3@h-partners.com> - 1.0.3-16
 - Type:feature
 - CVE:NA
