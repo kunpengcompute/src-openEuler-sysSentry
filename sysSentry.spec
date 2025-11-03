@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 17
+Release: 18
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -37,6 +37,7 @@ Patch25:   Use-panic-instead-of-coredump-file.patch
 Patch26:   Fix-Security-Scan-Warning.patch
 Patch27:   Fix-two-code-review-comments.patch
 Patch28:   Add-MulanV2-License-statement.patch
+Patch29:   slow-io-plugin-upgrade.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -289,6 +290,12 @@ rm -rf /var/run/sysSentry | :
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Mon Nov 3 2025 hewanhan <hewanhan@h-partners.com> - 1.0.3-18
+- Type:feature
+- CVE:NA
+- SUG:NA
+- DESC:slow io plugin upgrade
+
 * Tue Oct 21 2025 Qizhi Zhang <zhangqizhi3@h-partners.com> - 1.0.3-17
 - Type:feature
 - CVE:NA
