@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 12
+Release: 13
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -28,6 +28,7 @@ Patch16:   Use-panic-instead-of-coredump-file.patch
 Patch17:   Fix-Security-Scan-Warning.patch
 Patch18:   Fix-two-code-review-comments.patch
 Patch19:   Add-MulanV2-License-statement.patch
+Patch20:   add-bmc_block_io-and-slow-io-plugin-upgrade.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -113,6 +114,16 @@ Requires:       sysSentry = %{version}-%{release}
 %description -n hbm_online_repair
 This package provides hbm_online_repair for the sysSentry.
 
+%package -n bmc_block_io
+Summary:        bmc_block_io for the sysSentry
+Provides:       bmc_block_io = %{version}
+BuildRequires:  json-c-devel libxalarm-devel
+Requires:       libxalarm ipmitool json-c
+Requires:       sysSentry = %{version}-%{release}
+
+%description -n bmc_block_io
+This package provides bmc_block_io for the sysSentry.
+
 %package -n soc_ring_sentry
 Summary:        soc_ring_sentry for the sysSentry
 Provides:       soc_ring_sentry = %{version}
@@ -151,7 +162,7 @@ rm -rf /var/run/sysSentry | :
 
 %files
 %defattr(0550,root,root)
-%attr(0550,root,root) %{python3_sitelib}/xalarm
+%attr(0555,root,root) %{python3_sitelib}/xalarm
 %attr(0550,root,root) %{python3_sitelib}/syssentry
 %attr(0550,root,root) %{python3_sitelib}/%{PKGVER}
 %attr(0550,root,root) %{python3_sitelib}/sentryCollector
@@ -178,6 +189,8 @@ rm -rf /var/run/sysSentry | :
 %exclude %{_sysconfdir}/sysSentry/plugins/ai_block_io.ini
 %exclude %{_sysconfdir}/sysSentry/tasks/avg_block_io.mod
 %exclude %{_sysconfdir}/sysSentry/plugins/avg_block_io.ini
+%exclude %{_sysconfdir}/sysSentry/tasks/bmc_block_io.mod
+%exclude %{_sysconfdir}/sysSentry/plugins/bmc_block_io.ini
 
 # xalarm
 %attr(0550,root,root) %{_bindir}/xalarmd
@@ -205,13 +218,13 @@ rm -rf /var/run/sysSentry | :
 %exclude %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %files -n libxalarm
-%attr(0550,root,root) %{_libdir}/libxalarm.so
+%attr(0555,root,root) %{_libdir}/libxalarm.so
 
 %files -n libxalarm-devel
-%attr(0550,root,root) %{_includedir}/xalarm/register_xalarm.h
+%attr(0555,root,root) %{_includedir}/xalarm/register_xalarm.h
 
 %files -n pyxalarm
-%attr(0550,root,root) %{python3_sitelib}/xalarm/register_xalarm.py
+%attr(0555,root,root) %{python3_sitelib}/xalarm/register_xalarm.py
 
 %files -n pysentry_notify
 %attr(0550,root,root) %{python3_sitelib}/xalarm/sentry_notify.py
@@ -239,12 +252,23 @@ rm -rf /var/run/sysSentry | :
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/hbm_online_repair.mod
 %attr(0550,root,root) %{python3_sitelib}/syssentry/bmc_alarm.py
 
+%files -n bmc_block_io
+%attr(0550,root,root) %{_bindir}/bmc_block_io
+%attr(0600,root,root) %{_sysconfdir}/sysSentry/plugins/bmc_block_io.ini
+%attr(0600,root,root) %{_sysconfdir}/sysSentry/tasks/bmc_block_io.mod
+
 %files -n soc_ring_sentry
 %attr(0750,root,root) %{_bindir}/soc_ring_sentry
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysconfig/soc_ring_sentry.env
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Tue Nov 4 2025 hewanhan <hewanhan@h-partners.com> - 1.0.3-13
+- Type:feature
+- CVE:NA
+- SUG:NA
+- DESC:add bmc_block_io and slow io plugin upgrade
+
 * Tue Oct 21 2025 Qizhi Zhang <zhangqizhi3@h-partners.com> - 1.0.3-12
 - Type:feature
 - CVE:NA
