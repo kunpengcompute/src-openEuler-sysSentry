@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 13
+Release: 14
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -29,6 +29,7 @@ Patch17:   Fix-Security-Scan-Warning.patch
 Patch18:   Fix-two-code-review-comments.patch
 Patch19:   Add-MulanV2-License-statement.patch
 Patch20:   add-bmc_block_io-and-slow-io-plugin-upgrade.patch
+Patch21:   add-disk-latency-collect.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -263,6 +264,12 @@ rm -rf /var/run/sysSentry | :
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Mon Nov 17 2025 hewanhan <hewanhan@h-partners.com> - 1.0.3-14
+- Type:feature
+- CVE:NA
+- SUG:NA
+- DESC:add disk latency collect
+
 * Tue Nov 4 2025 hewanhan <hewanhan@h-partners.com> - 1.0.3-13
 - Type:feature
 - CVE:NA
