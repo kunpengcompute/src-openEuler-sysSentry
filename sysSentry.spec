@@ -40,7 +40,7 @@ BuildRequires: python3-numpy python3-pytest
 BuildRequires: numactl-libs numactl-devel
 
 Requires:      pyxalarm = %{version}
-Requires:      libbpf
+Requires:      libbpf nvme-cli
 
 %define PYTHON_VERSION %{python3_version}
 %define PKGVER syssentry-%{version}-py%{PYTHON_VERSION}.egg-info
