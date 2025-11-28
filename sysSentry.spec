@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 15
+Release: 16
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -57,6 +57,7 @@ Patch45:   fix-Out-of-memory-bounds-access-in-ebpf_collector.patch
 Patch46:   report-power-off-result-to-BMC.patch
 Patch47:   add-API-to-enable-disable-the-hijacking-function-for.patch
 Patch48:   build-sentry_msg_monitor-only-under-aarch64-architec.patch
+Patch49:   fix-syntar-in-sentryctl.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -314,6 +315,12 @@ rm -rf /var/run/sysSentry | :
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Fri Nov 28 2025 shixuantong <shixuantong1@h-partners.com> - 1.0.3-16
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix syntar in sentryctl
+
 * Thu Nov 27 2025 shixuantong <shixuantong1@h-partners.com> - 1.0.3-15
 - Type:feature
 - CVE:NA
