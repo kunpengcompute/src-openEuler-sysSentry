@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 18
+Release: 19
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -134,7 +134,7 @@ This package provides a plugin for sysSentry to listening specific messages
 %package -n bmc_block_io
 Summary:        bmc_block_io for the sysSentry
 Provides:       bmc_block_io = %{version}
-BuildRequires:  json-c-devel libxalarm-devel
+BuildRequires:  json-c-devel
 Requires:       libxalarm ipmitool json-c
 Requires:       sysSentry = %{version}-%{release}
 
@@ -290,6 +290,12 @@ rm -rf /var/run/sysSentry | :
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Wed Dec 3 2025 shixuantong <shixuantong1@h-partners.com> - 1.0.3-19
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:Fix self-dependency issue in spec file
+
 * Mon Nov 3 2025 hewanhan <hewanhan@h-partners.com> - 1.0.3-18
 - Type:feature
 - CVE:NA
