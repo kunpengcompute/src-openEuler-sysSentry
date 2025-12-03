@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 17
+Release: 18
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -58,6 +58,7 @@ Patch46:   report-power-off-result-to-BMC.patch
 Patch47:   add-API-to-enable-disable-the-hijacking-function-for.patch
 Patch48:   build-sentry_msg_monitor-only-under-aarch64-architec.patch
 Patch49:   fix-syntar-in-sentryctl.patch
+Patch50:   add-task_pre-and-task_post-for-task-mod-setting.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -315,6 +316,12 @@ rm -rf /var/run/sysSentry | :
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Wed Dec 03 2025 shixuantong <shixuantong1@h-partners.com> - 1.0.3-18
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:add task_pre and task_post for task mod setting
+
 * Wed Dec 03 2025 shixuantong <shixuantong1@h-partners.com> - 1.0.3-17
 - Type:bugfix
 - CVE:NA
