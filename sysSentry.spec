@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 18
+Release: 19
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -59,6 +59,7 @@ Patch47:   add-API-to-enable-disable-the-hijacking-function-for.patch
 Patch48:   build-sentry_msg_monitor-only-under-aarch64-architec.patch
 Patch49:   fix-syntar-in-sentryctl.patch
 Patch50:   add-task_pre-and-task_post-for-task-mod-setting.patch
+Patch51:   fix-potential-use-after-free-bugs-in-libxalarm.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -316,6 +317,12 @@ rm -rf /var/run/sysSentry | :
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Tue Dec 09 2025 shixuantong <shixuantong1@h-partners.com> - 1.0.3-19
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix potential use-after-free bugs in libxalarm
+
 * Wed Dec 03 2025 shixuantong <shixuantong1@h-partners.com> - 1.0.3-18
 - Type:bugfix
 - CVE:NA
