@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 19
+Release: 20
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -60,6 +60,7 @@ Patch48:   build-sentry_msg_monitor-only-under-aarch64-architec.patch
 Patch49:   fix-syntar-in-sentryctl.patch
 Patch50:   add-task_pre-and-task_post-for-task-mod-setting.patch
 Patch51:   fix-potential-use-after-free-bugs-in-libxalarm.patch
+Patch52:   change-egg-info-dir-permission.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -317,6 +318,12 @@ rm -rf /var/run/sysSentry | :
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Wed Dec 10 2025 shixuantong <shixuantong1@h-partners.com> - 1.0.3-20
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC: change egg-info dir permission
+
 * Tue Dec 09 2025 shixuantong <shixuantong1@h-partners.com> - 1.0.3-19
 - Type:bugfix
 - CVE:NA
