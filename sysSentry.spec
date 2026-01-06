@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 21
+Release: 22
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -62,6 +62,7 @@ Patch50:   add-task_pre-and-task_post-for-task-mod-setting.patch
 Patch51:   fix-potential-use-after-free-bugs-in-libxalarm.patch
 Patch52:   change-egg-info-dir-permission.patch
 Patch53:   keeping-the-driver-loaded-in-the-reboot-scenario.patch
+Patch54:   delete-tmp-log-file-in-logrotate-syssentry.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -321,6 +322,12 @@ rm -rf /var/run/sysSentry | :
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Tue Jan 06 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-22
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:delete tmp log file in logrotate-syssentry
+
 * Mon Dec 29 2025 shixuantong <shixuantong1@h-partners.com> - 1.0.3-21
 - Type:bugfix
 - CVE:NA
