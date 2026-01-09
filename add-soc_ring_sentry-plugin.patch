@@ -1,0 +1,1350 @@
+From 01dabc5644e5d550d29b732f1ab7e5ce46ee44bd Mon Sep 17 00:00:00 2001
+From: zengchao001 <zc18179036325@163.com>
+Date: Thu, 8 Jan 2026 16:38:46 +0800
+Subject: [PATCH] add soc_ring_sentry plugin
+
+---
+ config/env/soc_ring_sentry.env          |   5 +
+ config/tasks/soc_ring_sentry.mod        |   7 +
+ src/c/soc_ring_sentry/Makefile          |   9 +
+ src/c/soc_ring_sentry/README.md         |  34 ++
+ src/c/soc_ring_sentry/soc_ring_sentry.c | 289 ++++++++++
+ src/c/soc_ring_sentry/soc_ring_sentry.h |  39 ++
+ src/c/soc_ring_sentry/tc_ring_one.c     | 701 ++++++++++++++++++++++++
+ src/c/soc_ring_sentry/tc_ring_one.h     |  47 ++
+ src/libso/log/CMakeLists.txt            |   7 +
+ src/libso/log/log_utils.c               |  45 ++
+ src/libso/log/log_utils.h               |  67 +++
+ 11 files changed, 1250 insertions(+)
+ create mode 100644 config/env/soc_ring_sentry.env
+ create mode 100644 config/tasks/soc_ring_sentry.mod
+ create mode 100644 src/c/soc_ring_sentry/Makefile
+ create mode 100644 src/c/soc_ring_sentry/README.md
+ create mode 100644 src/c/soc_ring_sentry/soc_ring_sentry.c
+ create mode 100644 src/c/soc_ring_sentry/soc_ring_sentry.h
+ create mode 100755 src/c/soc_ring_sentry/tc_ring_one.c
+ create mode 100755 src/c/soc_ring_sentry/tc_ring_one.h
+ create mode 100644 src/libso/log/CMakeLists.txt
+ create mode 100644 src/libso/log/log_utils.c
+ create mode 100644 src/libso/log/log_utils.h
+
+diff --git a/config/env/soc_ring_sentry.env b/config/env/soc_ring_sentry.env
+new file mode 100644
+index 0000000..7921e45
+--- /dev/null
++++ b/config/env/soc_ring_sentry.env
+@@ -0,0 +1,5 @@
++LOG_LEVEL=info
++SOC_RING_SENTRY_INTENSITY_DELAY=600
++SOC_RING_SENTRY_MEM_SIZE=4096
++SOC_RING_SENTRY_LOOP_CNT=0
++SOC_RING_SENTRY_FAULT_HANDLING=1
+diff --git a/config/tasks/soc_ring_sentry.mod b/config/tasks/soc_ring_sentry.mod
+new file mode 100644
+index 0000000..303567a
+--- /dev/null
++++ b/config/tasks/soc_ring_sentry.mod
+@@ -0,0 +1,7 @@
++[common]
++enabled=yes
++task_start=/usr/bin/soc_ring_sentry
++task_stop=pkill -f soc_ring_sentry
++type=oneshot
++onstart=yes
++env_file=/etc/sysconfig/soc_ring_sentry.env
+\ No newline at end of file
+diff --git a/src/c/soc_ring_sentry/Makefile b/src/c/soc_ring_sentry/Makefile
+new file mode 100644
+index 0000000..9493d7b
+--- /dev/null
++++ b/src/c/soc_ring_sentry/Makefile
+@@ -0,0 +1,9 @@
++all: soc_ring_sentry
++
++soc_ring_sentry:
++	gcc *.c -Wall -o3 -I../../libso/log -L../../libso/log/build -I../../libso/xalarm -L../../libso/build/xalarm -lxalarm -lsentry_log -ljson-c -pthread -lnuma -o soc_ring_sentry
++
++clean:
++	rm -f soc_ring_sentry
++
++.PHONY: all clean
+diff --git a/src/c/soc_ring_sentry/README.md b/src/c/soc_ring_sentry/README.md
+new file mode 100644
+index 0000000..e4b3c53
+--- /dev/null
++++ b/src/c/soc_ring_sentry/README.md
+@@ -0,0 +1,34 @@
++# soc_ring_sentry
++
++#### 介绍
++soc_ring_sentry是一款依赖sysSentry并用于SOC STL巡检的插件，该插件的使用方法是：
++
++usage: soc_ring_sentry [OPTIONS]
++
++Options:
++  -h,            Show this help message and exit.
++  -g,            Get the SOC Ring sentry case.
++
++用户可以通过 `/etc/sysconfig/soc_ring_sentry.env` 修改环境变量以配置不同参数
++该文件中各个环境变量含义为：
++`LOG_LEVEL`
++日志登记配置，默认配置为info级别。也可以配置为debug, warning, 或者error.
++
++`SOC_RING_SENTRY_INTENSITY_DELAY`
++巡检间隔时长配置，单位ms，默认配置为600ms。用户可自定义其他所需间隔时长。
++
++`SOC_RING_SENTRY_MEM_SIZE`
++巡检空间大小配置，单位KB，默认配置为4096KB。也可配置为其他64KB的倍数。
++
++`SOC_RING_SENTRY_LOOP_CNT`
++巡检次数配置，默认配置为0，即持续巡检。若配置为其他值则为巡检次数。
++
++`SOC_RING_SENTRY_FAULT_HANDLING`
++后处理标识配置，默认配置为1，即主动触发panic。
++设置为0则表示检测到错误不做任何处理。
++设置为2则表示检测到错误主动关机。
++设置为3则表示检测到错误主动重启。
++
++`SOC_RING_SENTRY_BLACKLIST`
++巡检黑名单配置，默认配置为空。用户可将不运行巡检的CPU核号写入该环境变量，例如`SOC_RING_SENTRY_BLACKLIST=0,2,4,6-10`
++
+diff --git a/src/c/soc_ring_sentry/soc_ring_sentry.c b/src/c/soc_ring_sentry/soc_ring_sentry.c
+new file mode 100644
+index 0000000..2d4f129
+--- /dev/null
++++ b/src/c/soc_ring_sentry/soc_ring_sentry.c
+@@ -0,0 +1,289 @@
++/*
++ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
++ * sysSentry is licensed under Mulan PSL v2.
++ * You can use this software according to the terms and conditions of the Mulan PSL v2.
++ * You may obtain a copy of Mulan PSL v2 at:
++ *          http://license.coscl.org.cn/MulanPSL2
++ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
++ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
++ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
++ *
++ * See the Mulan PSL v2 for more details.
++ *
++ * Description: SOC Ring sentry main program
++ * Author: Yihang Li
++ * Create: 2025-7-10
++ */
++
++#include <argp.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <stdbool.h>
++#include <unistd.h>
++#include <ctype.h>
++#include <stdint.h>
++#include <numa.h>
++#include "register_xalarm.h"
++#include "log_utils.h"
++#include "soc_ring_sentry.h"
++#include "tc_ring_one.h"
++
++#define DEFAULT_INTENSITY_DELAY 600
++#define DEFAULT_HANDLE 1
++#define DEFAULT_LOOP_CNT 0
++#define LIMITE_MEM_SIZE 64
++#define KB 1024
++#define DEFAULT_MEM_SIZE (4 * KB * KB)
++
++uint64_t g_intensity_delay;
++uint64_t g_handle;
++uint64_t g_mem_size;
++uint64_t g_loop_cnt;
++bool *g_blacklist;
++
++static void print_opts_help()
++{
++    printf("usage: soc_ring_sentry [OPTIONS]\n"
++           "\n"
++           "Options:\n"
++           "  -h,            Show this help message and exit.\n"
++           "  -g,            Get the SOC Ring sentry case.\n");
++}
++
++static void soc_ring_sentry_case_get()
++{
++    printf("1. [soc stl] ring data bit line scan test case.\n");
++}
++
++static bool soc_ring_sentry_envtoull(char *env, uint64_t *value)
++{
++    char *endptr;
++    errno = 0;
++
++    if (env) {
++        if (*env == '-') {
++            logging_error("Negative input not allowed.\n");
++            return false;
++        }
++
++        *value = strtoull(env, &endptr, 10);
++        if (errno == 0 && endptr != env) {
++            while (isspace((unsigned char)*endptr)) {
++                endptr++;
++            }
++
++            if (*endptr == '\0') {
++                return true;
++            }
++        }
++    }
++
++    return false;
++}
++
++static void soc_ring_sentry_log_level_init()
++{
++    setLogLevel();
++}
++
++static void soc_ring_sentry_intensity_delay_init()
++{
++    char *env = getenv("SOC_RING_SENTRY_INTENSITY_DELAY");
++    g_intensity_delay = DEFAULT_INTENSITY_DELAY;
++    uint64_t value;
++
++    if (soc_ring_sentry_envtoull(env, &value)) {
++        g_intensity_delay = value;
++        logging_info("soc_ring_sentry intensity delay set %lums\n", g_intensity_delay);
++        return;
++    }
++
++    logging_warn("Environment variable SOC_RING_SENTRY_INTENSITY_DELAY invalid, using default value %lums\n", g_intensity_delay);
++}
++
++static void soc_ring_sentry_handle_init()
++{
++    char *env = getenv("SOC_RING_SENTRY_FAULT_HANDLING");
++    g_handle = DEFAULT_HANDLE;
++    uint64_t value;
++
++    if (soc_ring_sentry_envtoull(env, &value) && value < HANDLE_LEVEL_INVALID) {
++        g_handle = value;
++        logging_info("soc_ring_sentry handle set %lu\n", g_handle);
++        return;
++    }
++
++    logging_warn("Environment variable SOC_RING_SENTRY_FAULT_HANDLING invalid, using default value %lu\n", g_handle);
++}
++
++static void soc_ring_sentry_mem_size_init()
++{
++    char *env = getenv("SOC_RING_SENTRY_MEM_SIZE");
++    g_mem_size = DEFAULT_MEM_SIZE;
++    uint64_t value;
++
++    if (soc_ring_sentry_envtoull(env, &value)) {
++        if (value != 0 && value < (UINT64_MAX / KB) && (value % LIMITE_MEM_SIZE) == 0) {
++            g_mem_size = value * KB;
++            logging_info("soc_ring_sentry memory size set %luKB\n", value);
++            return;
++        }
++    }
++
++    logging_warn("Environment variable SOC_RING_SENTRY_MEM_SIZE invalid, using default value %luKB\n", g_mem_size / KB);
++}
++
++static void soc_ring_sentry_loop_cnt_init()
++{
++    char *env = getenv("SOC_RING_SENTRY_LOOP_CNT");
++    g_loop_cnt = DEFAULT_LOOP_CNT;
++    uint64_t value;
++
++    if (soc_ring_sentry_envtoull(env, &value)) {
++        g_loop_cnt = value;
++        logging_info("soc_ring_sentry loop cnt set %lu\n", g_loop_cnt);
++        return;
++    }
++
++    logging_warn("Environment variable SOC_RING_SENTRY_LOOP_CNT invalid, using default value %lu\n", g_loop_cnt);
++}
++
++static void soc_ring_sentry_blacklist_init(size_t core_num)
++{
++    char *env = getenv("SOC_RING_SENTRY_BLACKLIST");
++    char *log_buf, *log_end_ptr;
++    size_t log_buf_len, i;
++    int offset;
++
++    g_blacklist = (bool *)calloc(core_num, sizeof(bool));
++    if (!g_blacklist) {
++        logging_error("Failed to allocate memory for blacklist, none CPU set to blacklist\n");
++        return;
++    }
++
++    if (env && strlen(env) > 0) {
++        struct bitmask *cpuset = numa_parse_cpustring_all(env);
++
++        if (!cpuset) {
++            logging_error("Failed to parse environment variable SOC_RING_SENTRY_BLACKLIST: %s\n", env);
++            return;
++        }
++
++        for (i = 0; i < core_num; i++) {
++            if (numa_bitmask_isbitset(cpuset, i)) {
++                g_blacklist[i] = true;
++            }
++        }
++
++        numa_bitmask_free(cpuset);
++        cpuset = NULL;
++        logging_info("soc_ring_sentry blacklist set successful\n");
++        log_buf_len = strlen("blacklist cores: ") + core_num * 4 + 2;
++        log_buf = (char *)calloc(log_buf_len, sizeof(char));
++        if (log_buf) {
++            offset = snprintf(log_buf, log_buf_len * sizeof(char), "blacklist cores: ");
++            log_end_ptr = log_buf + offset;
++            for (i = 0; i < core_num; i++) {
++                if (g_blacklist[i]) {
++                    offset = snprintf(log_end_ptr, log_buf_len - (log_end_ptr - log_buf), "%ld ", i);
++                    if (offset < 0 || offset >= (log_buf_len - (log_end_ptr - log_buf))) {
++                        logging_error("Log buffer overflow during snprintf\n");
++                        break;
++                    }
++
++                    log_end_ptr += offset;
++                }
++            }
++
++            logging_info("%s\n", log_buf);
++            free(log_buf);
++            log_buf = NULL;
++        }
++    }
++}
++
++static void soc_ring_sentry_init(size_t core_num)
++{
++    soc_ring_sentry_log_level_init();
++    soc_ring_sentry_intensity_delay_init();
++    soc_ring_sentry_handle_init();
++    soc_ring_sentry_mem_size_init();
++    soc_ring_sentry_loop_cnt_init();
++    soc_ring_sentry_blacklist_init(core_num);
++}
++
++static int soc_ring_sentry_delivery(size_t core_num)
++{
++    int ret;
++
++    ret = tc_ring_one_main(g_mem_size, g_loop_cnt, g_intensity_delay, g_handle, g_blacklist, core_num);
++
++    return ret;
++}
++
++size_t get_system_core_num(void)
++{
++    long core_num = sysconf(_SC_NPROCESSORS_CONF);
++
++    return (core_num > 0) ? (size_t)core_num : 1;
++}
++
++void soc_ring_sentry_report(enum RESULT_LEVEL result_level, const char *report_data)
++{
++    char json_result[2048];
++
++    snprintf(json_result, sizeof(json_result), "{\"msg\":\"%s\", \"code\":1001}", report_data);
++    report_result(TOOL_NAME, result_level, json_result);
++    if (result_level == RESULT_LEVEL_PASS) {
++        logging_info("%s\n", report_data);
++    } else {
++        logging_error("%s\n", report_data);
++    }
++}
++
++static void soc_ring_sentry_exec()
++{
++    size_t core_num = get_system_core_num();
++    int ret;
++
++    soc_ring_sentry_init(core_num);
++    ret = soc_ring_sentry_delivery(core_num);
++    if (ret == 0) {
++        soc_ring_sentry_report(RESULT_LEVEL_PASS, "SOC STL test pass");
++    }
++
++    if (g_blacklist) {
++        free(g_blacklist);
++        g_blacklist = NULL;
++    }
++}
++
++int main(int argc, char *argv[])
++{
++    int opt;
++
++    if (argc > 2) {
++        print_opts_help();
++        return -1;
++    } else if (argc == 2) {
++        while ((opt = getopt(argc, argv, "hg")) != -1) {
++            switch ((char)opt) {
++                case 'h':
++                    print_opts_help();
++                    return 0;
++                case 'g':
++                    soc_ring_sentry_case_get();
++                    return 0;
++                default:
++                    print_opts_help();
++                    return -1;
++            }
++        }
++    } else {
++        soc_ring_sentry_exec();
++    }
++
++    return 0;
++}
++
+diff --git a/src/c/soc_ring_sentry/soc_ring_sentry.h b/src/c/soc_ring_sentry/soc_ring_sentry.h
+new file mode 100644
+index 0000000..34fb5ec
+--- /dev/null
++++ b/src/c/soc_ring_sentry/soc_ring_sentry.h
+@@ -0,0 +1,39 @@
++/*
++ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
++ * sysSentry is licensed under Mulan PSL v2.
++ * You can use this software according to the terms and conditions of the Mulan PSL v2.
++ * You may obtain a copy of Mulan PSL v2 at:
++ *          http://license.coscl.org.cn/MulanPSL2
++ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
++ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
++ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
++ *
++ * See the Mulan PSL v2 for more details.
++ *
++ * Description: SOC Ring sentry main header
++ * Author: Yihang Li
++ * Create: 2025-7-10
++ */
++
++#ifndef __SOC_RING_SENTRY_H
++#define __SOC_RING_SENTRY_H
++
++#define TOOL_NAME "soc_ring_sentry"
++
++enum handle_level {
++    HANDLE_NONE,
++    HANDLE_PANIC,
++    HANDLE_POWEROFF,
++    HANDLE_REBOOT,
++    HANDLE_LEVEL_INVALID
++};
++
++extern uint64_t g_intensity_delay;
++extern uint64_t g_handle;
++extern uint64_t g_mem_size;
++extern uint64_t g_loop_cnt;
++extern bool *g_blacklist;
++
++void soc_ring_sentry_report(enum RESULT_LEVEL result_level, const char *report_data);
++
++#endif
+diff --git a/src/c/soc_ring_sentry/tc_ring_one.c b/src/c/soc_ring_sentry/tc_ring_one.c
+new file mode 100755
+index 0000000..bae7ada
+--- /dev/null
++++ b/src/c/soc_ring_sentry/tc_ring_one.c
+@@ -0,0 +1,701 @@
++/*
++ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
++ * sysSentry is licensed under Mulan PSL v2.
++ * You can use this software according to the terms and conditions of the Mulan PSL v2.
++ * You may obtain a copy of Mulan PSL v2 at:
++ *          http://license.coscl.org.cn/MulanPSL2
++ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
++ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
++ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
++ *
++ * See the Mulan PSL v2 for more details.
++ *
++ * Description: tc ring testcase program
++ * Author: lizixian
++ * Create: 2025-7-10
++ */
++
++#ifndef _GNU_SOURCE
++#define _GNU_SOURCE
++#endif
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <stdint.h>
++#include <ctype.h>
++#include <stdbool.h>
++#include <errno.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <sys/mman.h>
++#include <unistd.h>
++#include <sched.h>
++#include <time.h>
++#include <fcntl.h>
++#include <pthread.h>
++#include <numa.h>
++#include <sys/reboot.h>
++#include "register_xalarm.h"
++#include "log_utils.h"
++#include "soc_ring_sentry.h"
++#include "tc_ring_one.h"
++
++struct tc_ring_one_config {
++    void**                 test_space_base;         // 存储每个numa节点测试空间的指针，需要根据当前系统numa节点数量动态申请存储空间
++    size_t                 mem_size;              // 每个numa节点测试空间内存大小
++    size_t                 block_size;              // 每个测试块的大小，固定为64kByte
++    uint64_t               loop_cnt;              // 测试循环总数，0 -- 无限测试
++    int64_t                delay_ms;                // 每次读完一个数据块后的休眠时间，≤ 0则不休眠，继续下一个数据块的扫描
++    int64_t                rd_loop;                 // 每个扫描bit单次循环内的数据扫描次数，固定为0x80
++    pthread_t*             tc_core_threads;         // 记录每个核的测试线程
++    pthread_barrier_t      tc_barrier;              // 同步标志
++    pthread_mutex_t*       tc_node_mutex;           // 每个numa节点数据更新的锁，单个numa节点测试空间的数据刷新，只能由一个本numa节点的测试核来刷新
++    uint32_t*              node_update_flag;        // 测试空间数据刷新状态标志
++    uint64_t               err_handle;              // 错误后处理
++    bool*                  black_list;              // 测试黑名单
++    int                    tc_core_total;           // 测试核总数
++    int                    sys_core_total;          // 系统核总数
++    int                    scan_bit;                // 扫描的bit
++    int                    err_flag;                 // 错误计数
++    int                    numa_node;               // 系统numa总数
++};
++
++#define TC_RING_ONE_BLOCK_SIZE                      0x10000
++#define TC_RING_ONE_RD_LOOP                         0x80
++#define TC_RING_ONE_DATA_UNIT                       128
++#define TC_RING_ONE_CACHELINE_SIZE                  64
++
++#define TC_RING_ONE_PRAMA_ERR                       -1
++#define TC_RING_ONE_FAIL                            -2
++#define TC_RING_ONE_SUCCESS                         0
++
++#define TC_ERROR_HANDLE_NONE                        0
++#define TC_ERROR_HANDLE_PANIC                       1
++#define TC_ERROR_HANDLE_SHUTDOWN                    2
++#define TC_ERROR_HANDLE_REBOOT                      3
++
++static const uint32_t tc_ring_one_pattern[32] = {
++    0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF,
++    0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF,
++    0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF,
++    0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF,
++    0x00000000, 0x00000000, 0x00000000, 0x00000000,
++    0x00000000, 0x00000000, 0x00000000, 0x00000000,
++    0x00000000, 0x00000000, 0x00000000, 0x00000000,
++    0x00000000, 0x00000000, 0x00000000, 0x00000000,
++};
++
++static const uint32_t g_tc_ring_one_special_bits[] = {394, 397, 405, 343, 394, 393, 392, 377};
++
++static void* tc_ring_one_thread_entry(void* arg);
++
++static int get_numa_node(void)
++{
++    return numa_max_node() + 1;
++}
++
++static int is_cpu_online(int core_id)
++{
++    char online_file[64];
++     struct stat buffer;
++    int online;
++    FILE *fp;
++
++    snprintf(online_file, sizeof(online_file), "/sys/devices/system/cpu/cpu%d/online", core_id);
++    if ((core_id == 0) && (lstat(online_file, &buffer) != 0)) {
++        return 1;
++    }
++
++    fp = fopen(online_file, "r");
++    if (!fp) {
++        logging_error("Failed to open %s\n", online_file);
++        return 0;
++    }
++
++    fscanf(fp, "%d", &online);
++    fclose(fp);
++
++    return online;
++}
++
++static uintptr_t vaddr_to_phys(uintptr_t vaddr)
++{
++    int page_size = sysconf(_SC_PAGESIZE);
++    char page_map_name[64];
++    int pid = getpid();
++    uintptr_t offset;
++    uintptr_t pinfo;
++    int fd;
++
++    offset = vaddr / page_size * (sizeof(pinfo));
++    snprintf(page_map_name, sizeof(page_map_name), "/proc/%d/pagemap", pid);
++    fd = open(page_map_name, O_RDONLY);
++    if (fd < 0) {
++        logging_error("Failed to open %s\n", page_map_name);
++        return 0;
++    }
++    if (pread(fd, &pinfo, sizeof(pinfo), offset) != sizeof(pinfo)) {
++        logging_error("Failed to read %s\n", page_map_name);
++        close(fd);
++        return 0;
++    }
++
++    close(fd);
++    if((pinfo & (1ULL << 63)) == 0) {
++        logging_error("pfn is not present\n");
++        return 0;
++    } else {
++        return (pinfo & ((1ULL << 55) - 1)) * page_size + (vaddr & (page_size - 1));
++    }
++}
++
++static int get_numa_node_of_core(int core_id)
++{
++    int numa_node = numa_node_of_cpu(core_id);;
++
++    if (numa_node < 0) {
++        logging_error("[CORE%d] numa_node_of_cpu failed, errno:%d\n", core_id, errno);
++    }
++
++    return numa_node;
++}
++
++/**
++ * 从指定 NUMA 节点优先分配内存，若失败则尝试其他节点
++ * @numa_node:          系统numa总数
++ * @preferred_node:     优先分配的 NUMA 节点号
++ * @size:               需要分配的内存大小（字节）
++ * @return:             成功返回内存指针，失败返回 NULL
++ */
++static void *numa_alloc_fallback(int numa_node, int preferred_node, size_t size)
++{
++    struct bitmask *allowed_nodes;
++    void *ptr = NULL;
++    int node;
++
++    // 1. 获取所有可用的 NUMA 节点
++    allowed_nodes = numa_get_mems_allowed();
++    if (!allowed_nodes) {
++        logging_error("Failed to get allowed NUMA nodes\n");
++        return NULL;
++    }
++
++    // 2. 优先从指定节点分配内存
++    if (numa_bitmask_isbitset(allowed_nodes, preferred_node)) {
++        ptr = numa_alloc_onnode(size, preferred_node);
++        if (ptr != NULL) {
++            logging_debug("Allocated %#x bytes on NUMA assigned node %d, addr: %p\n", size, preferred_node, ptr);
++            return ptr;
++        }
++    }
++
++    // 3. 遍历所有节点（跳过优先节点）
++    for (node = 0; node < numa_node; node++) {
++        if (node == preferred_node || !numa_bitmask_isbitset(allowed_nodes, node)) {
++            continue;  // 跳过优先节点或不允许的节点
++        }
++
++        ptr = numa_alloc_onnode(size, node);
++        if (ptr != NULL) {
++            logging_debug("Allocated %#x bytes on NUMA other node %d, addr: %p\n", size, node, ptr);
++            return ptr;
++        }
++    }
++
++    // 4. 所有节点均失败，尝试跨节点分配
++    ptr = numa_alloc_interleaved(size);
++    if (ptr == NULL) {
++        logging_error("Failed to allocate %#x bytes on any NUMA node\n", size);
++    }
++
++    return ptr;
++}
++
++static void tc_ring_one_space_init(void *base, size_t size)
++{
++    int i;
++
++    for (i = 0; i < size; i += TC_RING_ONE_DATA_UNIT) {
++        memcpy((char*)base + i, tc_ring_one_pattern, sizeof(tc_ring_one_pattern));
++    }
++}
++
++static bool is_core_invalid(struct tc_ring_one_config *config, int core_id)
++{
++    return config->black_list[core_id] || !is_cpu_online(core_id);
++}
++
++static int tc_ring_one_ctrl_var_init(struct tc_ring_one_config *config)
++{
++    pthread_mutexattr_t attr;
++    int valid_core_num = 0;
++    int i;
++
++    for (i = 0; i < config->sys_core_total; i++) {
++        if (!is_core_invalid(config, i)) {
++            valid_core_num++;
++        }
++    }
++
++    if (pthread_mutexattr_init(&attr) != 0) {
++        logging_error("Failed to initialize mutex attribute\n");
++        return TC_RING_ONE_PRAMA_ERR;
++    }
++
++    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_ERRORCHECK);
++    config->tc_node_mutex = (pthread_mutex_t *)calloc(config->numa_node, sizeof(pthread_mutex_t));
++    if (config->tc_node_mutex == NULL) {
++        logging_error("Failed to allocate memory for tc_mutex\n");
++        goto mutex_alloc_fail;
++    }
++
++    for (i = 0; i < config->numa_node; i++) {
++        if (pthread_mutex_init(&(config->tc_node_mutex[i]), &attr) != 0) {
++            logging_error("Failed to initialize mutex %d\n", i);
++            goto mutex_init_fail;
++        }
++    }
++
++    config->tc_core_threads = (pthread_t *)calloc(config->sys_core_total, sizeof(pthread_t));
++    if (config->tc_core_threads == NULL) {
++        logging_error("Failed to allocate memory for tc_core_threads\n");
++        goto mutex_init_fail;
++    }
++
++    pthread_mutexattr_destroy(&attr);
++    pthread_barrier_init(&config->tc_barrier, NULL, valid_core_num);
++    return TC_RING_ONE_SUCCESS;
++
++mutex_init_fail:
++    for (i = i - 1; i >= 0; i--) {
++        pthread_mutex_destroy(&config->tc_node_mutex[i]);
++    }
++
++    free(config->tc_node_mutex);
++    config->tc_node_mutex = NULL;
++
++mutex_alloc_fail:
++    pthread_mutexattr_destroy(&attr);
++    return TC_RING_ONE_PRAMA_ERR;
++}
++
++static int tc_ring_one_init(struct tc_ring_one_config *config)
++{
++    int ret, i;
++    void *ptr;
++
++    if (numa_available() < 0) {
++        logging_error("NUMA is not available on this system\n");
++        return TC_RING_ONE_PRAMA_ERR;
++    }
++
++    // 为每个 NUMA 节点分配测试内存空间
++    config->test_space_base = (void **)calloc(config->numa_node, sizeof(void *));
++    if (config->test_space_base == NULL) {
++        logging_error("Failed to allocate memory for test_space_base\n");
++        return TC_RING_ONE_PRAMA_ERR;
++    }
++
++    for (i = 0; i < config->numa_node; i++) {
++        ptr = numa_alloc_fallback(config->numa_node, i, config->mem_size);
++        if (ptr == NULL) {
++            ret = TC_RING_ONE_PRAMA_ERR;
++            goto numa_alloc_fail;
++        }
++
++        tc_ring_one_space_init(ptr, config->mem_size);
++        config->test_space_base[i] = ptr;
++    }
++
++    config->node_update_flag = (uint32_t *)calloc(config->numa_node, sizeof(uint32_t));
++    if (config->node_update_flag == NULL) {
++        logging_error("Failed to allocate memory for node_update_flag\n");
++        ret = TC_RING_ONE_PRAMA_ERR;
++        goto numa_alloc_fail;
++    }
++
++    for (i = 0; i < config->numa_node; i++) {
++            config->node_update_flag[i] = 0;
++    }
++
++    ret = tc_ring_one_ctrl_var_init(config);
++    if (ret != 0) {
++        logging_error("tc_ring_one_ctrl_var_init fail ret:%d\n", ret);
++        goto ctrl_var_init_fail;
++    }
++
++    return ret;
++
++ctrl_var_init_fail:
++    free(config->node_update_flag);
++    config->node_update_flag = NULL;
++
++numa_alloc_fail:
++    for (i = i - 1; i >= 0; i--) {
++        numa_free(config->test_space_base[i], config->mem_size);
++    }
++
++    free(config->test_space_base);
++    config->test_space_base = NULL;
++    return ret;
++}
++
++static void tc_ring_one_release(struct tc_ring_one_config *config)
++{
++    int node;
++
++    for (int i = 0; i < config->numa_node; i++) {
++        numa_free(config->test_space_base[i], config->mem_size);
++    }
++
++    free(config->test_space_base);
++    config->test_space_base = NULL;
++    free(config->node_update_flag);
++    config->node_update_flag = NULL;
++    pthread_barrier_destroy(&(config->tc_barrier));
++    for (node = 0; node < config->numa_node; node++) {
++        pthread_mutex_destroy(&config->tc_node_mutex[node]);
++    }
++
++    free(config->tc_node_mutex);
++    config->tc_node_mutex = NULL;
++}
++
++// 将线程绑定到指定 CORE
++static int bind_thread_to_core(pthread_t thread, int core_id)
++{
++    cpu_set_t cpuset;
++    int ret = 0;
++
++    CPU_ZERO(&cpuset);
++    CPU_SET(core_id, &cpuset);
++
++    ret = pthread_setaffinity_np(thread, sizeof(cpu_set_t), &cpuset);
++    if (ret != 0) {
++        logging_error("pthread_setaffinity_np failed\n");
++        ret = TC_RING_ONE_PRAMA_ERR;
++    }
++
++    return ret;
++}
++
++static int tc_ring_one_exec(struct tc_ring_one_config *config)
++{
++    int ret;
++    int i;
++
++    ret = tc_ring_one_init(config);
++    if (ret != 0) {
++        logging_error("tc_ring_one_init fail ret:%d\n", ret);
++        return ret;
++    }
++
++    for (i = 0; i < config->sys_core_total; i++) {
++        if (is_core_invalid(config, i)) {
++            // 跳过黑名单 & offline 的core
++            continue;
++        }
++
++        ret = pthread_create(&config->tc_core_threads[i], NULL, tc_ring_one_thread_entry, (void *)config);
++        if (ret != 0) {
++            logging_error("Failed to create thread for core %d\n", i);
++            goto pthread_create_fail;
++        }
++
++        ret = bind_thread_to_core(config->tc_core_threads[i], i);
++        if (ret != 0) {
++            logging_error("Failed to bind thread to core %d\n", i);
++            goto pthread_bind_fail;
++        }
++    }
++
++    // 等待所有线程完成
++    for (i = 0; i < config->sys_core_total; i++) {
++        if (is_core_invalid(config, i)) {
++            // 跳过黑名单 & offline 的core
++            continue;
++        }
++
++        pthread_join(config->tc_core_threads[i], NULL);
++    }
++
++    if (config->err_flag > 0) {
++        ret = TC_RING_ONE_FAIL;
++    } else {
++        ret = TC_RING_ONE_SUCCESS;
++    }
++
++    goto out;
++
++pthread_bind_fail:
++    if (!is_core_invalid(config, i)) {
++        pthread_cancel(config->tc_core_threads[i]);
++        pthread_join(config->tc_core_threads[i], NULL);
++    }
++
++pthread_create_fail:
++    for (i = i - 1; i >= 0; i--) {
++        if (is_core_invalid(config, i)) {
++            continue;
++        }
++
++        pthread_cancel(config->tc_core_threads[i]);
++        pthread_join(config->tc_core_threads[i], NULL);
++    }
++
++out:
++    tc_ring_one_release(config);
++    free(config->tc_core_threads);
++    config->tc_core_threads = NULL;
++    return ret;
++}
++
++static void tc_ring_one_execute_panic(void)
++{
++    FILE *file = fopen("/proc/sysrq-trigger", "w");
++
++    if (file == NULL) {
++        logging_error("Failed to open /proc/sysrq-trigger");
++        return;
++    }
++
++    if (fwrite("c", sizeof(char), 1, file) != 1) {
++        logging_error("Failed to write to /proc/sysrq-trigger");
++    }
++
++    fclose(file);
++}
++
++void tc_ring_one_post_process(uint64_t err_handle, int result)
++{
++    if (result == TC_RING_ONE_SUCCESS) {
++        logging_info("tc_ring_one test pass\n");
++    } else if (result == TC_RING_ONE_FAIL) {
++        switch (err_handle) {  // 根据错误处理策略进行相应的处理
++            case TC_ERROR_HANDLE_NONE:
++                logging_error("the system administrator must handle this error!!!\n");
++                break;
++            case TC_ERROR_HANDLE_SHUTDOWN:
++                logging_error("Execute 'shutdown'\n");
++                if (reboot(RB_POWER_OFF) < 0) {
++                    logging_error("ERROR: Failed to execute 'shutdown'\n");
++                }
++                break;
++            case TC_ERROR_HANDLE_REBOOT:
++                logging_error("Execute 'reboot'\n");
++                if (reboot(RB_AUTOBOOT) < 0) {
++                    logging_error("ERROR: Failed to execute 'reboot'\n");
++                }
++                break;
++            default: // panic
++                logging_error("Execute 'panic'\n");
++                tc_ring_one_execute_panic();
++                break;
++        }
++    } else {
++        // 通过log打印
++        logging_error("The system can not run the tc_ring_one:\n");
++        logging_error("1. the system must support NUMA\n");
++        logging_error("2. the memory in the system maybe too small\n");
++        soc_ring_sentry_report(RESULT_LEVEL_SKIP, "The system can not run the tc_ring_one testcase");
++    }
++}
++
++int tc_ring_one_main(uint64_t mem_size, uint64_t loop_cnt, uint64_t delay,
++                               uint64_t err_handle, bool *blacklist, size_t core_num)
++{
++    struct tc_ring_one_config tc_config = { 0 };
++    int ret;
++
++    tc_config.mem_size = mem_size;
++    tc_config.loop_cnt = loop_cnt;
++    tc_config.delay_ms = delay;
++    tc_config.err_handle = err_handle;
++    tc_config.black_list = blacklist;
++    tc_config.sys_core_total = core_num;
++    tc_config.block_size = TC_RING_ONE_BLOCK_SIZE;
++    tc_config.rd_loop = TC_RING_ONE_RD_LOOP;
++    tc_config.numa_node = get_numa_node();
++
++    ret = tc_ring_one_exec(&tc_config);
++    tc_ring_one_post_process(err_handle, ret);
++
++    return ret;
++}
++
++static void tc_ring_one_init_data_pattern(uintptr_t base, size_t size, int scan_bit)
++{
++    uint64_t dat_pattern = (1ULL << (scan_bit & 0x3F));
++    size_t word_offset = (scan_bit >> 6) << 3;              // 待测试bit在cacheline中的word的偏移位置(一个word为64 bit)
++    int i;
++
++    for (i = 0; i < size; i += TC_RING_ONE_DATA_UNIT) {
++        *((uint64_t *)(base + i + word_offset + TC_RING_ONE_CACHELINE_SIZE)) = dat_pattern;
++    }
++}
++
++static void tc_ring_one_data_clear(uintptr_t base, size_t size, int scan_bit)
++{
++    size_t word_offset = (scan_bit >> 6) << 3;				// 待测试bit在cacheline中的word的偏移位置(一个word为64 bit)
++    int i;
++
++    for (i = 0; i < size; i += TC_RING_ONE_DATA_UNIT) {
++        *((uint64_t *)(base + i + word_offset + TC_RING_ONE_CACHELINE_SIZE)) = 0;
++    }
++}
++
++static void tc_ring_one_testspace_update(struct tc_ring_one_config *config, int scan_bit)
++{
++    int core_id = sched_getcpu();
++    int numa_node = get_numa_node_of_core(core_id);
++
++    pthread_barrier_wait(&config->tc_barrier);
++    if (numa_node >= 0) {
++        pthread_mutex_lock(&config->tc_node_mutex[numa_node]);
++        if (config->node_update_flag[numa_node] == 0) {
++            tc_ring_one_init_data_pattern((uintptr_t)config->test_space_base[numa_node], config->mem_size, scan_bit);
++            config->node_update_flag[numa_node] = 1;
++        }
++
++        pthread_mutex_unlock(&config->tc_node_mutex[numa_node]);
++    }
++
++    pthread_barrier_wait(&config->tc_barrier);
++}
++
++static void tc_ring_one_testspace_recover(struct tc_ring_one_config *config, int scan_bit)
++{
++    uint32_t core_id = sched_getcpu();
++    int numa_node = get_numa_node_of_core(core_id);
++
++    pthread_barrier_wait(&config->tc_barrier);
++    if (numa_node >= 0) {
++        pthread_mutex_lock(&config->tc_node_mutex[numa_node]);
++        if (config->node_update_flag[numa_node] == 1) {
++            tc_ring_one_data_clear((uintptr_t)config->test_space_base[numa_node], config->mem_size, scan_bit);
++            config->node_update_flag[numa_node] = 0;
++        }
++        pthread_mutex_unlock(&config->tc_node_mutex[numa_node]);
++    }
++
++    pthread_barrier_wait(&config->tc_barrier);
++}
++
++/**
++ * tc_ring_one_scan_test_block - 针对测试空间的指定块空间进行读扫描, 确保在块空间的的指定bit位置不存在非预期的由1跳变成0的情况
++ * @base_addr:		测试空间中指定测试块首地址(必须为128B对齐地址)
++ * @scan_bit:	    待测试bit位置(0-511)
++ * @block_size:	    待测试块空间大小
++ * @loop_cnt:	    巡检次数
++ *
++ * 在调用本函数之前，要保证测试空间已经被待验证的数据Pattern初始化。
++ * 待验证的数据Pattern:
++ *     - base_addr + n * 64        各个数据bit为1
++ *     - base_addr + (n + 1) * 64  待验证的数据bit为1, 其余数据bit为0
++ *
++ * 注意: 调用者要保证 base_addr + block_size 不能超过测试空间长度
++ */
++static bool tc_ring_one_scan_test_block(uintptr_t base_addr, int scan_bit, size_t block_size, uint64_t loop_cnt)
++{
++    uint64_t tgt_dat_pattern = (1ULL << (scan_bit & 0x3F));
++    size_t word_offset = (scan_bit >> 6) << 3;			// 待测试bit在cacheline中的word的偏移位置(一个word为64 Byte)
++    uint64_t tgt_dat_all_one = ~0x0ULL;
++    char err_msg[1024];
++    uint64_t rd_data[2];
++    size_t i;
++
++    for (i = 0; i < block_size; i += TC_RING_ONE_DATA_UNIT) {
++        rd_data[0] = *((uint64_t *)(base_addr + i + word_offset));                              // base_addr + n * 64 + word_offset
++        rd_data[1] = *((uint64_t *)(base_addr + i + TC_RING_ONE_CACHELINE_SIZE + word_offset)); // base_addr + (n + 1) * 64 + word_offset
++        if((rd_data[0] != tgt_dat_all_one) || (rd_data[1] != tgt_dat_pattern)) {
++            snprintf(err_msg, sizeof(err_msg), "[ERROR][CORE%d] test loop %lu vaddr = %#lx paddr = %#lx read_data = %#llx read_disturb = %#llx "
++                "target_data = %#llx bit_index = %d offset = %#lx block_size = %#lx",
++                sched_getcpu(), loop_cnt, (base_addr + i + word_offset), vaddr_to_phys(base_addr + i + word_offset), rd_data[1], rd_data[0],
++                tgt_dat_pattern, scan_bit, word_offset, block_size);
++            soc_ring_sentry_report(RESULT_LEVEL_MAJOR_ALM, err_msg);
++            return false;
++        }
++    }
++
++    return true;
++}
++
++static bool tc_ring_one_scan_bit(struct tc_ring_one_config *config, int scan_bit, uint64_t loop_cnt)
++{
++    int core_id = sched_getcpu();
++    int numa_node = get_numa_node_of_core(core_id);;
++    uint32_t i, j;
++
++    // numa为无效值时直接返回，不再执行扫描测试
++    if (numa_node < 0) {
++        return true;
++    }
++
++    for (i = 0; i < config->rd_loop; i++) {
++        for (j = 0; j < config->mem_size; j += config->block_size) {
++            // 按测试块大小，扫描测试空间
++            if (!tc_ring_one_scan_test_block((uintptr_t)((char *)(config->test_space_base[numa_node])) + j,
++                                        scan_bit, config->block_size, loop_cnt)) {
++                __atomic_add_fetch(&config->err_flag, 1, __ATOMIC_SEQ_CST);
++                return false;
++            }
++
++            if (config->delay_ms > 0) {
++                // 每扫描完一个测试块就休眠一段时间
++                usleep(config->delay_ms * 1000);
++            }
++        }
++    }
++
++    return true;
++}
++
++static bool tc_ring_one_test_issue(struct tc_ring_one_config *config, int scan_bit, uint64_t loop_cnt)
++{
++    bool ret;
++
++    tc_ring_one_testspace_update(config, scan_bit);
++    ret = tc_ring_one_scan_bit(config, scan_bit, loop_cnt);
++    tc_ring_one_testspace_recover(config, scan_bit);
++
++    if (config->err_flag) {
++        return false;
++    }
++
++    return ret;
++}
++
++static void* tc_ring_one_thread_entry(void *arg)
++{
++    struct tc_ring_one_config *config = arg;
++    int scan_sequence_id = 0;
++    int scan_special_id = 0;
++    uint64_t loop_cnt = 0;
++    uint64_t tc_flag = 1;
++
++    while (tc_flag == 1 && config->err_flag == 0) {
++        config->scan_bit = scan_sequence_id;
++        pthread_barrier_wait(&config->tc_barrier);
++        if (!tc_ring_one_test_issue(config, config->scan_bit, loop_cnt)) {
++            break;
++        }
++
++        scan_sequence_id = (scan_sequence_id + 1) % (TC_RING_ONE_CACHELINE_SIZE * 8);
++        scan_special_id = g_tc_ring_one_special_bits[random() % 8];
++        config->scan_bit = scan_special_id;
++        pthread_barrier_wait(&config->tc_barrier);
++        if (!tc_ring_one_test_issue(config, config->scan_bit, loop_cnt)) {
++            break;
++        }
++
++        loop_cnt++;
++        if ((config->loop_cnt != 0) && (loop_cnt >= config->loop_cnt)) {
++            tc_flag = 0;
++        }
++    }
++
++    return config;
++}
++
++// end of tc_ring_one.c
+diff --git a/src/c/soc_ring_sentry/tc_ring_one.h b/src/c/soc_ring_sentry/tc_ring_one.h
+new file mode 100755
+index 0000000..126f9cb
+--- /dev/null
++++ b/src/c/soc_ring_sentry/tc_ring_one.h
+@@ -0,0 +1,47 @@
++/*
++ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
++ * sysSentry is licensed under Mulan PSL v2.
++ * You can use this software according to the terms and conditions of the Mulan PSL v2.
++ * You may obtain a copy of Mulan PSL v2 at:
++ *          http://license.coscl.org.cn/MulanPSL2
++ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
++ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
++ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
++ *
++ * See the Mulan PSL v2 for more details.
++ *
++ * Description: tc ring testcase header
++ * Author: lizixian
++ * Create: 2025-7-10
++ */
++
++#ifndef __TC_RING_ONE_H__
++#define __TC_RING_ONE_H__
++#include "soc_ring_sentry.h"
++
++
++
++/**
++ * tc_ring_one_main -
++ *                  测试用例总入口，该函数会为测试申请测试内存空间，为每个测试核创建测试线程，并将测试线程调度到测试核上
++ * @mem_size:		用户指定的测试内存空间大小，系统每个numa节点均提供对用大小的测试空间，用于巡检测试
++ * @loop_cnt:	    测试循环次数, 大于0，则按照对应的循环做巡检测试，等于0，则巡检线程持续驻留在测试核中
++ * @delay:	        每个测试块扫描完成后的休眠时长,单位ms， ≤0 则不休眠。
++ * @err_handle:	    用于指示是否检测到错误后，是否需要做相关后处理操作
++ *                  0 - 不处理，错误处理交由上层软件进行
++ *                  1 - 主动触发panic（默认处理）
++ *                  2 - 关机
++ *                  3 - 重启(不建议，该用例检测的失效错误为数据出错的致命错误，设备不应继续工作)
++ *                  其他 - 非法输入。保持为默认处理。
++ * @blacklist:     行巡检用例执行核的黑名单数组，用于指定某个核是否执行巡检测试线程，数值大小为测试核个数
++ *                 NULL - 无黑名单，系统所有在线核均需要调度巡检线程
++ * @core_num:      系统核总数（包含online & offline的core的总数），调用者需要保证该参数正确性
++ *
++ * return:          0 - 在测试块中未检出错误
++ *                  -1 - 系统状态不支持巡检用例执行(系统不支持numa or 系统内存空间不足)
++ *                  -2 - 检出到数据错误
++ *
++ */
++int tc_ring_one_main(uint64_t mem_size, uint64_t loop_cnt, uint64_t delay, uint64_t err_handle, bool *blacklist, size_t core_num);
++
++#endif /*__TC_RING_ONE_H__*/
+diff --git a/src/libso/log/CMakeLists.txt b/src/libso/log/CMakeLists.txt
+new file mode 100644
+index 0000000..494ff0d
+--- /dev/null
++++ b/src/libso/log/CMakeLists.txt
+@@ -0,0 +1,7 @@
++# Copyright (c) Huawei Technologies Co., Ltd. 2023-2025. All rights reserved.
++# Description: cmake file for log_utils
++cmake_minimum_required(VERSION 3.22)
++project(sentry_log)
++add_library(sentry_log SHARED log_utils.c)
++set_target_properties(sentry_log PROPERTIES LINK_FLAGS "-Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack -Wtrampolines")
++set_target_properties(sentry_log PROPERTIES CMAKE_C_FLAGS "-shared -fPIC -fstack-protector-strong -D_FORTIFY_SOURCE=2 -O2 -Wall -Werror -g")
+diff --git a/src/libso/log/log_utils.c b/src/libso/log/log_utils.c
+new file mode 100644
+index 0000000..0565104
+--- /dev/null
++++ b/src/libso/log/log_utils.c
+@@ -0,0 +1,45 @@
++/*
++ * Copyright (c) Huawei Technologies Co., Ltd. 2023-2025. All rights reserved.
++ * Description: log utils for sysSentry
++ * Author: sxt1001
++ * Create: 2025-2-16
++ */
++
++#include "log_utils.h"
++
++static LogLevel currentLogLevel = LOG_INFO;
++
++void logMessage(LogLevel level, char* file, int line, const char *format, ...)
++{
++    if (level >= currentLogLevel) {
++        PRINT_LOG_PREFIX(level, file, line);
++        va_list args;
++        va_start(args, format);
++        vfprintf(LOG_FD(level), format, args);
++        va_end(args);
++        fflush(LOG_FD(level));
++    }
++}
++
++void setLogLevel()
++{
++    char* levelStr = getenv(LOG_LEVEL_ENV);
++    if (levelStr == NULL) {
++        logMessage(LOG_WARN, __FILE__, __LINE__, "getenv('%s') is NULL, use default log level : %s\n", LOG_LEVEL_ENV, LOG_LEVEL_STRING(LOG_INFO));
++    } else if (strcmp(levelStr, "info") == 0) {
++        currentLogLevel = LOG_INFO;
++        logMessage(LOG_INFO, __FILE__, __LINE__, "Set log level : %s\n", LOG_LEVEL_STRING(LOG_INFO));
++    } else if (strcmp(levelStr, "warning") == 0) { 
++        currentLogLevel = LOG_WARN;
++        logMessage(LOG_INFO,__FILE__, __LINE__,"Set log level : %s\n", LOG_LEVEL_STRING(LOG_WARN));
++    } else if (strcmp(levelStr, "error") == 0) {
++        currentLogLevel = LOG_ERROR;
++        logMessage(LOG_INFO,__FILE__, __LINE__,"Set log level : %s\n", LOG_LEVEL_STRING(LOG_ERROR));
++    } else if (strcmp(levelStr, "debug") == 0) { 
++        currentLogLevel = LOG_DEBUG;
++        logMessage(LOG_INFO,__FILE__, __LINE__,"Set log level : %s\n", LOG_LEVEL_STRING(LOG_DEBUG));
++    } else {
++        currentLogLevel = LOG_INFO;
++        logMessage(LOG_WARN, __FILE__, __LINE__, "unknown log level : %s,  use default log level : %s\n", levelStr, LOG_LEVEL_STRING(LOG_INFO));
++    }
++}
+diff --git a/src/libso/log/log_utils.h b/src/libso/log/log_utils.h
+new file mode 100644
+index 0000000..774fa97
+--- /dev/null
++++ b/src/libso/log/log_utils.h
+@@ -0,0 +1,67 @@
++/*
++ * Copyright (c) Huawei Technologies Co., Ltd. 2023-2025. All rights reserved.
++ * Description: log utils for sysSentry
++ * Author: sxt1001
++ * Create: 2025-2-16
++ */
++
++#ifndef _SYSSENTRY_LOG_H
++#define _SYSSENTRY_LOG_H
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <stdarg.h>
++#include <time.h>
++#include <libgen.h>
++
++typedef enum {
++    LOG_DEBUG = 0,
++    LOG_INFO,
++    LOG_WARN,
++    LOG_ERROR,
++} LogLevel;
++
++#define LOG_FD(level) (level == LOG_ERROR ? stderr : stdout)
++
++#define LOG_LEVEL_STRING(level) \
++    (level == LOG_DEBUG ? "DEBUG":   \
++     level == LOG_INFO ? "INFO" :    \
++     level == LOG_WARN ? "WARNING" : \
++     level == LOG_ERROR ? "ERROR" :  \
++     "UNKNOWN_LEVEL")
++
++#define PRINT_LOG_PREFIX(level, file, line)                         \
++    do {                                                            \
++        struct timespec ts;                                         \
++        clock_gettime(CLOCK_REALTIME, &ts);                         \
++        struct tm *local_time = localtime(&ts.tv_sec);              \
++        fprintf(LOG_FD(level), "%d-%02d-%02d %02d:%02d:%02d,%03ld - %s - [%s:%d] - ", \
++            local_time->tm_year + 1900,                             \
++            local_time->tm_mon + 1,                                 \
++            local_time->tm_mday,                                    \
++            local_time->tm_hour,                                    \
++            local_time->tm_min,                                     \
++            local_time->tm_sec,                                     \
++            ts.tv_nsec / 1000000L,                                  \
++            LOG_LEVEL_STRING(level),                                \
++            basename(file),                                         \
++            line);                                                  \
++    } while (0)
++
++// configure Env for log 
++#define LOG_LEVEL_ENV "LOG_LEVEL"
++
++// print msg
++void logMessage(LogLevel level, char* file, int line, const char *format, ...);
++
++// set log level
++void setLogLevel();
++
++// log function
++#define logging_debug(...)       logMessage(LOG_DEBUG, __FILE__, __LINE__, __VA_ARGS__)
++#define logging_info(...)        logMessage(LOG_INFO, __FILE__, __LINE__, __VA_ARGS__)
++#define logging_warn(...)        logMessage(LOG_WARN, __FILE__, __LINE__, __VA_ARGS__)
++#define logging_error(...)       logMessage(LOG_ERROR, __FILE__, __LINE__, __VA_ARGS__)
++
++#endif
+-- 
+2.33.0
+
