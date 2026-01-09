@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 36
+Release: 37
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -47,6 +47,7 @@ Patch34:   fix-period-task-some-bugs.patch
 Patch35:   fix-env_file-and-environ_conf.patch
 Patch36:   fix-cpu_sentry-result-when-found_fault_cores_number-.patch
 Patch37:   add-huge-page-aggregation.patch
+Patch38:   add-soc_ring_sentry-plugin.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -136,6 +137,15 @@ Requires:       sysSentry = %{version}-%{release}
 %description -n hbm_online_repair
 This package provides hbm_online_repair for the sysSentry.
 
+%package -n soc_ring_sentry
+Summary:        soc_ring_sentry for the sysSentry
+Provides:       soc_ring_sentry = %{version}
+BuildRequires:  numactl-libs numactl-devel
+Requires:       sysSentry = %{version}-%{release}
+
+%description -n soc_ring_sentry
+This package provides soc_ring_sentry for the sysSentry.
+
 %prep
 %autosetup -n %{name}-%{version} -p1
 
@@ -157,6 +167,19 @@ popd
 
 # hbm_online_repair
 pushd src/c/hbm_online_repair
+make
+popd
+
+# log
+pushd src/libso/log
+cmake . -B build
+pushd build
+make
+popd
+popd
+
+# soc_ring_sentry
+pushd src/c/soc_ring_sentry
 make
 popd
 
@@ -203,6 +226,12 @@ mkdir -p %{buildroot}/etc/sysconfig/
 install config/tasks/hbm_online_repair.mod %{buildroot}/etc/sysSentry/tasks/
 install src/c/hbm_online_repair/hbm_online_repair %{buildroot}%{_bindir}
 install src/c/hbm_online_repair/hbm_online_repair.env %{buildroot}/etc/sysconfig/hbm_online_repair.env
+
+# soc_ring_sentry
+install	src/c/soc_ring_sentry/soc_ring_sentry %{buildroot}%{_bindir}
+install config/env/soc_ring_sentry.env %{buildroot}/etc/sysconfig/soc_ring_sentry.env
+install config/tasks/soc_ring_sentry.mod %{buildroot}/etc/sysSentry/tasks/
+install src/libso/log/build/libsentry_log.so %{buildroot}%{_libdir}
 
 chrpath -d %{buildroot}%{_bindir}/cat-cli
 chrpath -d %{buildroot}%{_libdir}/libcpu_patrol.so
@@ -289,6 +318,7 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{_bindir}/sentryCollector
 %attr(0600,root,root) %{_sysconfdir}/sysSentry/collector.conf
 %attr(0600,root,root) %{_unitdir}/sentryCollector.service
+%attr(0550,root,root) %{_libdir}/libsentry_log.so
 
 # pysentry_collect
 %exclude %{python3_sitelib}/sentryCollector/collect_plugin.py
@@ -311,6 +341,10 @@ rm -rf %{buildroot}
 %exclude %{_sysconfdir}/sysSentry/tasks/hbm_online_repair.mod
 %exclude %{python3_sitelib}/syssentry/bmc_*
 %exclude %{python3_sitelib}/syssentry/*/bmc_*
+
+# soc_ring_sentry
+%exclude %{_sysconfdir}/sysconfig/soc_ring_sentry.env
+%exclude %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %files -n avg_block_io
 %attr(0500,root,root) %{_bindir}/avg_block_io
@@ -363,7 +397,18 @@ rm -rf %{buildroot}
 %attr(0550,root,root) %{python3_sitelib}/sentryCollector/collect_plugin.py
 %attr(0550,root,root) %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin*
 
+%files -n soc_ring_sentry
+%attr(0550,root,root) %{_bindir}/soc_ring_sentry
+%attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysconfig/soc_ring_sentry.env
+%attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
+
 %changelog
+* Fri Jan 9 2026 zengchao001 <zc18179036325@163.com> - 1.0.2-37
+- Type:requirement
+- CVE:NA
+- SUG:NA
+- DESC:add soc_ring_sentry plugin
+
 * Tue Sep 09 2025 zhuo <1107893276@qq.com> - 1.0.2-36
 - Type:requirement
 - CVE:NA
