@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 23
+Release: 24
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -64,6 +64,9 @@ Patch52:   change-egg-info-dir-permission.patch
 Patch53:   keeping-the-driver-loaded-in-the-reboot-scenario.patch
 Patch54:   delete-tmp-log-file-in-logrotate-syssentry.patch
 Patch55:   delete-useless-sentry_urma_comm-mod-file.patch
+Patch56:   fix-the-potential-KeyError-exception-in-task_get_ala.patch
+Patch57:   fix-potential-stack-overflow-issue-in-hbm_online_rep.patch
+Patch58:   fix-potential-crash-issue-in-bmc_recv.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -323,6 +326,12 @@ rm -rf /var/run/sysSentry | :
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Fri Jan 23 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-24
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:some bugfix
+
 * Fri Jan 16 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-23
 - Type:bugfix
 - CVE:NA
