@@ -1,0 +1,28 @@
+From 313f53f374ada0a0936f58368df375d651d5876b Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Fri, 23 Jan 2026 17:35:46 +0800
+Subject: [PATCH] fix the potential KeyError exception in task_get_alarm()
+
+---
+ src/python/syssentry/callbacks.py | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/python/syssentry/callbacks.py b/src/python/syssentry/callbacks.py
+index d2dff24..6c0ae4e 100644
+--- a/src/python/syssentry/callbacks.py
++++ b/src/python/syssentry/callbacks.py
+@@ -44,9 +44,9 @@ def task_get_result(mod_name):
+ 
+ def task_get_alarm(data):
+     """get alarm by mod name"""
+-    task_name = data['task_name']
+-    time_range = data['time_range']
+     try:
++        task_name = data['task_name']
++        time_range = data['time_range']
+         detailed = data['detailed']
+     except KeyError:
+         logging.debug("Key 'detailed' does not exist in the dictionary")
+-- 
+2.27.0
+
