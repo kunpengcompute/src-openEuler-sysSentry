@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 38
+Release: 39
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -50,6 +50,8 @@ Patch37:   add-huge-page-aggregation.patch
 Patch38:   add-soc_ring_sentry-plugin.patch
 Patch39:   fix-the-potential-KeyError-exception-in-task_get_ala.patch
 Patch40:   fix-potential-crash-issue-in-bmc_recv.patch
+Patch41:   add-NONZERO_EXITED-status-for-plugin-exited-with-non.patch
+Patch42:   fix-process-exit-status-and-service-kill-mode.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -405,6 +407,13 @@ rm -rf %{buildroot}
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Thu Jan 29 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.2-39
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:add NONZERO_EXITED status for plugin exited with non-zero
+       fix process exit status and service kill mode
+
 * Fri Jan 23 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.2-38
 - Type:bugfix
 - CVE:NA
