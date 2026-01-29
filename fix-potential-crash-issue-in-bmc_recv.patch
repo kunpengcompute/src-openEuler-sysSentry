@@ -1,0 +1,25 @@
+From 989ea596a09785f10411832dd8807b7135a8e883 Mon Sep 17 00:00:00 2001
+From: tong_1001 <shixuantong1@huawei.com>
+Date: Sat, 10 Jan 2026 23:59:41 +0800
+Subject: [PATCH 2/2] fix potential crash issue in bmc_recv
+
+---
+ src/python/syssentry/bmc_alarm.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/python/syssentry/bmc_alarm.py b/src/python/syssentry/bmc_alarm.py
+index 5956538..04a7fea 100644
+--- a/src/python/syssentry/bmc_alarm.py
++++ b/src/python/syssentry/bmc_alarm.py
+@@ -153,7 +153,7 @@ def bmc_recv(server_socket: socket.socket):
+     except socket.error:
+         logging.error("socket error")
+         return
+-    except (ValueError, OSError, UnicodeError, TypeError, NotImplementedError):
++    except (ValueError, OSError, TypeError, IndexError, NotImplementedError):
+         logging.error("server recv bmc msg failed!")
+         client_socket.close()
+         return
+-- 
+2.43.0
+

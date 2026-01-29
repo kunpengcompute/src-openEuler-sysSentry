@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.2
-Release: 37
+Release: 38
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -48,6 +48,8 @@ Patch35:   fix-env_file-and-environ_conf.patch
 Patch36:   fix-cpu_sentry-result-when-found_fault_cores_number-.patch
 Patch37:   add-huge-page-aggregation.patch
 Patch38:   add-soc_ring_sentry-plugin.patch
+Patch39:   fix-the-potential-KeyError-exception-in-task_get_ala.patch
+Patch40:   fix-potential-crash-issue-in-bmc_recv.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -403,6 +405,12 @@ rm -rf %{buildroot}
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Fri Jan 23 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.2-38
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:some bugfix
+
 * Fri Jan 9 2026 zengchao001 <zc18179036325@163.com> - 1.0.2-37
 - Type:requirement
 - CVE:NA
