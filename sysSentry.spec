@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 20
+Release: 21
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -48,7 +48,8 @@ BuildRequires: elfutils-devel clang libbpf-devel bpftool
 BuildRequires: python3-numpy python3-pytest
 BuildRequires: numactl-libs numactl-devel
 
-Requires:      pyxalarm = %{version}
+Provides:      pyxalarm = %{version}-%{release}
+Obsoletes:     pyxalarm < 1.0.3-21
 Requires:      libbpf
 
 %define PYTHON_VERSION %{python3_version}
@@ -60,16 +61,17 @@ sysSentry provides framework tools for system inspection.
 %package -n libxalarm
 Summary:        The xalarm library for the sysSentry
 Requires:       json-c
-Provides:       libxalarm = %{version}
+Requires:       sysSentry = %{version}-%{release}
+Provides:       libxalarm = %{version}-%{release}
 
 %description -n libxalarm
 This package provides xalarm library for the sysSentry.
 
 %package -n libxalarm-devel
 Summary:        The development package for the libxalarm
-Requires:       libxalarm = %{version}
+Requires:       libxalarm = %{version}-%{release}
 Requires:       json-c-devel
-Provides:       libxalarm-devel = %{version}
+Provides:       libxalarm-devel = %{version}-%{release}
 
 %description -n libxalarm-devel
 This package provides developer tools for the libxalarm.
@@ -93,13 +95,6 @@ Requires:       pysentry_collect = %{version}-%{release}
 %description -n ai_block_io
 This package provides Supports slow I/O detection based on AI
 
-%package -n pyxalarm
-Summary:        Supports xalarm api in python immplementation
-Requires:       sysSentry = %{version}-%{release}
-
-%description -n pyxalarm
-This package provides Supports xalarm api for users
-
 %package -n pysentry_notify
 Summary:        Supports xalarm report in python immplementation
 Requires:       sysSentry = %{version}-%{release}
@@ -116,7 +111,7 @@ This package provides Supports collect for plugins
 
 %package -n hbm_online_repair
 Summary:        hbm_online_repair for the sysSentry
-Provides:       hbm_online_repair = %{version}
+Provides:       hbm_online_repair = %{version}-%{release}
 BuildRequires:  libtraceevent-devel
 Requires:       libtraceevent ipmitool
 Requires:       sysSentry = %{version}-%{release}
@@ -127,14 +122,14 @@ This package provides hbm_online_repair for the sysSentry.
 %package -n sentry_msg_monitor
 Summary:        A plugin for sysSentry to listening specific messages
 Requires:       sysSentry = %{version}-%{release}
-Provides:       sentry_msg_monitor = %{version}
+Provides:       sentry_msg_monitor = %{version}-%{release}
 
 %description -n sentry_msg_monitor
 This package provides a plugin for sysSentry to listening specific messages
 
 %package -n bmc_block_io
 Summary:        bmc_block_io for the sysSentry
-Provides:       bmc_block_io = %{version}
+Provides:       bmc_block_io = %{version}-%{release}
 BuildRequires:  json-c-devel
 Requires:       libxalarm ipmitool json-c
 Requires:       sysSentry = %{version}-%{release}
@@ -144,7 +139,7 @@ This package provides bmc_block_io for the sysSentry.
 
 %package -n soc_ring_sentry
 Summary:        soc_ring_sentry for the sysSentry
-Provides:       soc_ring_sentry = %{version}
+Provides:       soc_ring_sentry = %{version}-%{release}
 BuildRequires:  numactl-libs numactl-devel
 Requires:       sysSentry = %{version}-%{release}
 
@@ -190,6 +185,7 @@ rm -rf /var/run/sysSentry | :
 %attr(0550,root,root) %{_bindir}/syssentry
 %attr(0550,root,root) %{_bindir}/ebpf_collector
 %attr(0750,root,root) %config(noreplace) %{_var}/log/sysSentry
+%attr(0750,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/
 %attr(0750,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks
 %attr(0750,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/plugins
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/inspect.conf
@@ -197,13 +193,12 @@ rm -rf /var/run/sysSentry | :
 %attr(0550,root,root) %{_libdir}/libsentry_log.so
 %exclude %{_includedir}/libsentry/log_utils.h
 
+# pysentry_collect
 %exclude %{python3_sitelib}/sentryCollector/collect_plugin.py
-%exclude %{python3_sitelib}/xalarm/register_xalarm.py
+%exclude %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin.*.pyc
+# pysentry_notify
 %exclude %{python3_sitelib}/xalarm/sentry_notify.py
-
-%exclude %{python3_sitelib}/syssentry/__pycache__
-%exclude %{python3_sitelib}/sentryCollector/__pycache__
-%exclude %{python3_sitelib}/xalarm/__pycache__
+%exclude %{python3_sitelib}/xalarm/__pycache__/sentry_notify.*.pyc
 
 %exclude %{_sysconfdir}/sysSentry/tasks/ai_block_io.mod
 %exclude %{_sysconfdir}/sysSentry/plugins/ai_block_io.ini
@@ -244,36 +239,36 @@ rm -rf /var/run/sysSentry | :
 %attr(0555,root,root) %{_libdir}/libxalarm.so
 
 %files -n libxalarm-devel
+%dir %{_includedir}/xalarm
+%attr(0555,root,root) %{_includedir}/xalarm
 %attr(0555,root,root) %{_includedir}/xalarm/register_xalarm.h
-
-%files -n pyxalarm
-%attr(0555,root,root) %{python3_sitelib}/xalarm/register_xalarm.py
 
 %files -n pysentry_notify
 %attr(0550,root,root) %{python3_sitelib}/xalarm/sentry_notify.py
+%attr(0550,root,root) %{python3_sitelib}/xalarm/__pycache__/sentry_notify.*.pyc
 
 %files -n avg_block_io
 %attr(0500,root,root) %{_bindir}/avg_block_io
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/avg_block_io.mod
 %attr(0600,root,root) %{_sysconfdir}/sysSentry/plugins/avg_block_io.ini
 %attr(0550,root,root) %{python3_sitelib}/sentryPlugins/avg_block_io
-%exclude %{python3_sitelib}/sentryPlugins/avg_block_io/__pycache__
 
 %files -n ai_block_io
 %attr(0500,root,root) %{_bindir}/ai_block_io
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/ai_block_io.mod
 %attr(0600,root,root) %{_sysconfdir}/sysSentry/plugins/ai_block_io.ini
 %attr(0550,root,root) %{python3_sitelib}/sentryPlugins/ai_block_io
-%exclude %{python3_sitelib}/sentryPlugins/ai_block_io/__pycache__
 
 %files -n pysentry_collect
 %attr(0550,root,root) %{python3_sitelib}/sentryCollector/collect_plugin.py
+%attr(0550,root,root) %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin.*.pyc
 
 %files -n hbm_online_repair
 %attr(0550,root,root) %{_bindir}/hbm_online_repair
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysconfig/hbm_online_repair.env
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/hbm_online_repair.mod
 %attr(0550,root,root) %{python3_sitelib}/syssentry/bmc_alarm.py
+%attr(0550,root,root) %{python3_sitelib}/syssentry/__pycache__/bmc_alarm.*.pyc
 
 %files -n sentry_msg_monitor
 %attr(0550,root,root) %{_bindir}/sentry_msg_monitor
@@ -291,6 +286,13 @@ rm -rf /var/run/sysSentry | :
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Tue Feb 03 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-21
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix residual files exist after the rpms is uninstalled
+       merge pyxalarm to sysSentry rpm
+
 * Tue Dec 9 2025 shixuantong <shixuantong1@h-partners.com> - 1.0.3-20
 - Type:bugfix
 - CVE:NA
