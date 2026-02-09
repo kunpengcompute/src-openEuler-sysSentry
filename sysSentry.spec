@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 25
+Release: 26
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -67,6 +67,7 @@ Patch55:   delete-useless-sentry_urma_comm-mod-file.patch
 Patch56:   fix-the-potential-KeyError-exception-in-task_get_ala.patch
 Patch57:   fix-potential-stack-overflow-issue-in-hbm_online_rep.patch
 Patch58:   fix-potential-crash-issue-in-bmc_recv.patch
+Patch59:   fix-period-type-task-abnormal-status.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -322,6 +323,12 @@ rm -rf /var/run/sysSentry | :
 %attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Sat Feb 07 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-26
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix period type task abnormal status
+
 * Fri Jan 30 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-25
 - Type:bugfix
 - CVE:NA
