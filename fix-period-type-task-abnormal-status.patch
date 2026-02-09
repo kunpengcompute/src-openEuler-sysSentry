@@ -1,0 +1,44 @@
+From be35e75f8bca833606385ec221a1c3b990a3ec60 Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Sat, 7 Feb 2026 11:39:59 +0800
+Subject: [PATCH] fix period type task abnormal status
+
+---
+ src/python/syssentry/mod_status.py | 2 +-
+ src/python/syssentry/syssentry.py  | 7 +++++--
+ 2 files changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/src/python/syssentry/mod_status.py b/src/python/syssentry/mod_status.py
+index f650cf8..d3dfe7f 100644
+--- a/src/python/syssentry/mod_status.py
++++ b/src/python/syssentry/mod_status.py
+@@ -57,7 +57,7 @@ def set_runtime_status(task_name, status_code):
+     elif task_type == PERIOD_TYPE and status_code in PERIOD_RUNTIME_STATUS:
+         pass
+     else:
+-        logging.error("invaild task name")
++        logging.error(f"invalid status {status_code} for {task_type} type task {task_name}")
+         return
+ 
+     TasksMap.tasks_dict.get(task_type).get(task_name).runtime_status = status_code
+diff --git a/src/python/syssentry/syssentry.py b/src/python/syssentry/syssentry.py
+index 01ea0fb..acf5899 100644
+--- a/src/python/syssentry/syssentry.py
++++ b/src/python/syssentry/syssentry.py
+@@ -569,8 +569,11 @@ def sigchld_handler(signum, _f):
+             if os.WIFEXITED(child_status):
+                 # exit normally with exit() syscall
+                 logging.info("task %s exit with status %d", task.name, os.WEXITSTATUS(child_status))
+-                if task.type == "PERIOD" and task.period_enabled:
+-                    set_runtime_status(task.name, WAITING_STATUS)
++                if task.type == "PERIOD":
++                    if task.period_enabled:
++                        set_runtime_status(task.name, WAITING_STATUS)
++                    else:
++                        set_runtime_status(task.name, EXITED_STATUS)
+                 else:
+                     if os.WEXITSTATUS(child_status):
+                         set_runtime_status(task.name, NONZERO_EXITED_STATUS)
+-- 
+2.27.0
+
