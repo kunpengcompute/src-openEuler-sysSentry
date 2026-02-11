@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 21
+Release: 22
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -174,23 +174,23 @@ rm -rf /var/run/sysSentry | :
 /sbin/ldconfig
 
 %files
-%defattr(0550,root,root)
-%attr(0555,root,root) %{python3_sitelib}/xalarm
-%attr(0550,root,root) %{python3_sitelib}/syssentry
-%attr(0550,root,root) %{python3_sitelib}/%{PKGVER}
-%attr(0550,root,root) %{python3_sitelib}/sentryCollector
+%defattr(-,root,root)
+%attr(-,root,root) %{python3_sitelib}/xalarm
+%attr(-,root,root) %{python3_sitelib}/syssentry
+%attr(-,root,root) %{python3_sitelib}/%{PKGVER}
+%attr(-,root,root) %{python3_sitelib}/sentryCollector
 
 # sysSentry
-%attr(0500,root,root) %{_bindir}/sentryctl
-%attr(0550,root,root) %{_bindir}/syssentry
-%attr(0550,root,root) %{_bindir}/ebpf_collector
-%attr(0750,root,root) %config(noreplace) %{_var}/log/sysSentry
-%attr(0750,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/
-%attr(0750,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks
-%attr(0750,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/plugins
-%attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/inspect.conf
-%attr(0600,root,root) %{_unitdir}/sysSentry.service
-%attr(0550,root,root) %{_libdir}/libsentry_log.so
+%attr(-,root,root) %{_bindir}/sentryctl
+%attr(-,root,root) %{_bindir}/syssentry
+%attr(-,root,root) %{_bindir}/ebpf_collector
+%attr(-,root,root) %config(noreplace) %{_var}/log/sysSentry
+%attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/
+%attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks
+%attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/plugins
+%attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/inspect.conf
+%attr(-,root,root) %{_unitdir}/sysSentry.service
+%attr(-,root,root) %{_libdir}/libsentry_log.so
 %exclude %{_includedir}/libsentry/log_utils.h
 
 # pysentry_collect
@@ -208,19 +208,19 @@ rm -rf /var/run/sysSentry | :
 %exclude %{_sysconfdir}/sysSentry/plugins/bmc_block_io.ini
 
 # xalarm
-%attr(0550,root,root) %{_bindir}/xalarmd
-%attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/xalarm.conf
-%attr(0600,root,root) %{_unitdir}/xalarmd.service
+%attr(-,root,root) %{_bindir}/xalarmd
+%attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/xalarm.conf
+%attr(-,root,root) %{_unitdir}/xalarmd.service
 
 # logrotate
 %dir %{_localstatedir}/lib/logrotate-syssentry
-%attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/logrotate-sysSentry.conf
-%attr(0500,root,root) %{_sysconfdir}/cron.hourly/logrotate-sysSentry
+%attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/logrotate-sysSentry.conf
+%attr(-,root,root) %{_sysconfdir}/cron.hourly/logrotate-sysSentry
 
 # sentryCollector
-%attr(0550,root,root) %{_bindir}/sentryCollector
-%attr(0600,root,root) %{_sysconfdir}/sysSentry/collector.conf
-%attr(0600,root,root) %{_unitdir}/sentryCollector.service
+%attr(-,root,root) %{_bindir}/sentryCollector
+%attr(-,root,root) %{_sysconfdir}/sysSentry/collector.conf
+%attr(-,root,root) %{_unitdir}/sentryCollector.service
 
 # hbm_online_repair
 %exclude %{_sysconfdir}/sysSentry/tasks/hbm_online_repair.mod
@@ -236,56 +236,62 @@ rm -rf /var/run/sysSentry | :
 %exclude %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %files -n libxalarm
-%attr(0555,root,root) %{_libdir}/libxalarm.so
+%attr(-,root,root) %{_libdir}/libxalarm.so
 
 %files -n libxalarm-devel
 %dir %{_includedir}/xalarm
-%attr(0555,root,root) %{_includedir}/xalarm
-%attr(0555,root,root) %{_includedir}/xalarm/register_xalarm.h
+%attr(-,root,root) %{_includedir}/xalarm
+%attr(-,root,root) %{_includedir}/xalarm/register_xalarm.h
 
 %files -n pysentry_notify
-%attr(0550,root,root) %{python3_sitelib}/xalarm/sentry_notify.py
-%attr(0550,root,root) %{python3_sitelib}/xalarm/__pycache__/sentry_notify.*.pyc
+%attr(-,root,root) %{python3_sitelib}/xalarm/sentry_notify.py
+%attr(-,root,root) %{python3_sitelib}/xalarm/__pycache__/sentry_notify.*.pyc
 
 %files -n avg_block_io
-%attr(0500,root,root) %{_bindir}/avg_block_io
-%attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/avg_block_io.mod
-%attr(0600,root,root) %{_sysconfdir}/sysSentry/plugins/avg_block_io.ini
-%attr(0550,root,root) %{python3_sitelib}/sentryPlugins/avg_block_io
+%attr(-,root,root) %{_bindir}/avg_block_io
+%attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/avg_block_io.mod
+%attr(-,root,root) %{_sysconfdir}/sysSentry/plugins/avg_block_io.ini
+%attr(-,root,root) %{python3_sitelib}/sentryPlugins/avg_block_io
 
 %files -n ai_block_io
-%attr(0500,root,root) %{_bindir}/ai_block_io
-%attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/ai_block_io.mod
-%attr(0600,root,root) %{_sysconfdir}/sysSentry/plugins/ai_block_io.ini
-%attr(0550,root,root) %{python3_sitelib}/sentryPlugins/ai_block_io
+%attr(-,root,root) %{_bindir}/ai_block_io
+%attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/ai_block_io.mod
+%attr(-,root,root) %{_sysconfdir}/sysSentry/plugins/ai_block_io.ini
+%attr(-,root,root) %{python3_sitelib}/sentryPlugins/ai_block_io
 
 %files -n pysentry_collect
-%attr(0550,root,root) %{python3_sitelib}/sentryCollector/collect_plugin.py
-%attr(0550,root,root) %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin.*.pyc
+%attr(-,root,root) %{python3_sitelib}/sentryCollector/collect_plugin.py
+%attr(-,root,root) %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin.*.pyc
 
 %files -n hbm_online_repair
-%attr(0550,root,root) %{_bindir}/hbm_online_repair
-%attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysconfig/hbm_online_repair.env
-%attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/hbm_online_repair.mod
-%attr(0550,root,root) %{python3_sitelib}/syssentry/bmc_alarm.py
-%attr(0550,root,root) %{python3_sitelib}/syssentry/__pycache__/bmc_alarm.*.pyc
+%attr(-,root,root) %{_bindir}/hbm_online_repair
+%attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysconfig/hbm_online_repair.env
+%attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/hbm_online_repair.mod
+%attr(-,root,root) %{python3_sitelib}/syssentry/bmc_alarm.py
+%attr(-,root,root) %{python3_sitelib}/syssentry/__pycache__/bmc_alarm.*.pyc
 
 %files -n sentry_msg_monitor
-%attr(0550,root,root) %{_bindir}/sentry_msg_monitor
-%attr(0600,root,root) %{_sysconfdir}/sysconfig/sentry_msg_monitor.env
-%attr(0600,root,root) %{_sysconfdir}/sysSentry/tasks/sentry_msg_monitor.mod
+%attr(-,root,root) %{_bindir}/sentry_msg_monitor
+%attr(-,root,root) %{_sysconfdir}/sysconfig/sentry_msg_monitor.env
+%attr(-,root,root) %{_sysconfdir}/sysSentry/tasks/sentry_msg_monitor.mod
 
 %files -n bmc_block_io
-%attr(0550,root,root) %{_bindir}/bmc_block_io
-%attr(0600,root,root) %{_sysconfdir}/sysSentry/plugins/bmc_block_io.ini
-%attr(0600,root,root) %{_sysconfdir}/sysSentry/tasks/bmc_block_io.mod
+%attr(-,root,root) %{_bindir}/bmc_block_io
+%attr(-,root,root) %{_sysconfdir}/sysSentry/plugins/bmc_block_io.ini
+%attr(-,root,root) %{_sysconfdir}/sysSentry/tasks/bmc_block_io.mod
 
 %files -n soc_ring_sentry
-%attr(0750,root,root) %{_bindir}/soc_ring_sentry
-%attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysconfig/soc_ring_sentry.env
-%attr(0600,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
+%attr(-,root,root) %{_bindir}/soc_ring_sentry
+%attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysconfig/soc_ring_sentry.env
+%attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Wed Feb 11 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-22
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:do change permission in spec
+
 * Tue Feb 03 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-21
 - Type:bugfix
 - CVE:NA
