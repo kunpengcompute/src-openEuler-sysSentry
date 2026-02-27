@@ -1,0 +1,208 @@
+From 1e8f5bfc2a994ff8f544bbc6fd4ef4b04134ab51 Mon Sep 17 00:00:00 2001
+From: luckky <guodashun1@huawei.com>
+Date: Mon, 3 Mar 2025 03:09:57 +0000
+Subject: [PATCH] add oom event report
+
+Signed-off-by: luckky <guodashun1@huawei.com>
+---
+ config/service/sysSentry.service              |  2 +
+ src/libs/libxalarm/register_xalarm.h          |  2 +
+ src/sentryPlugins/sentry_msg_monitor/Makefile |  2 +-
+ .../sentry_msg_monitor/sentry_msg_monitor.c   | 63 +++++++++++++++----
+ .../sentry_msg_monitor/smh_common_type.h      | 12 +++-
+ 5 files changed, 66 insertions(+), 15 deletions(-)
+
+diff --git a/config/service/sysSentry.service b/config/service/sysSentry.service
+index 1d8338f..7b3f59e 100644
+--- a/config/service/sysSentry.service
++++ b/config/service/sysSentry.service
+@@ -1,5 +1,7 @@
+ [Unit]
+ Description=EulerOS System Inspection Frame
++Requires=xalarmd.service
++After=xalarmd.service
+ 
+ [Service]
+ ExecStart=/usr/bin/python3 /usr/bin/syssentry
+diff --git a/src/libs/libxalarm/register_xalarm.h b/src/libs/libxalarm/register_xalarm.h
+index 7a485ff..263fff5 100644
+--- a/src/libs/libxalarm/register_xalarm.h
++++ b/src/libs/libxalarm/register_xalarm.h
+@@ -21,6 +21,8 @@
+ 
+ #define ALARM_REBOOT_EVENT 1003
+ #define ALARM_REBOOT_ACK_EVENT 1004
++#define ALARM_OOM_EVENT 1005
++#define ALARM_OOM_ACK_EVENT 1006
+ 
+ #define MINOR_ALM 1
+ #define MAJOR_ALM 2
+diff --git a/src/sentryPlugins/sentry_msg_monitor/Makefile b/src/sentryPlugins/sentry_msg_monitor/Makefile
+index 77f4b21..dbc2a57 100644
+--- a/src/sentryPlugins/sentry_msg_monitor/Makefile
++++ b/src/sentryPlugins/sentry_msg_monitor/Makefile
+@@ -1,7 +1,7 @@
+ all: sentry_msg_monitor
+ 
+ sentry_msg_monitor:
+-	gcc sentry_msg_monitor.c -Wall -o3 -I../../libsentry/c/log -L../../libsentry/c/log/build -I../../libs/libxalarm -L../../libs/build/libxalarm/ -lxalarm -lsentry_log -ljson-c -pthread -o sentry_msg_monitor
++	gcc sentry_msg_monitor.c -Wall -o3 -I../../libsentry/c/log -L../../libsentry/c/log/build -I../../libs/libxalarm -L../../libs/build/libxalarm -lxalarm -lsentry_log -ljson-c -pthread -o sentry_msg_monitor
+ 
+ clean:
+ 	rm -f sentry_msg_monitor
+diff --git a/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c b/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
+index 514d04d..a307a96 100644
+--- a/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
++++ b/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
+@@ -16,7 +16,7 @@
+ #define SMH_DEV_PATH "/dev/sentry_msg_helper"
+ #define PID_FILE_PATH "/var/run/"TOOL_NAME".pid"
+ #define ID_LIST_LENGTH SMH_MESSAGE_MAX
+-#define MSG_STR_MAX_LEN 128
++#define MSG_STR_MAX_LEN 1024
+ #define DEFAULT_LOG_LEVEL LOG_INFO
+ #define MAX_RETRY_NUM 3
+ #define RETRY_PERIOD 1
+@@ -93,12 +93,43 @@ static int smh_dev_get_fd(void)
+ 
+ static int convert_smh_msg_to_str(struct sentry_msg_helper_msg* smh_msg, char* str)
+ {
+-    char msgid_str[32];
+-    snprintf(msgid_str, sizeof(msgid_str), "%lu", smh_msg->msgid);
+-
+-    int res = snprintf(str, MSG_STR_MAX_LEN, "%s", msgid_str);
+-    if ((size_t)res >= MSG_STR_MAX_LEN) {
+-        logging_warn("msg str size exceeds the max value\n");
++    int res;
++    char nid_str[MSG_STR_MAX_LEN];
++    size_t offset = 0;
++    switch (smh_msg->type) {
++    case SMH_MESSAGE_POWER_OFF:
++        res = snprintf(str, MSG_STR_MAX_LEN, "%lu", smh_msg->msgid);
++        if ((size_t)res >= MSG_STR_MAX_LEN) {
++            logging_warn("msg str size exceeds the max value\n");
++            return -1;
++        }
++        break;
++    case SMH_MESSAGE_OOM:
++        for (int i = 0; i < MAX_NUMA_NODES; i++) {
++            res = snprintf(nid_str + offset, MSG_STR_MAX_LEN - offset, "%d%s", 
++                        smh_msg->oom_info.nid[i], (i < MAX_NUMA_NODES - 1) ? "," : "");
++            if ((size_t)res >= MSG_STR_MAX_LEN) {
++                logging_warn("msg str size exceeds the max value\n");
++                return -1;
++            }
++            offset += res;
++        }
++        res = snprintf(str, MSG_STR_MAX_LEN,
++            "%lu_{nr_nid:%d,nid:[%s],sync:%d,timeout:%d,reason:%d}",
++            smh_msg->msgid,
++            smh_msg->oom_info.nr_nid,
++            nid_str,
++            smh_msg->oom_info.sync,
++            smh_msg->oom_info.timeout,
++            smh_msg->oom_info.reason
++        );
++        if ((size_t)res >= MSG_STR_MAX_LEN) {
++            logging_warn("msg str size exceeds the max value\n");
++            return -1;
++        }
++        break;
++    default:
++        logging_warn("Unknown msg type: %d\n", smh_msg->type);
+         return -1;
+     }
+     return 0;
+@@ -106,26 +137,31 @@ static int convert_smh_msg_to_str(struct sentry_msg_helper_msg* smh_msg, char* s
+ 
+ static int convert_str_to_smh_msg(char* str, struct sentry_msg_helper_msg* smh_msg)
+ {
+-    if (!(sscanf(str, "%lu_%d", &(smh_msg->msgid), &(smh_msg->res)) == XALARM_MSG_ITEM_CNT)) {
++    int n;
++    if (!(sscanf(str, "%lu_%lu%n", &(smh_msg->msgid), &(smh_msg->res), &n) == XALARM_MSG_ITEM_CNT)
++        || strlen(str) != n) {
+         logging_warn("Invalid msg str format, str is %s\n", str);
+         return -1;
+     }
+     return 0;
+ }
+ 
+-static unsigned short get_xalarm_us_alarm_id(enum sentry_msg_helper_msg_type msg_type)
++static unsigned short convert_msg_type_to_xalarm_type(enum sentry_msg_helper_msg_type msg_type)
+ {
+-    unsigned short alarm_id = 0;
++    unsigned short xalarm_type = 0;
+     switch (msg_type)
+     {
+     case SMH_MESSAGE_POWER_OFF:
+-        alarm_id = ALARM_REBOOT_EVENT;
++        xalarm_type = ALARM_REBOOT_EVENT;
++        break;
++    case SMH_MESSAGE_OOM:
++        xalarm_type = ALARM_OOM_EVENT;
+         break;
+     default:
+         logging_warn("Unknown msg type: %d\n", msg_type);
+         break;
+     }
+-    return alarm_id;
++    return xalarm_type;
+ }
+ 
+ static void sender_cleanup(void* arg)
+@@ -171,7 +207,7 @@ static void* sender_thread(void* arg) {
+         if (ret < 0) {
+             continue;
+         }
+-        unsigned short al_type = get_xalarm_us_alarm_id(smh_msg.type);
++        unsigned short al_type = convert_msg_type_to_xalarm_type(smh_msg.type);
+         if (al_type == 0) {
+             logging_warn("Send msg to xalarmd failed: Get unknown type msg, skip it\n");
+             continue;
+@@ -246,6 +282,7 @@ re_register:
+         .len = ID_LIST_LENGTH
+     };
+     id_filter.id_list[0] = ALARM_REBOOT_ACK_EVENT;
++    id_filter.id_list[1] = ALARM_OOM_ACK_EVENT;
+ 
+     for (int i = 0; i < MAX_RETRY_NUM; i++) {
+         ret = xalarm_register_event(&register_info, id_filter);
+diff --git a/src/sentryPlugins/sentry_msg_monitor/smh_common_type.h b/src/sentryPlugins/sentry_msg_monitor/smh_common_type.h
+index 8069fb8..bd01556 100644
+--- a/src/sentryPlugins/sentry_msg_monitor/smh_common_type.h
++++ b/src/sentryPlugins/sentry_msg_monitor/smh_common_type.h
+@@ -4,6 +4,7 @@
+ #include <stdint.h>
+ 
+ #define SMH_TYPE ('}')
++#define MAX_NUMA_NODES 8
+ 
+ enum {
+ 	SMH_CMD_MSG_ACK = 0x10,
+@@ -13,13 +14,22 @@ enum {
+ 
+ enum sentry_msg_helper_msg_type {
+ 	SMH_MESSAGE_POWER_OFF,
++	SMH_MESSAGE_OOM,
+ 	SMH_MESSAGE_MAX,
+ };
+ 
+ struct sentry_msg_helper_msg {
+ 	enum sentry_msg_helper_msg_type type;
+ 	uint64_t msgid;
+-	int res;
++	// reboot_info is empty
++	struct {
++		int nr_nid;
++		int nid[MAX_NUMA_NODES];
++		int sync;
++		int timeout;
++		int reason;
++	} oom_info;
++	unsigned long res;
+ };
+ 
+ #endif
+-- 
+2.43.0
+

@@ -1,0 +1,138 @@
+From 2a27a7d986ab4ce427c5157128d0e5c1710b57d2 Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Tue, 15 Apr 2025 15:45:15 +0800
+Subject: [PATCH 10/16] fix process exit status and service kill mode
+
+---
+ config/service/sysSentry.service                   |  2 +-
+ selftest/test/test_sentryctl_interval_exception.sh |  2 +-
+ selftest/test/test_sentryctl_normal.sh             |  2 +-
+ selftest/test/test_sentryctl_type_oneshot.sh       |  2 +-
+ selftest/test/test_sentryctl_type_period.sh        |  6 +++---
+ src/services/syssentry/syssentry.py                | 12 +++++++-----
+ 6 files changed, 14 insertions(+), 12 deletions(-)
+
+diff --git a/config/service/sysSentry.service b/config/service/sysSentry.service
+index 7b3f59e..335b3da 100644
+--- a/config/service/sysSentry.service
++++ b/config/service/sysSentry.service
+@@ -6,7 +6,7 @@ After=xalarmd.service
+ [Service]
+ ExecStart=/usr/bin/python3 /usr/bin/syssentry
+ ExecStop=/bin/kill $MAINPID
+-KillMode=process
++KillMode=mixed
+ Restart=on-failure
+ RestartSec=10s
+ 
+diff --git a/selftest/test/test_sentryctl_interval_exception.sh b/selftest/test/test_sentryctl_interval_exception.sh
+index 9066ff8..eaaaa86 100644
+--- a/selftest/test/test_sentryctl_interval_exception.sh
++++ b/selftest/test/test_sentryctl_interval_exception.sh
+@@ -40,7 +40,7 @@ function do_test() {
+     sleep 1
+ 
+     sentryctl status test_interval_exception 2>&1 | tee ${tmp_log} | cat
+-    expect_true "grep -E '(status: EXITED)' ${tmp_log}"
++    expect_true "grep -E '(status: FAILED)' ${tmp_log}"
+ 
+ }
+ 
+diff --git a/selftest/test/test_sentryctl_normal.sh b/selftest/test/test_sentryctl_normal.sh
+index efd9f29..77d43ec 100644
+--- a/selftest/test/test_sentryctl_normal.sh
++++ b/selftest/test/test_sentryctl_normal.sh
+@@ -34,7 +34,7 @@ function do_test() {
+     if [ $? -eq 0 ]
+     then
+         sentryctl status test_normal 2>&1 | tee ${tmp_log}
+-        expect_true "grep -E '(status: EXITED)' ${tmp_log}"
++        expect_true "grep -E '(status: FAILED)' ${tmp_log}"
+     fi
+ }
+ 
+diff --git a/selftest/test/test_sentryctl_type_oneshot.sh b/selftest/test/test_sentryctl_type_oneshot.sh
+index 500aba4..61b2937 100644
+--- a/selftest/test/test_sentryctl_type_oneshot.sh
++++ b/selftest/test/test_sentryctl_type_oneshot.sh
+@@ -33,7 +33,7 @@ function do_test() {
+     sleep 1
+ 
+     sentryctl status test_type_oneshot 2>&1 | tee ${tmp_log} | cat
+-    expect_true "grep -E '(status: EXITED)' ${tmp_log}"
++    expect_true "grep -E '(status: FAILED)' ${tmp_log}"
+ 
+     sentryctl start test_type_oneshot
+     expect_eq $? 0
+diff --git a/selftest/test/test_sentryctl_type_period.sh b/selftest/test/test_sentryctl_type_period.sh
+index 6788fad..16e9658 100644
+--- a/selftest/test/test_sentryctl_type_period.sh
++++ b/selftest/test/test_sentryctl_type_period.sh
+@@ -33,7 +33,7 @@ function do_test() {
+     sleep 1
+ 
+     sentryctl status test_type_period 2>&1 | tee ${tmp_log} | cat
+-    expect_true "grep -E '(status: EXITED)' ${tmp_log}"
++    expect_true "grep -E '(status: FAILED)' ${tmp_log}"
+ 
+     sentryctl start test_type_period
+     expect_eq $? 0
+@@ -50,7 +50,7 @@ function do_test() {
+     if pgrep -x "test_task" >/dev/null; then
+         pkill -x "test_task"
+         sleep 2
+-        sentryctl status test_type_period | grep -w "status: FAILED"
++        sentryctl status test_type_period | grep -w "status: WAITING"
+         expect_eq $? 0
+ 
+         sentryctl start test_type_period
+@@ -59,7 +59,7 @@ function do_test() {
+         sentryctl stop test_type_period
+         expect_eq $? 0
+ 
+-        sentryctl status test_type_period | grep -w "status: EXITED"
++        sentryctl status test_type_period | grep -w "status: FAILED"
+         expect_eq $? 0
+     fi
+ 
+diff --git a/src/services/syssentry/syssentry.py b/src/services/syssentry/syssentry.py
+index 2f371a7..831d974 100644
+--- a/src/services/syssentry/syssentry.py
++++ b/src/services/syssentry/syssentry.py
+@@ -562,26 +562,28 @@ def sigchld_handler(signum, _f):
+     """
+     while True:
+         try:
+-            child_pid, child_exit_code = os.waitpid(-1, os.WNOHANG)
++            child_pid, child_status = os.waitpid(-1, os.WNOHANG)
+             logging.debug("sigchld pid :%d", child_pid)
+             task = get_task_by_pid(child_pid)
+             if not task:
+                 logging.debug("pid %d cannot find task, ignore", child_pid)
+                 break
+             logging.debug("task name %s", task.name)
+-            if os.WIFEXITED(child_exit_code):
++            if os.WIFEXITED(child_status):
+                 # exit normally with exit() syscall
++                logging.info("task %s exit with status %d", task.name, os.WEXITSTATUS(child_status))
+                 if task.type == "PERIOD" and task.period_enabled:
+                     set_runtime_status(task.name, WAITING_STATUS)
+                 else:
+-                    if os.WEXITSTATUS(child_exit_code):
++                    if os.WEXITSTATUS(child_status):
+                         set_runtime_status(task.name, NONZERO_EXITED_STATUS)
+                     else:
+                         set_runtime_status(task.name, EXITED_STATUS)
+             else:
+                 # exit abnormally
+-                if not task.period_enabled:
+-                    set_runtime_status(task.name, EXITED_STATUS)
++                logging.info("task %s terminated", task.name)
++                if task.type == "PERIOD" and task.period_enabled:
++                    set_runtime_status(task.name, WAITING_STATUS)
+                 else:
+                     set_runtime_status(task.name, FAILED_STATUS)
+             task.result_info["end_time"] = get_current_time_string()
+-- 
+2.27.0
+
