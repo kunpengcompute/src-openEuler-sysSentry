@@ -1,0 +1,24 @@
+From 6f784daff5f0a3cf3f9465e55d371477e41e2126 Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Wed, 10 Dec 2025 09:57:35 +0800
+Subject: [PATCH] change egg-info dir permission
+
+---
+ Makefile | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/Makefile b/Makefile
+index ee95d4a..c4a2d0b 100644
+--- a/Makefile
++++ b/Makefile
+@@ -85,7 +85,6 @@ isentry:
+ 	install -d -m 755 $(PYDIR)/sentryCollector
+ 	install -d -m 755 $(PYDIR)/sentryCollector/__pycache__
+ 	install -d -m 755 $(PYDIR)/$(PKGVEREGG)
+-	install -d -m 700 $(PYDIR)/$(PKGVEREGG)
+ 	install -d -m 700 $(ETCDIR)/sysconfig
+ 
+ 	## 安装配置文件
+-- 
+2.27.0
+

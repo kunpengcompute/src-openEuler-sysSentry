@@ -1,0 +1,13 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "0" ]; then
+    systemctl stop xalarmd.service
+    systemctl disable xalarmd.service
+    systemctl stop sysSentry.service
+    systemctl disable sysSentry.service
+    systemctl stop sentryCollector.service
+    systemctl disable sentryCollector.service
+fi
+rm -rf /var/run/xalarm | :
+rm -rf /var/run/sysSentry | :

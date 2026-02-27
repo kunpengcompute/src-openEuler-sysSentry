@@ -1,0 +1,8 @@
+usr/lib/python3/dist-packages/xalarm
+usr/lib/python3/dist-packages/syssentry
+usr/lib/python3/dist-packages/syssentry-1.0.3-py3.11.egg-info
+etc/sysSentry/
+etc/sysSentry/tasks/
+etc/sysSentry/plugins/
+var/log/sysSentry/
+var/lib/logrotate-syssentry/

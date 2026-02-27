@@ -1,0 +1,25 @@
+From 8c639c8c1aa1ff34d0d1dce87969172a71508a17 Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Fri, 16 Jan 2026 14:51:16 +0800
+Subject: [PATCH] delete useless sentry_urma_comm mod file
+
+---
+ config/tasks/sentry_urma_comm.mod | 6 ------
+ 1 file changed, 6 deletions(-)
+ delete mode 100644 config/tasks/sentry_urma_comm.mod
+
+diff --git a/config/tasks/sentry_urma_comm.mod b/config/tasks/sentry_urma_comm.mod
+deleted file mode 100644
+index ad775a5..0000000
+--- a/config/tasks/sentry_urma_comm.mod
++++ /dev/null
+@@ -1,6 +0,0 @@
+-[common]
+-enabled=yes
+-task_start=modprobe sentry_urma_comm
+-task_stop=rmmod sentry_urma_comm
+-type=oneshot
+-onstart=no
+-- 
+2.27.0
+
