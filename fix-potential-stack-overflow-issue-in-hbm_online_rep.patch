@@ -1,0 +1,46 @@
+From 8150e188d4f4f15e26812f12fa5b3c0a91a2f5d2 Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Mon, 12 Jan 2026 11:56:50 +0800
+Subject: [PATCH 2/5] fix potential stack overflow issue in hbm_online_repair
+
+---
+ src/sentryPlugins/hbm_online_repair/hbm-ras-events.c | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/src/sentryPlugins/hbm_online_repair/hbm-ras-events.c b/src/sentryPlugins/hbm_online_repair/hbm-ras-events.c
+index a677fdb..621a451 100644
+--- a/src/sentryPlugins/hbm_online_repair/hbm-ras-events.c
++++ b/src/sentryPlugins/hbm_online_repair/hbm-ras-events.c
+@@ -26,6 +26,7 @@
+ #include "logger.h"
+ 
+ #define SIG_LIST_LEN 4
++#define DEBUGFS_DIR_MAX_LEN 512
+ 
+ static int get_debugfs_dir(char *debugfs_dir, size_t len)
+ {
+@@ -50,6 +51,10 @@ static int get_debugfs_dir(char *debugfs_dir, size_t len)
+             break;
+ 
+         if (strcmp(type, "debugfs") == 0) {
++            if (strlen(dir) > DEBUGFS_DIR_MAX_LEN) {
++                log(LOG_ERROR, "Unacceptable debugfs path\n");
++                return -1;
++            }
+             strncpy(debugfs_dir, dir, len - 1);
+             debugfs_dir[len - 1] = '\0';
+             fclose(fp);
+@@ -68,9 +73,7 @@ static int open_trace(char *trace_dir, char *name, int flags)
+     int ret;
+     char fname[MAX_PATH + 1];
+ 
+-    strcpy(fname, trace_dir);
+-    strcat(fname, "/");
+-    strcat(fname, name);
++    snprintf(fname, sizeof(fname), "%s/%s", trace_dir, name);
+ 
+     ret = open(fname, flags);
+     if (ret < 0)
+-- 
+2.27.0
+
