@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 27
+Release: 28
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -68,6 +68,19 @@ Patch56:   fix-the-potential-KeyError-exception-in-task_get_ala.patch
 Patch57:   fix-potential-stack-overflow-issue-in-hbm_online_rep.patch
 Patch58:   fix-potential-crash-issue-in-bmc_recv.patch
 Patch59:   fix-period-type-task-abnormal-status.patch
+# PR-295
+Patch60:   fix-potential-overflow-in-report_result.patch
+Patch61:   fix-potential-memory-leak-issues-in-sentry_msg_monit.patch
+Patch62:   fix-some-codecheck-warning.patch
+Patch63:   set-log-level-in-sentry_msg_monitor.patch
+# PR-300
+Patch64:   fix-the-problem-of-checking-the-return-value-of-the-.patch
+# PR-301
+Patch65:   xalarm-add-sysSentry.service-status-monitoring.patch
+Patch66:   refact-xalarm_unregister_event-and-xalarm_report_eve.patch
+Patch67:   refact-sentryctl-set-cmd.patch
+Patch68:   Implement-systemd-socket-activation-for-xalarm-and-f.patch
+Patch69:   implement-systemd-socket-activation-for-sysSentry.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -80,6 +93,7 @@ BuildRequires: numactl-libs numactl-devel
 Provides:      pyxalarm = %{version}-%{release}
 Obsoletes:     pyxalarm < 1.0.3-25
 Requires:      libbpf nvme-cli
+Requires:      python3-dbus dbus-daemon python3-gobject-base
 
 %define PYTHON_VERSION %{python3_version}
 %define PKGVER syssentry-%{version}-py%{PYTHON_VERSION}.egg-info
@@ -193,6 +207,10 @@ This package provides soc_ring_sentry for the sysSentry.
 
 %preun
 if [ "$1" = "0" ]; then
+    systemctl stop xalarmd.socket 2>/dev/null || true
+    systemctl stop sysSentry.socket 2>/dev/null || true
+    systemctl disable xalarmd.socket 2>/dev/null || true
+    systemctl disable sysSentry.socket 2>/dev/null || true
     systemctl stop xalarmd.service
     systemctl disable xalarmd.service
     systemctl stop sysSentry.service
@@ -224,6 +242,7 @@ rm -rf /var/run/sysSentry | :
 %attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/task_scripts
 %attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/inspect.conf
 %attr(-,root,root) %{_unitdir}/sysSentry.service
+%attr(-,root,root) %{_unitdir}/sysSentry.socket
 
 # pysentry_collect
 %exclude %{python3_sitelib}/sentryCollector/collect_plugin.py
@@ -242,6 +261,7 @@ rm -rf /var/run/sysSentry | :
 # xalarm
 %attr(-,root,root) %{_bindir}/xalarmd
 %attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/xalarm.conf
+%attr(-,root,root) %{_unitdir}/xalarmd.socket
 %attr(-,root,root) %{_unitdir}/xalarmd.service
 
 # logrotate
@@ -323,6 +343,20 @@ rm -rf /var/run/sysSentry | :
 %attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Mon Mar 09 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-28
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix potential overflow in report_result()
+       fix potential memory leak issues in sentry_msg_monitor
+       set log level in sentry_msg_monitor
+       fix the problem of checking the return value of the pthread_create()
+       xalarm: add sysSentry.service status monitoring
+       Implement systemd socket activation for xalarm and fix socket permission issues
+       refact xalarm_unregister_event and xalarm_report_event API
+       refact sentryctl set cmd
+       implement systemd socket activation for sysSentry
+
 * Wed Feb 11 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-27
 - Type:bugfix
 - CVE:NA
