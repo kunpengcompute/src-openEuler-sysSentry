@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 28
+Release: 29
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -81,6 +81,24 @@ Patch66:   refact-xalarm_unregister_event-and-xalarm_report_eve.patch
 Patch67:   refact-sentryctl-set-cmd.patch
 Patch68:   Implement-systemd-socket-activation-for-xalarm-and-f.patch
 Patch69:   implement-systemd-socket-activation-for-sysSentry.patch
+# PR-296
+Patch70:   fix-potential-resource-leak-in-get_debugfs_dir.patch
+Patch71:   fix-potential-buffer-overflow-in-create_trace_instan.patch
+Patch72:   fix-potential-double-free-in-sentry_msg_monitor.patch
+Patch73:   add-cmd-security-check.patch
+Patch74:   add-exception-handling-for-sentryCollector.patch
+Patch75:   fix-potential-DoS-attack-risks-and-resource-leaks.patch
+Patch76:   change-some-msg-log-level.patch
+Patch77:   fix-memset-usage.patch
+Patch78:   fix-potential-memory-leak-in-print_map_res.patch
+Patch79:   fix-potential-null-pointer-reference-in-extract_devi.patch
+Patch80:   fix-crash-in-cpu_alarm.patch
+Patch81:   use-snprintf-instead-of-sprintf-strcpy-strncpy.patch
+Patch82:   fix-build-warning.patch
+Patch83:   check-cpu-info-in-parse_patrol_result.patch
+Patch84:   fix-potential-null-pointer-reference-in-catlib.patch
+Patch85:   fix-socket-fd-leaks.patch
+Patch86:   fix-NameError-in-task_get_alarm.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -343,6 +361,28 @@ rm -rf /var/run/sysSentry | :
 %attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Tue Mar 17 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-29
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix potential resource leak in get_debugfs_dir()
+       fix potential buffer overflow in create_trace_instance()
+       fix potential double free in sentry_msg_monitor
+       add cmd security check
+       add exception handling for sentryCollector
+       fix potential DoS attack risks and resource leaks
+       change some msg log level
+       fix memset usage
+       fix potential memory leak in print_map_res()
+       fix potential null pointer reference in extract_device_name()
+       fix crash in cpu_alarm
+       use snprintf instead of sprintf/strcpy/strncpy
+       fix build warning
+       check cpu info in parse_patrol_result()
+       fix potential null pointer reference in catlib
+       fix socket fd leaks
+       fix NameError in task_get_alarm()
+
 * Mon Mar 09 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-28
 - Type:bugfix
 - CVE:NA
