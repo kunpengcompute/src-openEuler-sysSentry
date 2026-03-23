@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 29
+Release: 30
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -99,6 +99,12 @@ Patch83:   check-cpu-info-in-parse_patrol_result.patch
 Patch84:   fix-potential-null-pointer-reference-in-catlib.patch
 Patch85:   fix-socket-fd-leaks.patch
 Patch86:   fix-NameError-in-task_get_alarm.patch
+# PR-303
+Patch87:   fix-fd-leaks-in-get_socket_id.patch
+Patch88:   fix-resource-leaks-in-ebpf_collector.patch
+Patch89:   fix-fd-leaks-in-sysSentry-and-xalarmd-service.patch
+Patch90:   fix-potential-overflow-which-cause-the-allocated-mem.patch
+Patch91:   fix-fd-leaks-in-sentry_msg_monitor.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -361,6 +367,16 @@ rm -rf /var/run/sysSentry | :
 %attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Mon Mar 23 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-30
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix fd leaks in get_socket_id()
+       fix resource leaks in ebpf_collector
+       fix fd leaks in sysSentry and xalarmd service
+       fix potential overflow which cause the allocated memory to be too small
+       fix fd leaks in sentry_msg_monitor
+
 * Tue Mar 17 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-29
 - Type:bugfix
 - CVE:NA
