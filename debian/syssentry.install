@@ -16,7 +16,9 @@ debian/tmp/usr/bin/sentryctl usr/bin/
 debian/tmp/usr/bin/syssentry usr/bin/
 debian/tmp/usr/bin/xalarmd usr/bin/
 debian/tmp/usr/lib/systemd/system/sysSentry.service usr/lib/systemd/system/
+debian/tmp/usr/lib/systemd/system/sysSentry.socket usr/lib/systemd/system/
 debian/tmp/usr/lib/systemd/system/xalarmd.service  usr/lib/systemd/system/
+debian/tmp/usr/lib/systemd/system/xalarmd.socket  usr/lib/systemd/system/
 debian/tmp/usr/lib64/libsentry_log.so usr/lib/aarch64-linux-gnu/
 debian/tmp/var/log/sysSentry  var/log/
 debian/tmp/var/lib/logrotate-syssentry var/lib/

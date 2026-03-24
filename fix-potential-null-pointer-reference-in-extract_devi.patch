@@ -1,0 +1,38 @@
+From 3cf79643afdbc106ca08bb00e866898c9c7ccf1e Mon Sep 17 00:00:00 2001
+From: tong_1001 <shixuantong1@huawei.com>
+Date: Thu, 5 Feb 2026 11:39:38 +0800
+Subject: [PATCH 10/17] fix potential null pointer reference in
+ extract_device_name()
+
+---
+ .../sentryCollector/ebpf_collector/ebpf_collector.c  | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/src/services/sentryCollector/ebpf_collector/ebpf_collector.c b/src/services/sentryCollector/ebpf_collector/ebpf_collector.c
+index 2c08538..611c5f8 100644
+--- a/src/services/sentryCollector/ebpf_collector/ebpf_collector.c
++++ b/src/services/sentryCollector/ebpf_collector/ebpf_collector.c
+@@ -97,11 +97,17 @@ static void sig_handler(int sig)
+ 
+ char* extract_device_name(const char *path) {
+     const char *dev_dir = "/dev/";
+-    char *name = strrchr(path, '/') + 1; 
++    char *last_slash = strrchr(path, '/');
++
++    if (last_slash == NULL) {
++        return NULL;
++    }
++
++    char *name = last_slash + 1;
+     if (strncmp(dev_dir, path, strlen(dev_dir)) == 0) {
+-        return strdup(name); 
++        return strdup(name);
+     }
+-    return NULL; 
++    return NULL;
+ }
+ 
+ char* find_device_name(dev_t dev) {
+-- 
+2.27.0
+

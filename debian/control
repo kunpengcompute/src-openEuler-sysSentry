@@ -26,6 +26,9 @@ Architecture: arm64
 Multi-Arch: same
 Depends:
  libbpf1,
+ python3-dbus,
+ dbus-daemon,
+ python3-gi,
  ${misc:Depends},
  ${shlibs:Depends},
 Description: sysSentry provides framework tools for system inspection.

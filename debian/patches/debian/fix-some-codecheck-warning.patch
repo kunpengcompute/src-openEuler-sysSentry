@@ -1,0 +1,115 @@
+From 16d66f80a9efe9ba3c3a1311226fd658ca3e68ed Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Tue, 3 Feb 2026 14:26:59 +0800
+Subject: [PATCH 3/4] fix some codecheck warning
+
+---
+ src/libsentry/c/log/log_utils.c                           | 5 ++++-
+ src/libsentry/c/log/log_utils.h                           | 8 +++-----
+ src/sentryPlugins/sentry_msg_monitor/bmc_log_lib.c        | 3 +--
+ src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c | 4 ++--
+ 4 files changed, 10 insertions(+), 10 deletions(-)
+
+diff --git a/src/libsentry/c/log/log_utils.c b/src/libsentry/c/log/log_utils.c
+index 0565104..47a248b 100644
+--- a/src/libsentry/c/log/log_utils.c
++++ b/src/libsentry/c/log/log_utils.c
+@@ -5,6 +5,9 @@
+  * Create: 2025-2-16
+  */
+ 
++#include <string.h>
++#include <stdarg.h>
++
+ #include "log_utils.h"
+ 
+ static LogLevel currentLogLevel = LOG_INFO;
+@@ -21,7 +24,7 @@ void logMessage(LogLevel level, char* file, int line, const char *format, ...)
+     }
+ }
+ 
+-void setLogLevel()
++void setLogLevel(void)
+ {
+     char* levelStr = getenv(LOG_LEVEL_ENV);
+     if (levelStr == NULL) {
+diff --git a/src/libsentry/c/log/log_utils.h b/src/libsentry/c/log/log_utils.h
+index 774fa97..ff2f873 100644
+--- a/src/libsentry/c/log/log_utils.h
++++ b/src/libsentry/c/log/log_utils.h
+@@ -10,8 +10,6 @@
+ 
+ #include <stdio.h>
+ #include <stdlib.h>
+-#include <string.h>
+-#include <stdarg.h>
+ #include <time.h>
+ #include <libgen.h>
+ 
+@@ -25,7 +23,7 @@ typedef enum {
+ #define LOG_FD(level) (level == LOG_ERROR ? stderr : stdout)
+ 
+ #define LOG_LEVEL_STRING(level) \
+-    (level == LOG_DEBUG ? "DEBUG":   \
++    (level == LOG_DEBUG ? "DEBUG" :   \
+      level == LOG_INFO ? "INFO" :    \
+      level == LOG_WARN ? "WARNING" : \
+      level == LOG_ERROR ? "ERROR" :  \
+@@ -49,14 +47,14 @@ typedef enum {
+             line);                                                  \
+     } while (0)
+ 
+-// configure Env for log 
++// configure Env for log
+ #define LOG_LEVEL_ENV "LOG_LEVEL"
+ 
+ // print msg
+ void logMessage(LogLevel level, char* file, int line, const char *format, ...);
+ 
+ // set log level
+-void setLogLevel();
++void setLogLevel(void);
+ 
+ // log function
+ #define logging_debug(...)       logMessage(LOG_DEBUG, __FILE__, __LINE__, __VA_ARGS__)
+diff --git a/src/sentryPlugins/sentry_msg_monitor/bmc_log_lib.c b/src/sentryPlugins/sentry_msg_monitor/bmc_log_lib.c
+index 04fbd62..810d873 100644
+--- a/src/sentryPlugins/sentry_msg_monitor/bmc_log_lib.c
++++ b/src/sentryPlugins/sentry_msg_monitor/bmc_log_lib.c
+@@ -15,10 +15,9 @@
+ */
+ 
+ #include <stdlib.h>
+-#include <fcntl.h>
++#include <string.h>
+ #include <unistd.h>
+ 
+-#include "register_xalarm.h"
+ #include "log_utils.h"
+ #include "bmc_log_lib.h"
+ 
+diff --git a/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c b/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
+index ccc840d..3044aab 100644
+--- a/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
++++ b/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
+@@ -73,7 +73,7 @@ static int handle_file_lock(int fd, bool lock)
+     return ret;
+ }
+ 
+-static int check_and_set_pid_file()
++static int check_and_set_pid_file(void)
+ {
+     int ret, fd;
+     fd = open(PID_FILE_PATH, O_CREAT | O_RDWR, 0600);
+@@ -615,7 +615,7 @@ close_send:
+     return NULL;
+ }
+ 
+-int main()
++int main(void)
+ {
+     int ret, pid_fd;
+     pthread_t sender, receiver;
+-- 
+2.27.0
+

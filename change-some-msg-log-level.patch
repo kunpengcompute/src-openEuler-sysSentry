@@ -1,0 +1,104 @@
+From eca7fe257f9f6b9a5e7125aff52936ed2057d7fc Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Mon, 16 Mar 2026 19:55:53 +0800
+Subject: [PATCH 07/17] change some msg log level
+
+---
+ .../python/pySentryCollector/collect_plugin.py     | 14 +++++++-------
+ src/services/sentryCollector/collect_io.py         |  2 +-
+ src/services/xalarm/xalarm_transfer.py             |  4 ++--
+ 3 files changed, 10 insertions(+), 10 deletions(-)
+
+diff --git a/src/libsentry/python/pySentryCollector/collect_plugin.py b/src/libsentry/python/pySentryCollector/collect_plugin.py
+index 95fa38d..b119bf5 100644
+--- a/src/libsentry/python/pySentryCollector/collect_plugin.py
++++ b/src/libsentry/python/pySentryCollector/collect_plugin.py
+@@ -97,14 +97,14 @@ def client_send_and_recv(request_data, data_str_len, protocol):
+     try:
+         client_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+     except socket.error:
+-        logging.debug("collect_plugin: client create socket error")
++        logging.error("collect_plugin: client create socket error")
+         return None
+ 
+     try:
+         client_socket.connect(COLLECT_SOCKET_PATH)
+     except OSError:
+         client_socket.close()
+-        logging.debug("collect_plugin: client connect error")
++        logging.error("collect_plugin: client connect error")
+         return None
+ 
+     req_data_len = len(request_data)
+@@ -116,13 +116,13 @@ def client_send_and_recv(request_data, data_str_len, protocol):
+         res_data = res_data.decode()
+     except (OSError, UnicodeError):
+         client_socket.close()
+-        logging.debug("collect_plugin: client communicate error")
++        logging.error("collect_plugin: client communicate error")
+         return None
+ 
+     res_magic = res_data[:CLT_MSG_MAGIC_LEN]
+     if res_magic != "RES":
+         client_socket.close()
+-        logging.debug("res msg format error")
++        logging.error("res msg format error")
+         return None
+ 
+     protocol_str = res_data[CLT_MSG_MAGIC_LEN:CLT_MSG_MAGIC_LEN+CLT_MSG_PRO_LEN]
+@@ -130,12 +130,12 @@ def client_send_and_recv(request_data, data_str_len, protocol):
+         protocol_id = int(protocol_str)
+     except ValueError:
+         client_socket.close()
+-        logging.debug("recv msg protocol id is invalid %s", protocol_str)
++        logging.error("recv msg protocol id is invalid %s", protocol_str)
+         return None
+ 
+     if protocol_id >= ClientProtocol.PRO_END:
+         client_socket.close()
+-        logging.debug("protocol id is invalid")
++        logging.error("protocol id is invalid")
+         return None
+ 
+     try:
+@@ -148,7 +148,7 @@ def client_send_and_recv(request_data, data_str_len, protocol):
+         res_msg_data = res_msg_data.decode()
+         return res_msg_data
+     except (OSError, ValueError, UnicodeError):
+-        logging.debug("collect_plugin: client recv res msg error")
++        logging.error("collect_plugin: client recv res msg error")
+     finally:
+         client_socket.close()
+ 
+diff --git a/src/services/sentryCollector/collect_io.py b/src/services/sentryCollector/collect_io.py
+index c62c7f9..0b3b612 100644
+--- a/src/services/sentryCollector/collect_io.py
++++ b/src/services/sentryCollector/collect_io.py
+@@ -523,7 +523,7 @@ class CollectIo():
+             EBPF_PROCESS.terminate()
+             EBPF_PROCESS.wait(timeout=3)
+         except subprocess.TimeoutExpired:
+-            logging.debug("eBPF process did not exit within timeout. Forcing kill.")
++            logging.error("eBPF process did not exit within timeout. Forcing kill.")
+             EBPF_PROCESS.kill()
+             EBPF_PROCESS.wait()
+         logging.info("ebpf collector thread exit")
+diff --git a/src/services/xalarm/xalarm_transfer.py b/src/services/xalarm/xalarm_transfer.py
+index f30b44a..aafdd3f 100644
+--- a/src/services/xalarm/xalarm_transfer.py
++++ b/src/services/xalarm/xalarm_transfer.py
+@@ -98,9 +98,9 @@ def wait_for_connection(server_sock, epoll, fd_to_socket, conn_thread_should_sto
+                         fd_to_socket[connection.fileno()] = connection
+                     logging.info("connection fd %d registered event.", connection.fileno())
+         except socket.error as e: 
+-            logging.debug(f"socket error, reason is {e}")
++            logging.error(f"socket error, reason is {e}")
+         except (KeyError, OSError, ValueError) as e:
+-            logging.debug(f"wait for connection failed {e}")
++            logging.error(f"wait for connection failed {e}")
+ 
+ 
+ def broadcast_sentry_down(server_socket, fd_to_socket, fd_to_socket_lock):
+-- 
+2.27.0
+
