@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 30
+Release: 31
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -105,6 +105,13 @@ Patch88:   fix-resource-leaks-in-ebpf_collector.patch
 Patch89:   fix-fd-leaks-in-sysSentry-and-xalarmd-service.patch
 Patch90:   fix-potential-overflow-which-cause-the-allocated-mem.patch
 Patch91:   fix-fd-leaks-in-sentry_msg_monitor.patch
+# PR-299
+Patch92:   rename-bmc_block_io-to-bmc_ras_sentry.patch
+Patch93:   BMC-Ras-Sentry-add-config-bmc_events.patch
+Patch94:   Support-report-bmc-block-ras-sentry.patch
+# PR-302
+Patch95:   bmc_ras_sentry-add-new-way-to-get-disk-SN-to-block-n.patch
+Patch96:   bmc_ras_sentry-add-way-to-get-disk-SN.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -198,15 +205,15 @@ Requires:       lsof libobmm ipmitool
 This package provides a plugin for sysSentry to listening specific messages
 %endif
 
-%package -n bmc_block_io
-Summary:        bmc_block_io for the sysSentry
-Provides:       bmc_block_io = %{version}-%{release}
+%package -n bmc_ras_sentry
+Summary:        bmc_ras_sentry for the sysSentry
+Provides:       bmc_ras_sentry = %{version}-%{release}
 BuildRequires:  json-c-devel
 Requires:       libxalarm ipmitool json-c
 Requires:       sysSentry = %{version}-%{release}
 
-%description -n bmc_block_io
-This package provides bmc_block_io for the sysSentry.
+%description -n bmc_ras_sentry
+This package provides bmc_ras_sentry for the sysSentry.
 
 %package -n soc_ring_sentry
 Summary:        soc_ring_sentry for the sysSentry
@@ -279,8 +286,8 @@ rm -rf /var/run/sysSentry | :
 %exclude %{_sysconfdir}/sysSentry/plugins/ai_block_io.ini
 %exclude %{_sysconfdir}/sysSentry/tasks/avg_block_io.mod
 %exclude %{_sysconfdir}/sysSentry/plugins/avg_block_io.ini
-%exclude %{_sysconfdir}/sysSentry/tasks/bmc_block_io.mod
-%exclude %{_sysconfdir}/sysSentry/plugins/bmc_block_io.ini
+%exclude %{_sysconfdir}/sysSentry/tasks/bmc_ras_sentry.mod
+%exclude %{_sysconfdir}/sysSentry/plugins/bmc_ras_sentry.ini
 
 # xalarm
 %attr(-,root,root) %{_bindir}/xalarmd
@@ -356,10 +363,10 @@ rm -rf /var/run/sysSentry | :
 %attr(-,root,root) %{_sysconfdir}/sysSentry/task_scripts/sentry_msg_monitor.sh
 %endif
 
-%files -n bmc_block_io
-%attr(-,root,root) %{_bindir}/bmc_block_io
-%attr(-,root,root) %{_sysconfdir}/sysSentry/plugins/bmc_block_io.ini
-%attr(-,root,root) %{_sysconfdir}/sysSentry/tasks/bmc_block_io.mod
+%files -n bmc_ras_sentry
+%attr(-,root,root) %{_bindir}/bmc_ras_sentry
+%attr(-,root,root) %{_sysconfdir}/sysSentry/plugins/bmc_ras_sentry.ini
+%attr(-,root,root) %{_sysconfdir}/sysSentry/tasks/bmc_ras_sentry.mod
 
 %files -n soc_ring_sentry
 %attr(-,root,root) %{_bindir}/soc_ring_sentry
@@ -367,6 +374,16 @@ rm -rf /var/run/sysSentry | :
 %attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Mon Mar 23 2026 huwentao <huwentao19@h-partners.com> - 1.0.3-31
+- Type:feature
+- CVE:NA
+- SUG:NA
+- DESC:rename bmc_block_io to bmc_ras_sentry
+       BMC Ras Sentry add config bmc_events
+       Support report bmc block ras sentry
+       bmc_ras_sentry add new way to get disk SN to block name mapping
+       bmc_ras_sentry add way to get disk SN
+
 * Mon Mar 23 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-30
 - Type:bugfix
 - CVE:NA
