@@ -1,3 +1,12 @@
+syssentry (1.0.3-2) UNRELEASED; urgency=medium
+
+  * some bug fixes
+  * xalarm: add sysSentry.service status monitoring
+  * Implement sytemd socket activation for sysSentry and xalarmd service
+  * refact setryctl set cmd
+
+ -- shixuantong1 <shixuantong1@h-partners.com>  Tue, 24 Mar 2026 11:01:16 +0800
+
 syssentry (1.0.3-1) UNRELEASED; urgency=medium
 
   * Initial release.

@@ -1,0 +1,39 @@
+From 75ecc5a116db75a973a68974a51e8b519757362e Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Wed, 18 Mar 2026 15:45:51 +0800
+Subject: [PATCH 4/5] fix potential overflow which cause the allocated memory
+ to be too small
+
+---
+ src/sentryPlugins/sentry_msg_monitor/ub_fault_lib.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/src/sentryPlugins/sentry_msg_monitor/ub_fault_lib.c b/src/sentryPlugins/sentry_msg_monitor/ub_fault_lib.c
+index 1ac4892..812cdea 100644
+--- a/src/sentryPlugins/sentry_msg_monitor/ub_fault_lib.c
++++ b/src/sentryPlugins/sentry_msg_monitor/ub_fault_lib.c
+@@ -74,6 +74,10 @@ static int find_processes_by_device(const char *obmm_shmdev_name, pid_t **pids,
+         if (!duplicate) {
+             if (found >= capacity) {
+                 capacity *= 2;
++                if (capacity > SIZE_MAX / sizeof(pid_t)) {
++                    logging_error("capacity is too long");
++                    break;
++                }
+                 pid_t *new_pids = realloc(*pids, capacity * sizeof(pid_t));
+                 if (!new_pids) {
+                     logging_error("realloc failed\n");
+@@ -185,6 +189,10 @@ static int check_process_mapping(const char *obmm_shmdev_name, pid_t pid, unsign
+             if (is_accessing_faulty_address(obmm_shmdev_name, tid_maps_path, obmm_offset, virt_addr)) {
+                 if (found >= capacity) {
+                     capacity *= 2;
++                    if (capacity > SIZE_MAX / sizeof(pid_t)) {
++                        logging_error("capacity is too loncapacity is too long");
++                        break;
++                    }
+                     pid_t *new_tids = realloc(*tids, capacity * sizeof(pid_t));
+                     if (!new_tids) {
+                         logging_error("realloc new_tids failed\n");
+-- 
+2.27.0
+
