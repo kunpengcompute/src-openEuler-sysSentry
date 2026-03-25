@@ -89,3 +89,4 @@ debian/fix-resource-leaks-in-ebpf_collector.patch
 debian/fix-fd-leaks-in-sysSentry-and-xalarmd-service.patch
 debian/fix-potential-overflow-which-cause-the-allocated-mem.patch
 debian/fix-fd-leaks-in-sentry_msg_monitor.patch
+debian/delete-cmd-security-check.patch
