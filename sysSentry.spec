@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 32
+Release: 33
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -114,6 +114,8 @@ Patch95:   bmc_ras_sentry-add-new-way-to-get-disk-SN-to-block-n.patch
 Patch96:   bmc_ras_sentry-add-way-to-get-disk-SN.patch
 # PR-305
 Patch97:   delete-cmd-security-check.patch
+# PR-304
+pATCH98:   feat-add-OOM-rate-limit-policy-configuration-support.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -376,6 +378,12 @@ rm -rf /var/run/sysSentry | :
 %attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Tue Apr 07 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-33
+- Type:feature
+- CVE:NA
+- SUG:NA
+- DESC:add OOM rate limit policy configuration support
+
 * Tue Mar 24 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-32
 - Type:bugfix
 - CVE:NA
