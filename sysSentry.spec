@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 33
+Release: 34
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -115,7 +115,7 @@ Patch96:   bmc_ras_sentry-add-way-to-get-disk-SN.patch
 # PR-305
 Patch97:   delete-cmd-security-check.patch
 # PR-304
-pATCH98:   feat-add-OOM-rate-limit-policy-configuration-support.patch
+Patch98:   feat-add-OOM-rate-limit-policy-configuration-support.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -241,23 +241,11 @@ This package provides soc_ring_sentry for the sysSentry.
 /sbin/ldconfig
 
 %preun
-if [ "$1" = "0" ]; then
-    systemctl stop xalarmd.socket 2>/dev/null || true
-    systemctl stop sysSentry.socket 2>/dev/null || true
-    systemctl disable xalarmd.socket 2>/dev/null || true
-    systemctl disable sysSentry.socket 2>/dev/null || true
-    systemctl stop xalarmd.service
-    systemctl disable xalarmd.service
-    systemctl stop sysSentry.service
-    systemctl disable sysSentry.service
-    systemctl stop sentryCollector.service
-    systemctl disable sentryCollector.service
-fi
-rm -rf /var/run/xalarm | :
-rm -rf /var/run/sysSentry | :
+%systemd_preun xalarmd.socket sysSentry.socket xalarmd.service sysSentry.service sentryCollector.service
 
 %postun
 /sbin/ldconfig
+%systemd_postun_with_restart xalarmd.socket sysSentry.socket xalarmd.service sysSentry.service sentryCollector.service
 
 %files
 %defattr(-,root,root)
@@ -378,6 +366,13 @@ rm -rf /var/run/sysSentry | :
 %attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Thu Apr 09 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-34
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:don't clean /var/run/xalarm and /var/run/sysSentry dirs
+       restart only the running service during the upgrade
+
 * Tue Apr 07 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-33
 - Type:feature
 - CVE:NA
