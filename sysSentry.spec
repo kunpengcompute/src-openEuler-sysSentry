@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 34
+Release: 35
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -116,6 +116,10 @@ Patch96:   bmc_ras_sentry-add-way-to-get-disk-SN.patch
 Patch97:   delete-cmd-security-check.patch
 # PR-304
 Patch98:   feat-add-OOM-rate-limit-policy-configuration-support.patch
+# PR-306
+Patch99:   check-pid-result-and-add-some-log.patch
+# PR-307
+Patch100:  add-some-error-info.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -366,6 +370,12 @@ This package provides soc_ring_sentry for the sysSentry.
 %attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Mon Apr 13 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-35
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:check pid result and add some log
+
 * Thu Apr 09 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-34
 - Type:bugfix
 - CVE:NA
