@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 36
+Release: 37
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -126,6 +126,8 @@ Patch101:  fix-integer-overflow-rish-in-QueryEvents.patch
 Patch102:  fix-potential-fd-leak-issue.patch
 Patch103:  fix-the-infinite-loop-for-cleanup_thread-thread.patch
 Patch104:  fix-error-log-for-task-stop-function.patch
+# PR-316
+Patch105:  feat-xalarm-add-event-registration-and-switch-manage.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -376,6 +378,12 @@ This package provides soc_ring_sentry for the sysSentry.
 %attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Wed Apr 22 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-37
+- Type:feature
+- CVE:NA
+- SUG:NA
+- DESC:feat(xalarm): add event registration and switch management
+
 * Mon Apr 20 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-36
 - Type:bugfix
 - CVE:NA
