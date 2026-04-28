@@ -90,3 +90,11 @@ debian/fix-fd-leaks-in-sysSentry-and-xalarmd-service.patch
 debian/fix-potential-overflow-which-cause-the-allocated-mem.patch
 debian/fix-fd-leaks-in-sentry_msg_monitor.patch
 debian/delete-cmd-security-check.patch
+debian/feat-add-OOM-rate-limit-policy-configuration-support.patch
+debian/check-pid-result-and-add-some-log.patch
+debian/add-some-error-info.patch
+debian/fix-integer-overflow-rish-in-QueryEvents.patch
+debian/fix-potential-fd-leak-issue.patch
+debian/fix-the-infinite-loop-for-cleanup_thread-thread.patch
+debian/fix-error-log-for-task-stop-function.patch
+debian/feat-xalarm-add-event-registration-and-switch-manage.patch
