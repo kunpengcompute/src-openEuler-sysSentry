@@ -1,0 +1,113 @@
+From bc9b2b9df93480d25a9abd062a2e5cfe0b6454b6 Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Tue, 28 Apr 2026 20:59:03 +0800
+Subject: [PATCH 2/2] fix dh_missing error
+
+---
+ Makefile | 50 --------------------------------------------------
+ 1 file changed, 50 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index db79f4f..ae0d411 100755
+--- a/Makefile
++++ b/Makefile
+@@ -83,8 +83,6 @@ isentry:
+ 	install -d -m 755 $(PYDIR)/syssentry/__pycache__
+ 	install -d -m 755 $(PYDIR)/xalarm/
+ 	install -d -m 755 $(PYDIR)/xalarm/__pycache__
+-	install -d -m 755 $(PYDIR)/sentryCollector
+-	install -d -m 755 $(PYDIR)/sentryCollector/__pycache__
+ 	install -d -m 755 $(PYDIR)/$(PKGVEREGG)
+ 	install -d -m 700 $(ETCDIR)/sysconfig
+ 
+@@ -92,7 +90,6 @@ isentry:
+ 	install -m 600 $(CURCONFIGDIR)/logrotate-sysSentry.conf $(ETCDIR)/sysSentry/
+ 	install -m 600 $(CURCONFIGDIR)/inspect.conf $(ETCDIR)/sysSentry/
+ 	install -m 600 $(CURCONFIGDIR)/xalarm.conf $(ETCDIR)/sysSentry/
+-	install -m 600 $(CURCONFIGDIR)/collector.conf $(ETCDIR)/sysSentry/
+ 	
+ 	## 安装日志文件
+ 	install -m 0500 src/libsentry/sh/log/logrotate-sysSentry.cron $(ETCDIR)/cron.hourly/logrotate-sysSentry
+@@ -102,58 +99,18 @@ isentry:
+ 	install -m 600 $(CURCONFIGDIR)/service/sysSentry.socket $(SYSTEMDDIR)
+ 	install -m 600 $(CURCONFIGDIR)/service/xalarmd.service $(SYSTEMDDIR)
+ 	install -m 600 $(CURCONFIGDIR)/service/xalarmd.socket $(SYSTEMDDIR)
+-	install -m 600 $(CURCONFIGDIR)/service/sentryCollector.service $(SYSTEMDDIR)
+ 
+ 	## 安装python源代码文件到相应的目录
+ 	install -m 644 src/build/usr/local/lib/$(PYNAME)/dist-packages/services/syssentry/*.py $(PYDIR)/syssentry
+ 	install -m 644 src/build/usr/local/lib/$(PYNAME)/dist-packages/services/syssentry/__pycache__/* $(PYDIR)/syssentry/__pycache__
+ 	install -m 644 src/build/usr/local/lib/$(PYNAME)/dist-packages/services/xalarm/*.py $(PYDIR)/xalarm
+ 	install -m 644 src/build/usr/local/lib/$(PYNAME)/dist-packages/services/xalarm/__pycache__/* $(PYDIR)/xalarm/__pycache__
+-	install -m 644 src/build/usr/local/lib/$(PYNAME)/dist-packages/services/sentryCollector/*.py $(PYDIR)/sentryCollector
+-	install -m 644 src/build/usr/local/lib/$(PYNAME)/dist-packages/services/sentryCollector/__pycache__/* $(PYDIR)/sentryCollector/__pycache__
+ 	install -m 644 src/build/usr/local/lib/$(PYNAME)/dist-packages/$(PKGVEREGG)/* $(PYDIR)/$(PKGVEREGG)
+ 
+ 	## 安装可执行文件
+ 	install -m 550 $(CURSRCDIR)/services/syssentry/sentryctl $(BINDIR)
+ 	install -m 550 $(CURSRCDIR)/build/usr/local/bin/syssentry $(BINDIR)
+ 	install -m 550 $(CURSRCDIR)/build/usr/local/bin/xalarmd $(BINDIR)
+-	install -m 550 $(CURSRCDIR)/build/usr/local/bin/sentryCollector $(BINDIR)
+-	@if [ -f "$(CURSRCDIR)/services/sentryCollector/ebpf_collector/ebpf_collector" ]; then \
+-		install -m 550 $(CURSRCDIR)/services/sentryCollector/ebpf_collector/ebpf_collector $(BINDIR); \
+-	fi
+-
+-	# avg_block_io
+-	install -d -m 755 $(PYDIR)/sentryPlugins/avg_block_io
+-	install -d -m 755 $(PYDIR)/sentryPlugins/avg_block_io/__pycache__
+-	install -m 550 $(CURSRCDIR)/build/usr/local/bin/avg_block_io $(BINDIR)
+-	install -m 644 src/build/usr/local/lib/$(PYNAME)/dist-packages/sentryPlugins/avg_block_io/*.py $(PYDIR)/sentryPlugins/avg_block_io
+-	install -m 644 src/build/usr/local/lib/$(PYNAME)/dist-packages/sentryPlugins/avg_block_io/__pycache__/* $(PYDIR)/sentryPlugins/avg_block_io/__pycache__
+-	install -m 600 $(CURCONFIGDIR)/plugins/avg_block_io.ini $(ETCDIR)/sysSentry/plugins/
+-	install -m 600 $(CURCONFIGDIR)/tasks/avg_block_io.mod $(ETCDIR)/sysSentry/tasks/
+-
+-	# ai_block_io
+-	install -d -m 755 $(PYDIR)/sentryPlugins/ai_block_io
+-	install -d -m 755 $(PYDIR)/sentryPlugins/ai_block_io/__pycache__
+-	install -m 550 $(CURSRCDIR)/build/usr/local/bin/ai_block_io $(BINDIR)
+-	install -m 644 src/build/usr/local/lib/$(PYNAME)/dist-packages/sentryPlugins/ai_block_io/*.py $(PYDIR)/sentryPlugins/ai_block_io
+-	install -m 644 src/build/usr/local/lib/$(PYNAME)/dist-packages/sentryPlugins/ai_block_io/__pycache__/* $(PYDIR)/sentryPlugins/ai_block_io/__pycache__
+-	install -m 600 $(CURCONFIGDIR)/plugins/ai_block_io.ini $(ETCDIR)/sysSentry/plugins/
+-	install -m 600 $(CURCONFIGDIR)/tasks/ai_block_io.mod $(ETCDIR)/sysSentry/tasks/
+-
+-	# hbm_online_repair
+-	install -m 550 $(CURSRCDIR)/sentryPlugins/hbm_online_repair/hbm_online_repair $(BINDIR)
+-	install -m 600 $(CURCONFIGDIR)/env/hbm_online_repair.env $(ETCDIR)/sysconfig/
+-	install -m 600 $(CURCONFIGDIR)/tasks/hbm_online_repair.mod $(ETCDIR)/sysSentry/tasks/
+-
+-	# soc_ring_sentry
+-	install -m 750 $(CURSRCDIR)/sentryPlugins/soc_ring_sentry/soc_ring_sentry $(BINDIR)
+-	install -m 600 $(CURCONFIGDIR)/env/soc_ring_sentry.env $(ETCDIR)/sysconfig/
+-	install -m 600 $(CURCONFIGDIR)/tasks/soc_ring_sentry.mod $(ETCDIR)/sysSentry/tasks/
+-
+-	# bmc_block_io
+-	install -m 550 $(CURSRCDIR)/sentryPlugins/bmc_block_io/output/bmc_block_io $(BINDIR)
+-	install -m 600 $(CURCONFIGDIR)/plugins/bmc_block_io.ini  $(ETCDIR)/sysSentry/plugins/
+-	install -m 600 $(CURCONFIGDIR)/tasks/bmc_block_io.mod $(ETCDIR)/sysSentry/tasks/
+ 
+ ifeq ($(ARCH), aarch64)
+ 	# sentry_msg_monitor
+@@ -163,12 +120,6 @@ ifeq ($(ARCH), aarch64)
+ 	install -m 600 $(CURCONFIGDIR)/task_scripts/sentry_msg_monitor.sh $(ETCDIR)/sysSentry/task_scripts/
+ endif
+ 
+-	# pysentry_notify
+-	install -m 644 src/libsentry/python/pySentryNotify/sentry_notify.py $(PYDIR)/xalarm
+-
+-	# pysentry_collect
+-	install -m 644 src/libsentry/python/pySentryCollector/collect_plugin.py $(PYDIR)/sentryCollector
+-
+ 	# libxalarm
+ 	install -m 555 $(CURLIBDIR)/build/libxalarm/libxalarm.so $(LIBINSTALLDIR)
+ 
+@@ -181,7 +132,6 @@ endif
+ 
+ 	# log utils
+ 	install -d -m 700 $(INCLUDEDIR)/libsentry
+-	install -m 644 $(CURSRCDIR)/libsentry/c/log/log_utils.h $(INCLUDEDIR)/libsentry/
+ 	install -m 550 $(CURSRCDIR)/libsentry/c/log/build/libsentry_log.so $(LIBINSTALLDIR)
+ 
+ ebpf_clean:
+-- 
+2.43.0
+

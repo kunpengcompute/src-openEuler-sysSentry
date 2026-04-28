@@ -2,12 +2,12 @@
 set -e
 
 if [ "$1" = "0" ]; then
+    systemctl stop xalarmd.socket
+    systemctl disable xalarmd.socket
+    systemctl stop sysSentry.socket
+    systemctl disable sysSentry.socket
     systemctl stop xalarmd.service
     systemctl disable xalarmd.service
     systemctl stop sysSentry.service
     systemctl disable sysSentry.service
-    systemctl stop sentryCollector.service
-    systemctl disable sentryCollector.service
 fi
-rm -rf /var/run/xalarm | :
-rm -rf /var/run/sysSentry | :

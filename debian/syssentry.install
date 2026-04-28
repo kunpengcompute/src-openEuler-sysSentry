@@ -6,6 +6,7 @@ debian/tmp/usr/lib/python3.11/dist-packages/xalarm/xalarm_daemon.py usr/lib/pyth
 debian/tmp/usr/lib/python3.11/dist-packages/xalarm/xalarm_server.py usr/lib/python3/dist-packages/xalarm/
 debian/tmp/usr/lib/python3.11/dist-packages/xalarm/xalarm_transfer.py usr/lib/python3/dist-packages/xalarm/
 debian/tmp/usr/lib/python3.11/dist-packages/xalarm/register_xalarm.py usr/lib/python3/dist-packages/xalarm/
+debian/tmp/usr/lib/python3.11/dist-packages/xalarm/xalarm_events.py usr/lib/python3/dist-packages/xalarm/
 debian/tmp/usr/lib/python3.11/dist-packages/syssentry/ usr/lib/python3/dist-packages/
 debian/tmp/usr/lib/python3.11/dist-packages/syssentry-1.0.3-py3.11.egg-info/ usr/lib/python3/dist-packages/
 debian/tmp/etc/cron.hourly/logrotate-sysSentry etc/cron.hourly/

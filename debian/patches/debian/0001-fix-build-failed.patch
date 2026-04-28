@@ -1,0 +1,80 @@
+From b6fb904a66d14d8bcd817b0b60ab2557c51c78cf Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Tue, 28 Apr 2026 20:56:55 +0800
+Subject: [PATCH 1/2] fix build failed
+
+---
+ Makefile | 34 +++++++++++++++++-----------------
+ 1 file changed, 17 insertions(+), 17 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index 65e27ef..db79f4f 100755
+--- a/Makefile
++++ b/Makefile
+@@ -21,7 +21,7 @@ CURCONFIGDIR    = $(CURDIR)/config
+ 
+ PYBIN   = $(shell which python3)
+ PYNAME  = $(shell ls /usr/lib |grep -E '^python'| sort -V | tail -n1)
+-PYDIR   = $(DESTDIR)$(PREFIX)/lib/$(PYNAME)/site-packages
++PYDIR   = $(DESTDIR)$(PREFIX)/lib/$(PYNAME)/dist-packages
+ 
+ PYTHON_VERSION := $(shell $(PYBIN) --version 2>&1 | awk '{print $$2}' | cut -d '.' -f 1,2)
+ PKGVER := syssentry-$(VERSION)-py$(PYTHON_VERSION)
+@@ -105,19 +105,19 @@ isentry:
+ 	install -m 600 $(CURCONFIGDIR)/service/sentryCollector.service $(SYSTEMDDIR)
+ 
+ 	## 安装python源代码文件到相应的目录
+-	install -m 644 src/build/usr/lib/$(PYNAME)/site-packages/services/syssentry/*.py $(PYDIR)/syssentry
+-	install -m 644 src/build/usr/lib/$(PYNAME)/site-packages/services/syssentry/__pycache__/* $(PYDIR)/syssentry/__pycache__
+-	install -m 644 src/build/usr/lib/$(PYNAME)/site-packages/services/xalarm/*.py $(PYDIR)/xalarm
+-	install -m 644 src/build/usr/lib/$(PYNAME)/site-packages/services/xalarm/__pycache__/* $(PYDIR)/xalarm/__pycache__
+-	install -m 644 src/build/usr/lib/$(PYNAME)/site-packages/services/sentryCollector/*.py $(PYDIR)/sentryCollector
+-	install -m 644 src/build/usr/lib/$(PYNAME)/site-packages/services/sentryCollector/__pycache__/* $(PYDIR)/sentryCollector/__pycache__
+-	install -m 644 src/build/usr/lib/$(PYNAME)/site-packages/$(PKGVEREGG)/* $(PYDIR)/$(PKGVEREGG)
++	install -m 644 src/build/usr/local/lib/$(PYNAME)/dist-packages/services/syssentry/*.py $(PYDIR)/syssentry
++	install -m 644 src/build/usr/local/lib/$(PYNAME)/dist-packages/services/syssentry/__pycache__/* $(PYDIR)/syssentry/__pycache__
++	install -m 644 src/build/usr/local/lib/$(PYNAME)/dist-packages/services/xalarm/*.py $(PYDIR)/xalarm
++	install -m 644 src/build/usr/local/lib/$(PYNAME)/dist-packages/services/xalarm/__pycache__/* $(PYDIR)/xalarm/__pycache__
++	install -m 644 src/build/usr/local/lib/$(PYNAME)/dist-packages/services/sentryCollector/*.py $(PYDIR)/sentryCollector
++	install -m 644 src/build/usr/local/lib/$(PYNAME)/dist-packages/services/sentryCollector/__pycache__/* $(PYDIR)/sentryCollector/__pycache__
++	install -m 644 src/build/usr/local/lib/$(PYNAME)/dist-packages/$(PKGVEREGG)/* $(PYDIR)/$(PKGVEREGG)
+ 
+ 	## 安装可执行文件
+ 	install -m 550 $(CURSRCDIR)/services/syssentry/sentryctl $(BINDIR)
+-	install -m 550 $(CURSRCDIR)/build/usr/bin/syssentry $(BINDIR)
+-	install -m 550 $(CURSRCDIR)/build/usr/bin/xalarmd $(BINDIR)
+-	install -m 550 $(CURSRCDIR)/build/usr/bin/sentryCollector $(BINDIR)
++	install -m 550 $(CURSRCDIR)/build/usr/local/bin/syssentry $(BINDIR)
++	install -m 550 $(CURSRCDIR)/build/usr/local/bin/xalarmd $(BINDIR)
++	install -m 550 $(CURSRCDIR)/build/usr/local/bin/sentryCollector $(BINDIR)
+ 	@if [ -f "$(CURSRCDIR)/services/sentryCollector/ebpf_collector/ebpf_collector" ]; then \
+ 		install -m 550 $(CURSRCDIR)/services/sentryCollector/ebpf_collector/ebpf_collector $(BINDIR); \
+ 	fi
+@@ -125,18 +125,18 @@ isentry:
+ 	# avg_block_io
+ 	install -d -m 755 $(PYDIR)/sentryPlugins/avg_block_io
+ 	install -d -m 755 $(PYDIR)/sentryPlugins/avg_block_io/__pycache__
+-	install -m 550 $(CURSRCDIR)/build/usr/bin/avg_block_io $(BINDIR)
+-	install -m 644 src/build/usr/lib/$(PYNAME)/site-packages/sentryPlugins/avg_block_io/*.py $(PYDIR)/sentryPlugins/avg_block_io
+-	install -m 644 src/build/usr/lib/$(PYNAME)/site-packages/sentryPlugins/avg_block_io/__pycache__/* $(PYDIR)/sentryPlugins/avg_block_io/__pycache__
++	install -m 550 $(CURSRCDIR)/build/usr/local/bin/avg_block_io $(BINDIR)
++	install -m 644 src/build/usr/local/lib/$(PYNAME)/dist-packages/sentryPlugins/avg_block_io/*.py $(PYDIR)/sentryPlugins/avg_block_io
++	install -m 644 src/build/usr/local/lib/$(PYNAME)/dist-packages/sentryPlugins/avg_block_io/__pycache__/* $(PYDIR)/sentryPlugins/avg_block_io/__pycache__
+ 	install -m 600 $(CURCONFIGDIR)/plugins/avg_block_io.ini $(ETCDIR)/sysSentry/plugins/
+ 	install -m 600 $(CURCONFIGDIR)/tasks/avg_block_io.mod $(ETCDIR)/sysSentry/tasks/
+ 
+ 	# ai_block_io
+ 	install -d -m 755 $(PYDIR)/sentryPlugins/ai_block_io
+ 	install -d -m 755 $(PYDIR)/sentryPlugins/ai_block_io/__pycache__
+-	install -m 550 $(CURSRCDIR)/build/usr/bin/ai_block_io $(BINDIR)
+-	install -m 644 src/build/usr/lib/$(PYNAME)/site-packages/sentryPlugins/ai_block_io/*.py $(PYDIR)/sentryPlugins/ai_block_io
+-	install -m 644 src/build/usr/lib/$(PYNAME)/site-packages/sentryPlugins/ai_block_io/__pycache__/* $(PYDIR)/sentryPlugins/ai_block_io/__pycache__
++	install -m 550 $(CURSRCDIR)/build/usr/local/bin/ai_block_io $(BINDIR)
++	install -m 644 src/build/usr/local/lib/$(PYNAME)/dist-packages/sentryPlugins/ai_block_io/*.py $(PYDIR)/sentryPlugins/ai_block_io
++	install -m 644 src/build/usr/local/lib/$(PYNAME)/dist-packages/sentryPlugins/ai_block_io/__pycache__/* $(PYDIR)/sentryPlugins/ai_block_io/__pycache__
+ 	install -m 600 $(CURCONFIGDIR)/plugins/ai_block_io.ini $(ETCDIR)/sysSentry/plugins/
+ 	install -m 600 $(CURCONFIGDIR)/tasks/ai_block_io.mod $(ETCDIR)/sysSentry/tasks/
+ 
+-- 
+2.43.0
+
