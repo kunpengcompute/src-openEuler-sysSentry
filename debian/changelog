@@ -1,3 +1,9 @@
+syssentry (1.0.3-4) UNRELEASED; urgency=medium
+
+  * sync ub related patches
+
+ -- Vanient <xiadanni1@huawei.com>  Tue, 28 Apr 2026 15:07:04 +0800
+
 syssentry (1.0.3-3) UNRELEASED; urgency=medium
 
   * delete cmd check

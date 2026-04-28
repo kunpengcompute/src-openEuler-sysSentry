@@ -1,0 +1,37 @@
+From 34a413a491eca59bb9d43409d534e14e5c3d02f5 Mon Sep 17 00:00:00 2001
+From: Vanient <xiadanni1@huawei.com>
+Date: Tue, 28 Apr 2026 14:54:37 +0800
+Subject: [PATCH 4/8] fix integer overflow rish in QueryEvents()
+
+Signed-off-by: Vanient <xiadanni1@huawei.com>
+---
+ src/sentryPlugins/bmc_block_io/src/cbmcblockio.cpp | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/sentryPlugins/bmc_block_io/src/cbmcblockio.cpp b/src/sentryPlugins/bmc_block_io/src/cbmcblockio.cpp
+index 0b9b578..62b193d 100644
+--- a/src/sentryPlugins/bmc_block_io/src/cbmcblockio.cpp
++++ b/src/sentryPlugins/bmc_block_io/src/cbmcblockio.cpp
+@@ -9,6 +9,7 @@
+ #include <string>
+ #include <chrono>
+ #include <cstdint>
++#include <climits>
+ #include <json-c/json.h>
+ #include <sstream>
+ #include <algorithm>
+@@ -220,6 +221,11 @@ int CBMCBlockIo::QueryEvents()
+         }
+ 
+         ProcessEvents(hexBytes, header.eventCount);
++        if (header.eventCount > (UINT16_MAX - currentIndex)) {
++            BMC_LOG_ERROR << "Integer overflow rish in currentIndex update, break";
++            ret = BMCPLU_FAILED;
++            break;
++        }
+         currentIndex += header.eventCount;
+ 
+         if (currentIndex >= header.totalEvents) {
+-- 
+2.41.0
+
