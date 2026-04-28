@@ -98,3 +98,5 @@ debian/fix-potential-fd-leak-issue.patch
 debian/fix-the-infinite-loop-for-cleanup_thread-thread.patch
 debian/fix-error-log-for-task-stop-function.patch
 debian/feat-xalarm-add-event-registration-and-switch-manage.patch
+debian/0001-fix-build-failed.patch
+debian/0002-fix-dh_missing-error.patch
