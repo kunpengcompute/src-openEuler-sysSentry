@@ -1,0 +1,182 @@
+From 3c7d8c013517ccc75445136f6f1f479cad00cd21 Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Thu, 6 Nov 2025 10:24:19 +0800
+Subject: [PATCH] fix typo
+
+---
+ src/libs/libxalarm/register_xalarm.c          | 14 ++++++-------
+ src/libs/libxalarm/register_xalarm.h          |  4 ++--
+ .../bmc_block_io/src/cbmcblockio.cpp          |  4 ++--
+ src/services/xalarm/xalarm_server.py          | 20 +++++++++----------
+ 4 files changed, 21 insertions(+), 21 deletions(-)
+
+diff --git a/src/libs/libxalarm/register_xalarm.c b/src/libs/libxalarm/register_xalarm.c
+index d689d0a..3cd7e9d 100644
+--- a/src/libs/libxalarm/register_xalarm.c
++++ b/src/libs/libxalarm/register_xalarm.c
+@@ -520,13 +520,13 @@ int send_data_to_socket(const char *socket_path, const char *message)
+     sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
+     if (sockfd == -1) {
+         fprintf(stderr, "failed to create socket\n");
+-        return RETURE_CODE_FAIL;
++        return RETURN_CODE_FAIL;
+     }
+ 
+     // set socket address
+     if (memset(&addr, 0, sizeof(struct sockaddr_un)) == NULL) {
+         fprintf(stderr, "%s: memset info failed.\n", __func__);
+-        return RETURE_CODE_FAIL;
++        return RETURN_CODE_FAIL;
+     }
+ 
+     addr.sun_family = AF_UNIX;
+@@ -535,18 +535,18 @@ int send_data_to_socket(const char *socket_path, const char *message)
+     if (connect(sockfd, (struct sockaddr *)&addr, sizeof(struct sockaddr_un)) == -1) {
+         fprintf(stderr, "failed to connect socket %s\n", socket_path);
+         close(sockfd);
+-        return RETURE_CODE_FAIL;
++        return RETURN_CODE_FAIL;
+     }
+ 
+     // write data
+     if (write(sockfd, message, strlen(message)) == -1) {
+         fprintf(stderr, "failed to send data to socket %s\n", socket_path);
+         close(sockfd);
+-        return RETURE_CODE_FAIL;
++        return RETURN_CODE_FAIL;
+     }
+ 
+     close(sockfd);
+-    return RETURE_CODE_SUCCESS;
++    return RETURN_CODE_SUCCESS;
+ }
+ 
+ 
+@@ -600,7 +600,7 @@ static bool is_valid_task_name(const char *task_name)
+  */
+ int report_result(const char *task_name, enum RESULT_LEVEL result_level, const char *report_data)
+ {
+-    int ret = RETURE_CODE_FAIL;
++    int ret = RETURN_CODE_FAIL;
+     if (result_level < 0 || result_level >= RESULT_LEVEL_NUM) {
+         fprintf(stderr, "result_level (%d) is invalid, it must be in [0-5]\n", result_level);
+         return ret;
+@@ -644,7 +644,7 @@ int report_result(const char *task_name, enum RESULT_LEVEL result_level, const c
+         goto free_msg;
+     }
+ 
+-    ret = RETURE_CODE_SUCCESS;
++    ret = RETURN_CODE_SUCCESS;
+ free_msg:
+     free(message);
+     message = NULL;
+diff --git a/src/libs/libxalarm/register_xalarm.h b/src/libs/libxalarm/register_xalarm.h
+index 263fff5..80fd635 100644
+--- a/src/libs/libxalarm/register_xalarm.h
++++ b/src/libs/libxalarm/register_xalarm.h
+@@ -130,8 +130,8 @@ enum RESULT_LEVEL {
+ #define RESULT_INFO_MAX_LEN 4096
+ #define RESULT_INFO_LOG_MGS_MAX_LEN 255
+ 
+-#define RETURE_CODE_FAIL (-1)
+-#define RETURE_CODE_SUCCESS 0
++#define RETURN_CODE_FAIL (-1)
++#define RETURN_CODE_SUCCESS 0
+ 
+ extern int report_result(const char *task_name,
+                          enum RESULT_LEVEL result_level,
+diff --git a/src/sentryPlugins/bmc_block_io/src/cbmcblockio.cpp b/src/sentryPlugins/bmc_block_io/src/cbmcblockio.cpp
+index 5d64bde..0b9b578 100644
+--- a/src/sentryPlugins/bmc_block_io/src/cbmcblockio.cpp
++++ b/src/sentryPlugins/bmc_block_io/src/cbmcblockio.cpp
+@@ -409,7 +409,7 @@ void CBMCBlockIo::ReportAlarm(const IPMIEvent& event)
+     json_object_object_add(jObject, JSON_KEY_DETAILS.c_str(), json_object_new_string("{}}"));
+     const char *jData = json_object_to_json_string(jObject);
+     int ret = xalarm_Report(m_alarmId, ucAlarmLevel, ucAlarmType, const_cast<char*>(jData));
+-    if (ret != RETURE_CODE_SUCCESS) {
++    if (ret != RETURN_CODE_SUCCESS) {
+         BMC_LOG_ERROR << "Failed to xalarm_Report, ret: " << ret;
+     }
+     json_object_put(jObject);
+@@ -423,7 +423,7 @@ void CBMCBlockIo::ReportResult(int resultLevel, const std::string& msg)
+     json_object_object_add(jObject, JSON_KEY_MSG.c_str(), json_object_new_string(msg.c_str()));
+     const char *jData = json_object_to_json_string(jObject);
+     int ret = report_result(BMC_TASK_NAME.c_str(), level, const_cast<char*>(jData));
+-    if (ret != RETURE_CODE_SUCCESS) {
++    if (ret != RETURN_CODE_SUCCESS) {
+         BMC_LOG_ERROR << "Failed to report_result, ret: " << ret;
+     }
+     json_object_put(jObject);
+diff --git a/src/services/xalarm/xalarm_server.py b/src/services/xalarm/xalarm_server.py
+index 932279c..d31cd03 100644
+--- a/src/services/xalarm/xalarm_server.py
++++ b/src/services/xalarm/xalarm_server.py
+@@ -37,16 +37,16 @@ SOCK_FILE = "/var/run/xalarm/report"
+ ALARM_REPORT_LEN = 8216
+ ALARM_DIR_PERMISSION = 0o755
+ SOCKET_FILE_PERMISSON = 0o666
+-PERMISION_MASK = 0o777
+-PEROID_CHECK_TIME = 3
++PERMISSION_MASK = 0o777
++PERIOD_CHECK_TIME = 3
+ ALARM_LISTEN_QUEUE_LEN = 5
+-PEROID_SCANN_TIME = 60
++PERIOD_SCANN_TIME = 60
+ fd_to_socket_lock = threading.Lock()
+ 
+ def check_permission(path, permission):
+     """check whether the permission of path is right
+     """
+-    return (os.stat(path).st_mode & PERMISION_MASK) == permission
++    return (os.stat(path).st_mode & PERMISSION_MASK) == permission
+ 
+ 
+ def check_socket_file(path):
+@@ -108,14 +108,14 @@ def recover_sock_path_and_permission():
+         os.chmod(ALARM_DIR, ALARM_DIR_PERMISSION)
+     if os.path.exists(SOCK_FILE) and not check_permission(SOCK_FILE, SOCKET_FILE_PERMISSON):
+         logging.info("socket file %s permission %s set not properly, recover as default permission",
+-                    SOCK_FILE, oct(os.stat(SOCK_FILE).st_mode & PERMISION_MASK))
++                    SOCK_FILE, oct(os.stat(SOCK_FILE).st_mode & PERMISSION_MASK))
+         os.chmod(SOCK_FILE, SOCKET_FILE_PERMISSON)
+     if os.path.exists(USER_RECV_SOCK) and not check_permission(USER_RECV_SOCK, SOCKET_FILE_PERMISSON):
+         logging.info("socket file %s permission %s set not properly, recover as default permission",
+-                    USER_RECV_SOCK, oct(os.stat(USER_RECV_SOCK).st_mode & PERMISION_MASK))
++                    USER_RECV_SOCK, oct(os.stat(USER_RECV_SOCK).st_mode & PERMISSION_MASK))
+         os.chmod(USER_RECV_SOCK, SOCKET_FILE_PERMISSON)
+ 
+-def peroid_task_to_cleanup_connections():
++def period_task_to_cleanup_connections():
+     global alarm_sock
+     global alarm_epoll
+     global fd_to_socket
+@@ -124,7 +124,7 @@ def peroid_task_to_cleanup_connections():
+     logging.info("cleanup thread is running")
+ 
+     while True:
+-        sleep(PEROID_SCANN_TIME)
++        sleep(PERIOD_SCANN_TIME)
+         # if conn thread stopped, cleanup thread should not cleanup anymore
+         if conn_thread_should_stop.is_set():
+             continue
+@@ -182,7 +182,7 @@ def watch_socket_file_and_dir():
+         except Exception as e:
+             logging.error("Error watch socket file thread: %s", str(e))
+     
+-        sleep(PEROID_CHECK_TIME)
++        sleep(PERIOD_CHECK_TIME)
+ 
+     
+ def start_wait_for_conn_thread(alarm_sock_, alarm_epoll_,
+@@ -229,7 +229,7 @@ def server_loop(alarm_config):
+         fd_to_socket_lock
+     )
+ 
+-    cleanup_thread = threading.Thread(target=peroid_task_to_cleanup_connections)
++    cleanup_thread = threading.Thread(target=period_task_to_cleanup_connections)
+     cleanup_thread.daemon = True
+     cleanup_thread.start()
+ 
+-- 
+2.27.0
+

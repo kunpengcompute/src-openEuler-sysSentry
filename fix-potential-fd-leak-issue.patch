@@ -1,0 +1,57 @@
+From e733b7e59e7a2edf0ee171a2db006b1caf52e889 Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Sat, 18 Apr 2026 09:10:01 +0800
+Subject: [PATCH 4/6] fix potential fd leak issue
+
+---
+ src/services/syssentry/syssentry.py  | 4 ++--
+ src/services/xalarm/xalarm_daemon.py | 4 ++--
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/src/services/syssentry/syssentry.py b/src/services/syssentry/syssentry.py
+index bbede4e..2003596 100644
+--- a/src/services/syssentry/syssentry.py
++++ b/src/services/syssentry/syssentry.py
+@@ -480,7 +480,7 @@ def release_pidfile():
+     except (IOError, FileNotFoundError):
+         logging.error("Failed to release PID file lock")
+     finally:
+-        if not pid_file_fd:
++        if pid_file_fd:
+             pid_file_fd.close()
+         PID_FILE_FLOCK.close()
+         os.unlink(SYSSENTRY_PID_FILE)
+@@ -581,7 +581,7 @@ def main():
+ 
+     if not chk_and_set_pidfile():
+         logging.error("get pid file lock failed, exist")
+-        if not PID_FILE_FLOCK:
++        if PID_FILE_FLOCK:
+             PID_FILE_FLOCK.close()
+         sys.exit(17)
+ 
+diff --git a/src/services/xalarm/xalarm_daemon.py b/src/services/xalarm/xalarm_daemon.py
+index 0581abe..8524a89 100644
+--- a/src/services/xalarm/xalarm_daemon.py
++++ b/src/services/xalarm/xalarm_daemon.py
+@@ -59,7 +59,7 @@ def release_pidfile():
+     except (IOError, FileNotFoundError):
+         logging.error("Failed to release PID file lock")
+     finally:
+-        if not pid_file_fd:
++        if pid_file_fd:
+             pid_file_fd.close()
+         PID_FILE_FLOCK.close()
+         os.unlink(XALARMD_PID_FILE)
+@@ -91,7 +91,7 @@ def daemon_init():
+ 
+     if not chk_and_set_pidfile():
+         logging.error("get pid file lock failed, exist")
+-        if not PID_FILE_FLOCK:
++        if PID_FILE_FLOCK:
+             PID_FILE_FLOCK.close()
+         sys.exit(17)
+ 
+-- 
+2.43.0
+
