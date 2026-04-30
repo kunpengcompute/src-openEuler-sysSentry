@@ -1,0 +1,36 @@
+From c8d7195581dd44180fcc2fc474536e2d73d14900 Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Mon, 20 Apr 2026 19:29:45 +0800
+Subject: [PATCH] fix integer overflow rish in QueryEvents()
+
+---
+ src/sentryPlugins/bmc_ras_sentry/src/cbmcrassentry.cpp | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/sentryPlugins/bmc_ras_sentry/src/cbmcrassentry.cpp b/src/sentryPlugins/bmc_ras_sentry/src/cbmcrassentry.cpp
+index 3d5c8c9..f28b323 100644
+--- a/src/sentryPlugins/bmc_ras_sentry/src/cbmcrassentry.cpp
++++ b/src/sentryPlugins/bmc_ras_sentry/src/cbmcrassentry.cpp
+@@ -9,6 +9,7 @@
+ #include <string>
+ #include <chrono>
+ #include <cstdint>
++#include <climits>
+ #include <sstream>
+ #include <algorithm>
+ #include <regex>
+@@ -744,6 +745,11 @@ int CBMCRasSentry::QueryEvents()
+         }
+ 
+         ProcessEvents(hexBytes, header.eventCount);
++        if (header.eventCount > (UINT16_MAX - currentIndex)) {
++            BMC_LOG_ERROR << "Integer overflow rish in currentIndex update, break";
++            ret = BMCPLU_FAILED;
++            break;
++        }
+         currentIndex += header.eventCount;
+ 
+         if (currentIndex >= header.totalEvents) {
+-- 
+2.43.0
+
