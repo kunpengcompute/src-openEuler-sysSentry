@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 37
+Release: 38
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -128,6 +128,7 @@ Patch103:  fix-the-infinite-loop-for-cleanup_thread-thread.patch
 Patch104:  fix-error-log-for-task-stop-function.patch
 # PR-316
 Patch105:  feat-xalarm-add-event-registration-and-switch-manage.patch
+Patch106:  compile-cpu_sentry-plugin.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -198,6 +199,15 @@ Requires:       sysSentry = %{version}-%{release}
 
 %description -n pysentry_collect
 This package provides Supports collect for plugins
+
+%package -n cpu_sentry
+Summary:        CPU fault inspection program
+Requires:       procps-ng
+Recommends:     sysSentry = %{version}-%{release}
+Recommends:     ipmitool
+
+%description -n cpu_sentry
+This package provides CPU fault detection
 
 %package -n hbm_online_repair
 Summary:        hbm_online_repair for the sysSentry
@@ -293,6 +303,12 @@ This package provides soc_ring_sentry for the sysSentry.
 %exclude %{_sysconfdir}/sysSentry/tasks/bmc_ras_sentry.mod
 %exclude %{_sysconfdir}/sysSentry/plugins/bmc_ras_sentry.ini
 
+# cpu inspection module
+%exclude %{_sysconfdir}/sysSentry/tasks/cpu_sentry.mod
+%exclude %{_sysconfdir}/sysSentry/plugins/cpu_sentry.ini
+%exclude %{_bindir}/cpu_sentry
+%exclude %{_bindir}/cat-cli
+
 # xalarm
 %attr(-,root,root) %{_bindir}/xalarmd
 %attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/xalarm.conf
@@ -352,6 +368,14 @@ This package provides soc_ring_sentry for the sysSentry.
 %attr(-,root,root) %{python3_sitelib}/sentryCollector/collect_plugin.py
 %attr(-,root,root) %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin.*.pyc
 
+%files -n cpu_sentry
+%attr(-,root,root) %{_bindir}/cat-cli
+%attr(-,root,root) %{_bindir}/cpu_sentry
+%attr(-,root,root) %{_libdir}/libcpu_patrol.so
+%attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/cpu_sentry.mod
+%attr(-,root,root) %{_sysconfdir}/sysSentry/plugins/cpu_sentry.ini
+%attr(-,root,root) %{python3_sitelib}/sentryPlugins/cpu_sentry
+
 %files -n hbm_online_repair
 %attr(-,root,root) %{_bindir}/hbm_online_repair
 %attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysconfig/hbm_online_repair.env
@@ -378,6 +402,12 @@ This package provides soc_ring_sentry for the sysSentry.
 %attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Thu Apr 30 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-38
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:add cpu_sentry
+
 * Wed Apr 22 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-37
 - Type:feature
 - CVE:NA
