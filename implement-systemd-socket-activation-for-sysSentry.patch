@@ -1,0 +1,711 @@
+From 760602db5c2e4802f2abd736f2e1f28bbd93c7f6 Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Mon, 16 Mar 2026 11:54:00 +0800
+Subject: [PATCH] implement systemd socket activation for sysSentry
+
+- Implement systemd socket activation for sysSentry service
+- Add sysSentry.socket unit file with all 5 socket definitions
+- Update sysSentry.service to require and depend on sysSentry.socket
+- Modify main_loop() to use systemd-provided file descriptors when available
+---
+ Makefile                                      |   4 +
+ config/service/sysSentry.service              |   4 +-
+ config/service/sysSentry.socket               |  28 +++
+ selftest/libs/common.sh                       |   3 +-
+ selftest/test/test_sentryctl_end_exception.sh |   9 +-
+ selftest/test/test_sentryctl_exception.sh     |  15 +-
+ .../test_sentryctl_heartbeat_exception.sh     |   8 +-
+ .../test/test_sentryctl_interval_exception.sh |   8 +-
+ ...sentryctl_modname_long_length_exception.sh |  12 +-
+ selftest/test/test_sentryctl_modname_valid.sh |   8 +-
+ selftest/test/test_sentryctl_normal.sh        |   8 +-
+ selftest/test/test_sentryctl_reload.sh        |   8 +-
+ .../test/test_sentryctl_start_exception.sh    |   8 +-
+ .../test/test_sentryctl_type_exception.sh     |   9 +-
+ selftest/test/test_sentryctl_type_oneshot.sh  |   8 +-
+ selftest/test/test_sentryctl_type_period.sh   |   8 +-
+ src/services/syssentry/heartbeat.py           |  36 ---
+ src/services/syssentry/syssentry.py           | 215 +++++-------------
+ 18 files changed, 140 insertions(+), 259 deletions(-)
+ create mode 100644 config/service/sysSentry.socket
+
+diff --git a/Makefile b/Makefile
+index 97c4da3..65e27ef 100644
+--- a/Makefile
++++ b/Makefile
+@@ -99,6 +99,7 @@ isentry:
+ 	
+ 	## 安装 systemd 服务文件
+ 	install -m 600 $(CURCONFIGDIR)/service/sysSentry.service $(SYSTEMDDIR)
++	install -m 600 $(CURCONFIGDIR)/service/sysSentry.socket $(SYSTEMDDIR)
+ 	install -m 600 $(CURCONFIGDIR)/service/xalarmd.service $(SYSTEMDDIR)
+ 	install -m 600 $(CURCONFIGDIR)/service/xalarmd.socket $(SYSTEMDDIR)
+ 	install -m 600 $(CURCONFIGDIR)/service/sentryCollector.service $(SYSTEMDDIR)
+@@ -232,6 +233,7 @@ uninstall:
+ 	rm -rf $(PYDIR)/$(PKGVEREGG)
+ 	rm -rf $(PYDIR)/xalarm
+ 	rm -rf $(SYSTEMDDIR)/sysSentry.service
++	rm -rf $(SYSTEMDDIR)/sysSentry.socket
+ 	rm -rf $(SYSTEMDDIR)/xalarmd.service
+ 	rm -rf $(SYSTEMDDIR)/xalarmd.socket
+ 	rm -rf $(SYSTEMDDIR)/sentryCollector.service
+@@ -250,7 +252,9 @@ test:
+ startup:
+ 	systemctl daemon-reload
+ 	systemctl enable xalarmd.socket
++	systemctl enable sysSentry.socket
+ 	systemctl start xalarmd.socket
++	systemctl start sysSentry.socket
+ 	systemctl restart xalarmd
+ 	systemctl restart sysSentry
+ 	systemctl restart sentryCollector
+diff --git a/config/service/sysSentry.service b/config/service/sysSentry.service
+index 335b3da..9496e6a 100644
+--- a/config/service/sysSentry.service
++++ b/config/service/sysSentry.service
+@@ -1,7 +1,7 @@
+ [Unit]
+ Description=EulerOS System Inspection Frame
+-Requires=xalarmd.service
+-After=xalarmd.service
++Requires=xalarmd.service sysSentry.socket
++After=xalarmd.service sysSentry.socket
+ 
+ [Service]
+ ExecStart=/usr/bin/python3 /usr/bin/syssentry
+diff --git a/config/service/sysSentry.socket b/config/service/sysSentry.socket
+new file mode 100644
+index 0000000..9001fac
+--- /dev/null
++++ b/config/service/sysSentry.socket
+@@ -0,0 +1,28 @@
++[Unit]
++Description=sysSentry daemon sockets
++Before=sysSentry.service
++
++[Socket]
++RuntimeDirectory=sysSentry
++# Control socket for sentryctl commands
++ListenStream=/run/sysSentry/control.sock
++# Result socket for plugin results
++ListenStream=/run/sysSentry/result.sock
++# Heartbeat socket for heartbeat detection
++ListenStream=/run/sysSentry/heartbeat.sock
++# CPU alarm socket
++ListenStream=/run/sysSentry/report.sock
++# BMC socket
++ListenStream=/run/sysSentry/bmc.sock
++
++# Socket file permissions: 0600 (rw-------), owned by root
++SocketMode=0600
++# Directory permissions: 0755 (rwxr-xr-x)
++RuntimeDirectoryMode=0755
++# Don't accept connections individually, service handles all connections
++Accept=no
++# remove socket files when sysSentry daemon socket stop
++RemoveOnStop=yes
++
++[Install]
++WantedBy=sockets.target
+diff --git a/selftest/libs/common.sh b/selftest/libs/common.sh
+index b60b4b9..bb7b299 100644
+--- a/selftest/libs/common.sh
++++ b/selftest/libs/common.sh
+@@ -18,7 +18,8 @@ function common_pre_test() {
+     gcc test/sysSentry/test_task.c -o test/sysSentry/test_task
+     cp test/sysSentry/test_task /usr/bin
+ 
+-    syssentry &
++    systemctl start xalarmd.socket xalarmd.service
++    systemctl start sysSentry.socket sysSentry.service
+     sleep 1
+ }
+ 
+diff --git a/selftest/test/test_sentryctl_end_exception.sh b/selftest/test/test_sentryctl_end_exception.sh
+index e0fc8e0..69945a5 100644
+--- a/selftest/test/test_sentryctl_end_exception.sh
++++ b/selftest/test/test_sentryctl_end_exception.sh
+@@ -37,11 +37,10 @@ function do_test() {
+ }
+ 
+ function post_test() {
+-    while [[ -n "`ps aux|grep -w syssentry|grep -v grep`" ]]; do
+-        kill -9 `pgrep -w syssentry`
+-        kill -9 `pgrep -w test_task`
+-        sleep 1
+-    done
++    systemctl stop sysSentry.socket sysSentry.service
++    systemctl stop xalarmd.socket xalarmd.service
++    kill -9 `pgrep -w test_task`
++
+    rm -rf ${tmp_log} test/sysSentry/test_task 
+    rm -rf /usr/bin/test_task /etc/sysSentry/tasks/test_end_exception.mod
+ }
+diff --git a/selftest/test/test_sentryctl_exception.sh b/selftest/test/test_sentryctl_exception.sh
+index c8e3107..7f372c8 100644
+--- a/selftest/test/test_sentryctl_exception.sh
++++ b/selftest/test/test_sentryctl_exception.sh
+@@ -25,6 +25,7 @@ function pre_test() {
+ }
+ 
+ function do_test() {
++    systemctl start xalarmd.socket xalarmd.service
+ 
+     sentryctl status test_sentryctl_exception 2>&1 | tee ${tmp_log} | cat
+     expect_true "grep -E '(sentryctl: client_send_and_recv failed)' ${tmp_log}"
+@@ -41,10 +42,11 @@ function do_test() {
+     sentryctl list 2>&1 | tee ${tmp_log} | cat
+     expect_true "grep -E '(sentryctl: client_send_and_recv failed)' ${tmp_log}"
+ 
+-    syssentry &
++    systemctl start sysSentry.service
+     pid1=$(ps -ef | grep syssentry | grep -v grep | awk '{print $2}')
+ 
+-    syssentry &
++
++    systemctl start sysSentry.service
+     pid2=$(ps -ef | grep syssentry | grep -v grep | awk '{print $2}')
+ 
+     expect_eq $pid1 $pid2
+@@ -70,11 +72,10 @@ function do_test() {
+ }
+ 
+ function post_test() {
+-    while [[ -n "`ps aux|grep -w syssentry|grep -v grep`" ]]; do
+-        kill -9 `pgrep -w syssentry`
+-        kill -9 `pgrep -w test_task`
+-        sleep 1
+-    done
++    systemctl stop sysSentry.socket sysSentry.service
++    systemctl stop xalarmd.socket xalarmd.service
++    kill -9 `pgrep -w test_task`
++
+     rm -rf ${tmp_log} test/sysSentry/test_task
+     rm -rf /usr/bin/test_task /etc/sysSentry/tasks/test_sentryctl_exception.mod
+ }
+diff --git a/selftest/test/test_sentryctl_heartbeat_exception.sh b/selftest/test/test_sentryctl_heartbeat_exception.sh
+index 37cae10..2c07521 100644
+--- a/selftest/test/test_sentryctl_heartbeat_exception.sh
++++ b/selftest/test/test_sentryctl_heartbeat_exception.sh
+@@ -43,11 +43,9 @@ function do_test() {
+ }
+ 
+ function post_test() {
+-	while [[ -n "`ps aux|grep -w syssentry|grep -v grep`" ]]; do
+-		kill -9 `pgrep -w syssentry`
+-		kill -9 `pgrep -w test_task`
+-		sleep 1
+-	done
++	systemctl stop sysSentry.socket sysSentry.service
++    systemctl stop xalarmd.socket xalarmd.service
++    kill -9 `pgrep -w test_task`
+    rm -rf ${tmp_log} test/sysSentry/test_task 
+    rm -rf /usr/bin/test_task /etc/sysSentry/tasks/test_heartbeat_exception.mod
+ }
+diff --git a/selftest/test/test_sentryctl_interval_exception.sh b/selftest/test/test_sentryctl_interval_exception.sh
+index eaaaa86..f8c1451 100644
+--- a/selftest/test/test_sentryctl_interval_exception.sh
++++ b/selftest/test/test_sentryctl_interval_exception.sh
+@@ -45,11 +45,9 @@ function do_test() {
+ }
+ 
+ function post_test() {
+-	while [[ -n "`ps aux|grep -w syssentry|grep -v grep`" ]]; do
+-		kill -9 `pgrep -w syssentry`
+-		kill -9 `pgrep -w test_task`
+-		sleep 1
+-	done
++	systemctl stop sysSentry.socket sysSentry.service
++    systemctl stop xalarmd.socket xalarmd.service
++    kill -9 `pgrep -w test_task`
+    rm -rf ${tmp_log} test/sysSentry/test_task 
+    rm -rf /usr/bin/test_task /etc/sysSentry/tasks/test_interval_exception.mod
+ }
+diff --git a/selftest/test/test_sentryctl_modname_long_length_exception.sh b/selftest/test/test_sentryctl_modname_long_length_exception.sh
+index c91af59..472459e 100644
+--- a/selftest/test/test_sentryctl_modname_long_length_exception.sh
++++ b/selftest/test/test_sentryctl_modname_long_length_exception.sh
+@@ -14,7 +14,8 @@ function pre_test() {
+     gcc test/sysSentry/test_task.c -o test/sysSentry/test_task
+     cp test/sysSentry/test_task /usr/bin
+ 
+-    syssentry &
++    systemctl start xalarmd.socket xalarmd.service
++    systemctl start sysSentry.socket sysSentry.service
+     sleep 1
+ }
+ 
+@@ -46,11 +47,10 @@ function do_test() {
+ }
+ 
+ function post_test() {
+-	while [[ -n "`ps aux|grep -w syssentry|grep -v grep`" ]]; do
+-		kill -9 `pgrep -w syssentry`
+-		kill -9 `pgrep -w test_task`
+-		sleep 1
+-	done
++    systemctl stop sysSentry.socket sysSentry.service
++    systemctl stop xalarmd.socket xalarmd.service
++    kill -9 `pgrep -w test_task`
++
+     cat /etc/sysSentry/tasks/"$result2.mod"
+     rm -rf ${tmp_log} test_task /usr/bin/test_task /etc/sysSentry/tasks/"$result2.mod"
+ }
+diff --git a/selftest/test/test_sentryctl_modname_valid.sh b/selftest/test/test_sentryctl_modname_valid.sh
+index 98239cf..69732d0 100644
+--- a/selftest/test/test_sentryctl_modname_valid.sh
++++ b/selftest/test/test_sentryctl_modname_valid.sh
+@@ -29,11 +29,9 @@ function do_test() {
+ }
+ 
+ function post_test() {
+-    while [[ -n "`ps aux|grep -w syssentry|grep -v grep`" ]]; do
+-        kill -9 `pgrep -w syssentry`
+-        kill -9 `pgrep -w test_task`
+-        sleep 1
+-    done
++    systemctl stop sysSentry.socket sysSentry.service
++    systemctl stop xalarmd.socket xalarmd.service
++    kill -9 `pgrep -w test_task`
+     rm -rf ${tmp_log}
+     rm -rf test/sysSentry/test_task /usr/bin/test_task
+     rm -rf /etc/sysSentry/tasks/this*.mod
+diff --git a/selftest/test/test_sentryctl_normal.sh b/selftest/test/test_sentryctl_normal.sh
+index 77d43ec..a4f00dd 100644
+--- a/selftest/test/test_sentryctl_normal.sh
++++ b/selftest/test/test_sentryctl_normal.sh
+@@ -39,11 +39,9 @@ function do_test() {
+ }
+ 
+ function post_test() {
+-    while [[ -n "`ps aux|grep -w syssentry|grep -v grep`" ]]; do
+-        kill -9 `pgrep -w syssentry`
+-        kill -9 `pgrep -w test_task`
+-        sleep 1
+-    done
++    systemctl stop sysSentry.socket sysSentry.service
++    systemctl stop xalarmd.socket xalarmd.service
++    kill -9 `pgrep -w test_task`
+     rm -rf ${tmp_log}
+     rm -rf test/sysSentry/test_task /usr/bin/test_task /etc/sysSentry/tasks/test_normal.mod
+ }
+diff --git a/selftest/test/test_sentryctl_reload.sh b/selftest/test/test_sentryctl_reload.sh
+index 85a5418..f66b92a 100644
+--- a/selftest/test/test_sentryctl_reload.sh
++++ b/selftest/test/test_sentryctl_reload.sh
+@@ -73,11 +73,9 @@ function do_test() {
+ }
+ 
+ function post_test() {
+-	while [[ -n "`ps aux|grep -w syssentry|grep -v grep`" ]]; do
+-		kill -9 `pgrep -w syssentry`
+-		kill -9 `pgrep -w test_task`
+-		sleep 1
+-	done
++	systemctl stop sysSentry.socket sysSentry.service
++    systemctl stop xalarmd.socket xalarmd.service
++    kill -9 `pgrep -w test_task`
+    rm -rf ${tmp_log} test/sysSentry/test_task /usr/bin/test_task /etc/sysSentry/tasks/test_sentryctl_reload.mod
+ }
+ set -x
+diff --git a/selftest/test/test_sentryctl_start_exception.sh b/selftest/test/test_sentryctl_start_exception.sh
+index b6611aa..0c0b8a8 100644
+--- a/selftest/test/test_sentryctl_start_exception.sh
++++ b/selftest/test/test_sentryctl_start_exception.sh
+@@ -28,11 +28,9 @@ function do_test() {
+ }
+ 
+ function post_test() {
+-    while [[ -n "`ps aux|grep -w syssentry|grep -v grep`" ]]; do
+-        kill -9 `pgrep -w syssentry`
+-        kill -9 `pgrep -w test_task`
+-        sleep 1
+-    done
++    systemctl stop sysSentry.socket sysSentry.service
++    systemctl stop xalarmd.socket xalarmd.service
++    kill -9 `pgrep -w test_task`
+    rm -rf ${tmp_log} test/sysSentry/test_task 
+    rm -rf /usr/bin/test_task /etc/sysSentry/tasks/test_start_exception.mod
+ }
+diff --git a/selftest/test/test_sentryctl_type_exception.sh b/selftest/test/test_sentryctl_type_exception.sh
+index df1ad4d..80ce7af 100644
+--- a/selftest/test/test_sentryctl_type_exception.sh
++++ b/selftest/test/test_sentryctl_type_exception.sh
+@@ -33,11 +33,10 @@ function do_test() {
+ }
+ 
+ function post_test() {
+-	while [[ -n "`ps aux|grep -w syssentry|grep -v grep`" ]]; do
+-		kill -9 `pgrep -w syssentry`
+-		kill -9 `pgrep -w test_task`
+-		sleep 1
+-	done
++    systemctl stop sysSentry.socket sysSentry.service
++    systemctl stop xalarmd.socket xalarmd.service
++    kill -9 `pgrep -w test_task`
++
+    rm -rf ${tmp_log} test/sysSentry/test_task /usr/bin/test_task /etc/sysSentry/tasks/test_type_exception.mod
+ }
+ set -x
+diff --git a/selftest/test/test_sentryctl_type_oneshot.sh b/selftest/test/test_sentryctl_type_oneshot.sh
+index 61b2937..a101c0d 100644
+--- a/selftest/test/test_sentryctl_type_oneshot.sh
++++ b/selftest/test/test_sentryctl_type_oneshot.sh
+@@ -61,11 +61,9 @@ function do_test() {
+ }
+ 
+ function post_test() {
+-	while [[ -n "`ps aux|grep -w syssentry|grep -v grep`" ]]; do
+-		kill -9 `pgrep -w syssentry`
+-		kill -9 `pgrep -w test_task`
+-		sleep 1
+-	done
++	systemctl stop sysSentry.socket sysSentry.service
++    systemctl stop xalarmd.socket xalarmd.service
++    kill -9 `pgrep -w test_task`
+    rm -rf ${tmp_log} test/sysSentry/test_task /usr/bin/test_task /etc/sysSentry/tasks/test_type_oneshot.mod
+ }
+ set -x
+diff --git a/selftest/test/test_sentryctl_type_period.sh b/selftest/test/test_sentryctl_type_period.sh
+index 16e9658..64794d8 100644
+--- a/selftest/test/test_sentryctl_type_period.sh
++++ b/selftest/test/test_sentryctl_type_period.sh
+@@ -66,11 +66,9 @@ function do_test() {
+ }
+ 
+ function post_test() {
+-	while [[ -n "`ps aux|grep -w syssentry|grep -v grep`" ]]; do
+-		kill -9 `pgrep -w syssentry`
+-		kill -9 `pgrep -w test_task`
+-		sleep 1
+-	done
++	systemctl stop sysSentry.socket sysSentry.service
++    systemctl stop xalarmd.socket xalarmd.service
++    kill -9 `pgrep -w test_task`
+    rm -rf ${tmp_log} test/sysSentry/test_task /usr/bin/test_task /etc/sysSentry/tasks/test_type_period.mod
+ }
+ set -x
+diff --git a/src/services/syssentry/heartbeat.py b/src/services/syssentry/heartbeat.py
+index 22d954d..0650b8a 100644
+--- a/src/services/syssentry/heartbeat.py
++++ b/src/services/syssentry/heartbeat.py
+@@ -135,39 +135,3 @@ def heartbeat_recv(heartbeat_socket: socket.socket):
+     logging.info("task %s heartbeat upgrade success, current time is %d", task.name, cur_timestamp)
+ 
+     client_socket.close()
+-
+-
+-def heartbeat_fd_create():
+-    """create heartbeat fd"""
+-    if not os.path.exists(SENTRY_RUN_DIR):
+-        logging.debug("%s not exist", SENTRY_RUN_DIR)
+-        return None
+-
+-    try:
+-        heartbeat_fd = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+-    except socket.error:
+-        logging.error("heartbeat fd create failed")
+-        return None
+-
+-    heartbeat_fd.setblocking(False)
+-    if os.path.exists(THB_SOCKET_PATH):
+-        os.remove(THB_SOCKET_PATH)
+-
+-    try:
+-        heartbeat_fd.bind(THB_SOCKET_PATH)
+-    except OSError:
+-        logging.error("heartbeat fd bind failed")
+-        heartbeat_fd.close()
+-        return None
+-
+-    os.chmod(THB_SOCKET_PATH, 0o600)
+-    try:
+-        heartbeat_fd.listen(5)
+-    except OSError:
+-        logging.error("heartbeat fd listen failed")
+-        heartbeat_fd.close()
+-        return None
+-
+-    logging.debug("%s bind and listen", THB_SOCKET_PATH)
+-
+-    return heartbeat_fd
+diff --git a/src/services/syssentry/syssentry.py b/src/services/syssentry/syssentry.py
+index 7cb85b8..ed04a16 100644
+--- a/src/services/syssentry/syssentry.py
++++ b/src/services/syssentry/syssentry.py
+@@ -26,7 +26,7 @@ import select
+ from .sentry_config import SentryConfig, get_log_level
+ 
+ from .task_map import TasksMap
+-from .global_values import SENTRY_RUN_DIR, CTL_SOCKET_PATH, SENTRY_RUN_DIR_PERM
++from .global_values import SENTRY_RUN_DIR, SENTRY_RUN_DIR_PERM
+ from .cron_process import period_tasks_handle
+ from .callbacks import (
+     mod_list_show,
+@@ -40,8 +40,7 @@ from .callbacks import (
+ from .mod_status import get_task_by_pid, set_runtime_status
+ from .mod_status import RUNNING_STATUS, EXITED_STATUS, NONZERO_EXITED_STATUS, FAILED_STATUS, WAITING_STATUS
+ from .load_mods import load_tasks, reload_single_mod
+-from .heartbeat import (heartbeat_timeout_chk, heartbeat_fd_create,
+-    heartbeat_recv, THB_SOCKET_PATH)
++from .heartbeat import (heartbeat_timeout_chk, heartbeat_recv)
+ from .result import RESULT_MSG_HEAD_LEN, RESULT_MSG_MAGIC_LEN, RESULT_MAGIC
+ from .result import RESULT_LEVEL_ERR_MSG_DICT, ResultLevel
+ from .utils import get_current_time_string
+@@ -107,6 +106,57 @@ BMC_SOCKET_PATH = "/var/run/sysSentry/bmc.sock"
+ 
+ fd_list = []
+ 
++
++def get_syssentry_systemd_sockets():
++    """Get file descriptors from systemd socket activation using LISTEN_FDS"""
++    # sysSentry socket fds
++    global server_fd
++    global server_result_fd
++    global heartbeat_fd
++    global cpu_alarm_fd
++    global bmc_fd
++
++    listen_pid = int(os.environ.get('LISTEN_PID', '0'))
++    listen_fds = int(os.environ.get('LISTEN_FDS', '0'))
++    # we have at least 5 sockets
++    if listen_pid != os.getpid() or listen_fds < 5:
++        logging.error("fd/pid verify failed, systemd socket activation maybe not available or invalid")
++        logging.error("Please ensure sysSentry.socket is enabled and started")
++        logging.error("Run: systemctl enable sysSentry.socket && systemctl start sysSentry.socket")
++        return -1
++    try:
++        # File descriptors start from 3 (SD_LISTEN_FDS_START)
++        for fd_offset in range(listen_fds):
++            fd = 3 + fd_offset
++            test_sock = socket.fromfd(fd, socket.AF_UNIX, socket.SOCK_STREAM)
++            sock_type_val = test_sock.getsockopt(1, 3)
++            test_sock.close()
++            if sock_type_val == socket.SOCK_STREAM:
++                stream_sock = socket.fromfd(fd, socket.AF_UNIX, socket.SOCK_STREAM)
++                stream_sock.setblocking(False)
++                if stream_sock.getsockname() == "/run/sysSentry/control.sock":
++                    server_fd = stream_sock
++                elif stream_sock.getsockname() == "/run/sysSentry/result.sock":
++                    server_result_fd = stream_sock
++                elif stream_sock.getsockname() == "/run/sysSentry/heartbeat.sock":
++                    heartbeat_fd = stream_sock
++                elif stream_sock.getsockname() == "/run/sysSentry/report.sock":
++                    cpu_alarm_fd = stream_sock
++                elif stream_sock.getsockname() == "/run/sysSentry/bmc.sock":
++                    bmc_fd = stream_sock
++                else:
++                    logging.error("Found Unknown STREAM socket at FD %d (%s)", fd, stream_sock.getsockname())
++                    return -1
++                logging.info("Found STREAM socket at FD %d (%s)", fd, stream_sock.getsockname())
++            else:
++                logging.error("Unknown socket type %d at FD %d", sock_type_val, fd)
++                return -1
++    except (ValueError, AttributeError) as e:
++        logging.warning("Failed to parse LISTEN_FDS: %s", str(e))
++        return -1
++    return 0
++
++
+ def msg_data_process(msg_data):
+     """message data process"""
+     logging.debug("msg_data %s", msg_data)
+@@ -293,100 +343,6 @@ def server_recv(server_socket: socket.socket):
+     return
+ 
+ 
+-def server_fd_create():
+-    """create server fd"""
+-    if not os.path.exists(SENTRY_RUN_DIR):
+-        logging.error("%s not exist, failed", SENTRY_RUN_DIR)
+-        return None
+-
+-    try:
+-        server_fd = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+-        server_fd.setblocking(False)
+-        if os.path.exists(CTL_SOCKET_PATH):
+-            os.remove(CTL_SOCKET_PATH)
+-
+-        server_fd.bind(CTL_SOCKET_PATH)
+-        os.chmod(CTL_SOCKET_PATH, 0o600)
+-        server_fd.listen(CTL_LISTEN_QUEUE_LEN)
+-        logging.debug("%s bind and listen", CTL_SOCKET_PATH)
+-    except socket.error:
+-        logging.error("server fd create failed")
+-        server_fd = None
+-
+-    return server_fd
+-
+-
+-def cpu_alarm_fd_create():
+-    """create heartbeat fd"""
+-    if not os.path.exists(SENTRY_RUN_DIR):
+-        logging.debug("%s not exist", SENTRY_RUN_DIR)
+-        return None
+-
+-    try:
+-        cpu_alarm_fd = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+-    except socket.error:
+-        logging.error("cpu alarm fd create failed")
+-        return None
+-
+-    cpu_alarm_fd.setblocking(False)
+-    if os.path.exists(CPU_ALARM_SOCKET_PATH):
+-        os.remove(CPU_ALARM_SOCKET_PATH)
+-
+-    try:
+-        cpu_alarm_fd.bind(CPU_ALARM_SOCKET_PATH)
+-    except OSError:
+-        logging.error("cpu alarm fd bind failed")
+-        cpu_alarm_fd.close()
+-        return None
+-
+-    os.chmod(CPU_ALARM_SOCKET_PATH, 0o600)
+-    try:
+-        cpu_alarm_fd.listen(5)
+-    except OSError:
+-        logging.error("cpu alarm fd listen failed")
+-        cpu_alarm_fd.close()
+-        return None
+-
+-    logging.debug("%s bind and listen", CPU_ALARM_SOCKET_PATH)
+-
+-    return cpu_alarm_fd
+-
+-def bmc_fd_create():
+-    """create bmc fd"""
+-    if not os.path.exists(SENTRY_RUN_DIR):
+-        logging.debug("%s not exist", SENTRY_RUN_DIR)
+-        return None
+-
+-    try:
+-        bmc_fd = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+-    except socket.error:
+-        logging.error("bmc fd create failed")
+-        return None
+-
+-    bmc_fd.setblocking(False)
+-    if os.path.exists(BMC_SOCKET_PATH):
+-        os.remove(BMC_SOCKET_PATH)
+-
+-    try:
+-        bmc_fd.bind(BMC_SOCKET_PATH)
+-    except OSError:
+-        logging.error("bmc fd bind failed")
+-        bmc_fd.close()
+-        return None
+-
+-    os.chmod(BMC_SOCKET_PATH, 0o600)
+-    try:
+-        bmc_fd.listen(5)
+-    except OSError:
+-        logging.error("bmc fd listen failed")
+-        bmc_fd.close()
+-        return None
+-
+-    logging.debug("%s bind and listen", BMC_SOCKET_PATH)
+-
+-    return bmc_fd
+-
+-
+ def server_result_recv(server_socket: socket.socket):
+     """server result receive"""
+     try:
+@@ -437,28 +393,6 @@ def server_result_recv(server_socket: socket.socket):
+     return
+ 
+ 
+-def server_result_fd_create():
+-    """create server result fd"""
+-    if not os.path.exists(SENTRY_RUN_DIR):
+-        logging.error("%s not exist, failed", SENTRY_RUN_DIR)
+-        return None
+-    try:
+-        server_result_fd = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+-        server_result_fd.setblocking(False)
+-        if os.path.exists(RESULT_SOCKET_PATH):
+-            os.remove(RESULT_SOCKET_PATH)
+-
+-        server_result_fd.bind(RESULT_SOCKET_PATH)
+-        os.chmod(RESULT_SOCKET_PATH, 0o600)
+-        server_result_fd.listen(CTL_LISTEN_QUEUE_LEN)
+-        logging.debug("%s bind and listen", RESULT_SOCKET_PATH)
+-    except socket.error:
+-        logging.error("server result fd create failed")
+-        server_result_fd = None
+-
+-    return server_result_fd
+-
+-
+ def close_all_fd():
+     for fd in fd_list:
+         fd.close()
+@@ -467,34 +401,16 @@ def close_all_fd():
+ def main_loop():
+     """main loop"""
+ 
+-    server_fd = server_fd_create()
+-    if not server_fd:
+-        close_all_fd()
++    # get sockets
++    ret = get_syssentry_systemd_sockets()
++    if ret != 0:
++        logging.error("get sysSentry sockets failed")
+         return
+-    fd_list.append(server_fd)
+ 
+-    server_result_fd = server_result_fd_create()
+-    if not server_result_fd:
+-        close_all_fd()
+-        return
++    fd_list.append(server_fd)
+     fd_list.append(server_result_fd)
+-
+-    heartbeat_fd = heartbeat_fd_create()
+-    if not heartbeat_fd:
+-        close_all_fd()
+-        return
+     fd_list.append(heartbeat_fd)
+-
+-    cpu_alarm_fd = cpu_alarm_fd_create()
+-    if not cpu_alarm_fd:
+-        close_all_fd()
+-        return
+     fd_list.append(cpu_alarm_fd)
+-
+-    bmc_fd = bmc_fd_create()
+-    if not bmc_fd:
+-        close_all_fd()
+-        return
+     fd_list.append(bmc_fd)
+ 
+     epoll_fd = select.epoll()
+@@ -552,20 +468,6 @@ def release_pidfile():
+         logging.error("Failed to release PID file lock")
+ 
+ 
+-def remove_sock_file():
+-    """remove sock file
+-    """
+-    for socket_path in (THB_SOCKET_PATH, CTL_SOCKET_PATH, CPU_ALARM_SOCKET_PATH, RESULT_SOCKET_PATH, BMC_SOCKET_PATH):
+-        try:
+-            os.unlink(socket_path)
+-        except FileNotFoundError:
+-            pass
+-    try:
+-        os.rmdir(SENTRY_RUN_DIR)
+-    except Exception:
+-        pass
+-
+-
+ def sigchld_handler(signum, _f):
+     """child sig handler
+     """
+@@ -685,4 +587,3 @@ def main():
+             xalarm_unregister(client_id)
+         clean_child()
+         release_pidfile()
+-        remove_sock_file()
+-- 
+2.27.0
+

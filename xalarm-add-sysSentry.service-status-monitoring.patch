@@ -1,0 +1,215 @@
+From 9bc1e77c0fa223cd7b512d1783901a97cea69852 Mon Sep 17 00:00:00 2001
+From: luckky <guodashun1@huawei.com>
+Date: Mon, 9 Mar 2026 11:40:00 +0800
+Subject: [PATCH] xalarm: add sysSentry.service status monitoring
+
+---
+ src/libs/libxalarm/register_xalarm.c   |  5 +++
+ src/libs/libxalarm/register_xalarm.h   |  9 +++--
+ src/services/xalarm/xalarm_server.py   | 56 +++++++++++++++++++++++---
+ src/services/xalarm/xalarm_transfer.py | 35 +++++++++++++++-
+ 4 files changed, 95 insertions(+), 10 deletions(-)
+
+diff --git a/src/libs/libxalarm/register_xalarm.c b/src/libs/libxalarm/register_xalarm.c
+index 7b3c173..0aa8cd0 100644
+--- a/src/libs/libxalarm/register_xalarm.c
++++ b/src/libs/libxalarm/register_xalarm.c
+@@ -739,6 +739,11 @@ int xalarm_get_event(struct alarm_msg* msg, struct alarm_register *register_info
+         // alarm_info for communication and return alarm_msg(alarm_msg is subset of
+         // alarm_info).
+         if (recvlen == (int)sizeof(struct alarm_info)) {
++            // check if this is sysSentry down notification
++            if (info.usAlarmId == SYSSENTRY_DOWN_ALARM_ID) {
++                close(register_info->register_fd);
++                return -EBADF;
++            }
+             // filter alarm id, alarm id reciecved which is not registered by this program
+             // will be ignored and continue to wait for next msg
+             if (info.usAlarmId < MIN_ALARM_ID || info.usAlarmId > MAX_ALARM_ID || 
+diff --git a/src/libs/libxalarm/register_xalarm.h b/src/libs/libxalarm/register_xalarm.h
+index 1e2818d..da80467 100644
+--- a/src/libs/libxalarm/register_xalarm.h
++++ b/src/libs/libxalarm/register_xalarm.h
+@@ -16,10 +16,10 @@
+ #define MAX_ALARM_TYEPS 1024
+ #define MIN_ALARM_ID 1001
+ #define BYTE_TO_BITS 8
+-
+-#define MEMORY_ALARM_ID 1001
+-
+-#define ALARM_REBOOT_EVENT 1003
++
++#define MEMORY_ALARM_ID 1001
++
++#define ALARM_REBOOT_EVENT 1003
+ #define ALARM_REBOOT_ACK_EVENT 1004
+ #define ALARM_OOM_EVENT 1005
+ #define ALARM_OOM_ACK_EVENT 1006
+@@ -28,6 +28,7 @@
+ #define ALARM_KERNEL_REBOOT_EVENT 1009
+ #define ALARM_KERNEL_REBOOT_ACK_EVENT 1010
+ #define ALARM_UBUS_MEM_EVENT 1013
++#define SYSSENTRY_DOWN_ALARM_ID 1128
+ 
+ #define MINOR_ALM 1
+ #define MAJOR_ALM 2
+diff --git a/src/services/xalarm/xalarm_server.py b/src/services/xalarm/xalarm_server.py
+index d31cd03..429dc32 100644
+--- a/src/services/xalarm/xalarm_server.py
++++ b/src/services/xalarm/xalarm_server.py
+@@ -27,7 +27,8 @@ from .xalarm_transfer import (
+     check_filter,
+     transmit_alarm,
+     wait_for_connection,
+-    cleanup_closed_connections
++    cleanup_closed_connections,
++    broadcast_sentry_down
+ )
+ 
+ 
+@@ -52,7 +53,7 @@ def check_permission(path, permission):
+ def check_socket_file(path):
+     if not os.path.exists(path):
+         return False
+-    
++
+     file_stat = os.stat(path)
+     # path is not a socket file
+     if not stat.S_ISSOCK(file_stat.st_mode):
+@@ -130,6 +131,47 @@ def period_task_to_cleanup_connections():
+             continue
+         cleanup_closed_connections(alarm_sock, alarm_epoll, fd_to_socket, fd_to_socket_lock)
+ 
++def monitor_sentry_service():
++    """
++    Monitor sysSentry service status via systemd D-Bus
++    When sysSentry service becomes inactive or failed, broadcast alarm to all clients
++    """
++    global fd_to_socket
++    global fd_to_socket_lock
++
++    try:
++        import dbus
++        from gi.repository import GLib
++        from dbus.mainloop.glib import DBusGMainLoop
++    except ImportError as e:
++        logging.error("Failed to import dbus or GLib: %s, systemd monitoring disabled", str(e))
++        return
++
++    try:
++        DBusGMainLoop(set_as_default=True)
++        bus = dbus.SystemBus()
++        systemd = bus.get_object('org.freedesktop.systemd1',
++                                '/org/freedesktop/systemd1/unit/sysSentry_2eservice')
++
++        def on_properties_changed(interface, changed, invalidated):
++            if 'ActiveState' in changed:
++                state = changed['ActiveState']
++                logging.info("sysSentry service state changed to: %s", state)
++                if state in ['inactive', 'failed']:
++                    logging.warning("sysSentry service is down, broadcasting alarm to all clients")
++                    broadcast_sentry_down(alarm_sock, fd_to_socket, fd_to_socket_lock)
++
++        systemd.connect_to_signal(dbus_interface='org.freedesktop.DBus.Properties',
++                                  signal_name='PropertiesChanged',
++                                  handler_function=on_properties_changed)
++
++        logging.info("sysSentry service monitoring started")
++        loop = GLib.MainLoop()
++        loop.run()
++    except Exception as e:
++        logging.error("Failed to monitor sysSentry service: %s", str(e))
++
++
+ def watch_socket_file_and_dir():
+     global conn_thread
+     global alarm_epoll
+@@ -146,7 +188,7 @@ def watch_socket_file_and_dir():
+                 logging.info("socket file %s not found or socket file been replaced, recovering ...", SOCK_FILE)
+                 clear_sock_conn(report_sock, report_epoll)
+                 clear_sock_file(SOCK_FILE)
+-                # if create socket failed, will retry to create because socket file was cleared in last step
++                # if create socket socket, will retry to create because socket file was cleared in last step
+                 report_sock, report_epoll = create_sock_conn(SOCK_FILE, socket.SOCK_DGRAM)
+             
+             if not check_socket_file(USER_RECV_SOCK):
+@@ -181,10 +223,10 @@ def watch_socket_file_and_dir():
+                 )
+         except Exception as e:
+             logging.error("Error watch socket file thread: %s", str(e))
+-    
++
+         sleep(PERIOD_CHECK_TIME)
+ 
+-    
++
+ def start_wait_for_conn_thread(alarm_sock_, alarm_epoll_,
+         fd_to_socket_, conn_thread_should_stop_, fd_to_socket_lock_):
+     conn_thread = threading.Thread(
+@@ -237,6 +279,10 @@ def server_loop(alarm_config):
+     watch_thread.daemon = True
+     watch_thread.start()
+ 
++    systemd_monitor_thread = threading.Thread(target=monitor_sentry_service)
++    systemd_monitor_thread.daemon = True
++    systemd_monitor_thread.start()
++
+     while True:
+         try:
+             # set timeout as 1 seconds to avoid main process blocked by recvfrom
+diff --git a/src/services/xalarm/xalarm_transfer.py b/src/services/xalarm/xalarm_transfer.py
+index d52a61f..69e27b7 100644
+--- a/src/services/xalarm/xalarm_transfer.py
++++ b/src/services/xalarm/xalarm_transfer.py
+@@ -102,6 +102,39 @@ def wait_for_connection(server_sock, epoll, fd_to_socket, conn_thread_should_sto
+             logging.debug(f"wait for connection failed {e}")
+ 
+ 
++def broadcast_sentry_down(server_socket, fd_to_socket, fd_to_socket_lock):
++    """
++    broadcast sysSentry down alarm to all clients
++    :param server_socket: xalarmd service socket
++    :param fd_to_socket: dict instance, used to hold client connections and server connections
++    :param fd_to_socket_lock: lock instance for fd_to_socket
++    """
++    from .xalarm_api import Xalarm, alarm_stu2bin
++
++    to_remove = []
++
++    alarm_info = Xalarm(1128, 1, 1, 0, 0, "sysSentry service is down")
++    bin_data = alarm_stu2bin(alarm_info)
++
++    with fd_to_socket_lock:
++        for fileno, connection in fd_to_socket.items():
++            try:
++                if connection is server_socket:
++                    continue
++                connection.sendall(bin_data)
++                logging.info("Broadcast sysSentry down msg success, fd is %d", fileno)
++            except (BrokenPipeError, ConnectionResetError):
++                to_remove.append(fileno)
++            except Exception as e:
++                logging.info("Broadcast sysSentry down msg failed, fd is %d, reason is: %s",
++                    fileno, str(e))
++
++        for fileno in to_remove:
++            fd_to_socket[fileno].close()
++            del fd_to_socket[fileno]
++            logging.info(f"cleaned up connection {fileno} for client lost connection.")
++
++
+ def transmit_alarm(server_sock, epoll, fd_to_socket, bin_data, alarm_str, fd_to_socket_lock):
+     """
+     this function is to broadcast alarm data to client, if fail to send data, remove connections held by fd_to_socket
+@@ -140,7 +173,7 @@ def transmit_alarm(server_sock, epoll, fd_to_socket, bin_data, alarm_str, fd_to_
+                 except Exception as e:
+                     sleep(0.1)
+                     logging.info("Sending msg failed for %d times, fd is %d, alarm msg is %s, reason is: %s",
+-                            i, connection.fileno(), alarm_str, str(e))
++                        i, connection.fileno(), alarm_str, str(e))
+ 
+         for fileno in to_remove:
+             fd_to_socket[fileno].close()
+-- 
+2.27.0
+
