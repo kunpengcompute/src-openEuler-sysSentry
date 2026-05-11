@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 38
+Release: 39
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -129,6 +129,9 @@ Patch104:  fix-error-log-for-task-stop-function.patch
 # PR-316
 Patch105:  feat-xalarm-add-event-registration-and-switch-manage.patch
 Patch106:  compile-cpu_sentry-plugin.patch
+# PR-328
+Patch107:  change-os-name-in-service-desc.patch
+Patch108:  delete-sensitive-information-content.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -402,6 +405,13 @@ This package provides soc_ring_sentry for the sysSentry.
 %attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Mon May 11 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-39
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:change os name in service desc
+       delete sensitive information content
+
 * Thu Apr 30 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-38
 - Type:bugfix
 - CVE:NA
