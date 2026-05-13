@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 39
+Release: 40
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -132,6 +132,8 @@ Patch106:  compile-cpu_sentry-plugin.patch
 # PR-328
 Patch107:  change-os-name-in-service-desc.patch
 Patch108:  delete-sensitive-information-content.patch
+# PR-332
+Patch109:  fix-build-warning-for-catlib.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -405,6 +407,12 @@ This package provides soc_ring_sentry for the sysSentry.
 %attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Wed May 13 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-40
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix build warning for catlib
+
 * Mon May 11 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-39
 - Type:bugfix
 - CVE:NA
