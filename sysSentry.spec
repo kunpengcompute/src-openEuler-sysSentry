@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 42
+Release: 43
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -138,6 +138,9 @@ Patch109:  fix-build-warning-for-catlib.patch
 Patch110:  fix-keep-critical-events-enabled-during-service-shut.patch
 # PR-336
 Patch111:  xalarm-auto-load-driver-when-proc-not-found.patch
+# PR-337
+Patch112:  fix-xalarm-fix-service-stop-timeout-and-PID-lock-rel.patch
+Patch113:  fix-xalarm-add-graceful-shutdown-for-GLib-main-loop-.patch 
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -411,6 +414,12 @@ This package provides soc_ring_sentry for the sysSentry.
 %attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Fri May 22 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-43
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix(xalarm): fix service stop timeout and PID lock release issues
+
 * Wed May 20 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-42
 - Type:bugfix
 - CVE:NA
