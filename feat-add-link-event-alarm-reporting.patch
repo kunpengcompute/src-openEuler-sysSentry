@@ -1,0 +1,203 @@
+From d143fa8ebb1ee427e27706c81af9709483a42742 Mon Sep 17 00:00:00 2001
+From: Deng Guangxing <dengguangxing@huawei.com>
+Date: Sat, 16 May 2026 15:09:46 +0800
+Subject: [PATCH] feat: add link event alarm reporting
+
+Add ALARM_LINK_EVENT (1016) to xalarm ID registry. Implement
+convert_link_event_smh_msg_to_str() for message serialization
+and add SMH_MESSAGE_LINK_EVENT dispatch in both convert and
+alarm type mapping. Add link_event parameter support in callbacks.py.
+Fix msgid log format from %u to %lu.
+
+issue: https://atomgit.com/openeuler/kernel/issues/9124
+
+Signed-off-by: Deng Guangxing <dengguangxing@huawei.com>
+Signed-off-by: shixuantong <shixuantong1@huawei.com>
+---
+ src/libs/libxalarm/register_xalarm.c          | 12 +++++++++-
+ src/libs/libxalarm/register_xalarm.h          |  1 +
+ .../sentry_msg_monitor/sentry_msg_monitor.c   | 22 ++++++++++++++++++-
+ .../sentry_msg_monitor/smh_common_type.h      |  8 +++++++
+ src/services/syssentry/callbacks.py           |  2 ++
+ src/services/xalarm/xalarm_events.py          | 16 +++++++++++---
+ 6 files changed, 56 insertions(+), 5 deletions(-)
+
+diff --git a/src/libs/libxalarm/register_xalarm.c b/src/libs/libxalarm/register_xalarm.c
+index ba96bf4..efcc992 100644
+--- a/src/libs/libxalarm/register_xalarm.c
++++ b/src/libs/libxalarm/register_xalarm.c
+@@ -221,6 +221,8 @@ bool xalarm_Upgrade(struct alarm_subscription_info id_filter, int client_id)
+     return true;
+ }
+ 
++static int send_event_registration(int fd, struct alarm_subscription_info id_filter);
++
+ int xalarm_Register(alarm_callback_func callback, struct alarm_subscription_info id_filter)
+ {
+     if (g_register_info.is_registered || (g_register_info.register_fd != -1) ||
+@@ -240,6 +242,13 @@ int xalarm_Register(alarm_callback_func callback, struct alarm_subscription_info
+         return -1;
+     }
+ 
++    if (send_event_registration(g_register_info.register_fd, id_filter) < 0) {
++        printf("%s: send_event_registration failed\n", __func__);
++        (void)close(g_register_info.register_fd);
++        g_register_info.register_fd = -1;
++        return -1;
++    }
++
+     g_register_info.thread_should_stop = 0;
+     g_register_info.register_tid = create_thread();
+     if (g_register_info.register_tid == ULONG_MAX) {
+@@ -691,7 +700,8 @@ static int send_event_message(int fd, struct alarm_subscription_info id_filter,
+                 id_filter.id_list[i] == ALARM_OOM_EVENT ||
+                 id_filter.id_list[i] == ALARM_PANIC_EVENT ||
+                 id_filter.id_list[i] == ALARM_KERNEL_REBOOT_EVENT ||
+-                id_filter.id_list[i] == ALARM_UBUS_MEM_EVENT) {
++                id_filter.id_list[i] == ALARM_UBUS_MEM_EVENT ||
++                id_filter.id_list[i] == ALARM_LINK_EVENT) {
+             json_object_array_add(ids_array, json_object_new_int(id_filter.id_list[i]));
+         }
+     }
+diff --git a/src/libs/libxalarm/register_xalarm.h b/src/libs/libxalarm/register_xalarm.h
+index 4112e7a..e34c0e6 100644
+--- a/src/libs/libxalarm/register_xalarm.h
++++ b/src/libs/libxalarm/register_xalarm.h
+@@ -29,6 +29,7 @@
+ #define ALARM_KERNEL_REBOOT_ACK_EVENT 1010
+ #define ALARM_UBUS_MEM_EVENT 1013
+ #define ALARM_RAS_SENTRY_EVENT 1015
++#define ALARM_LINK_EVENT 1016
+ #define SYSSENTRY_DOWN_ALARM_ID 1128
+ 
+ #define MINOR_ALM 1
+diff --git a/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c b/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
+index 7b68c38..fc1a05a 100644
+--- a/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
++++ b/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
+@@ -290,6 +290,20 @@ static int convert_ub_mem_err_smh_msg_to_str(struct sentry_msg_helper_msg* smh_m
+     return 0;
+ }
+ 
++static int convert_link_event_smh_msg_to_str(const struct sentry_msg_helper_msg* smh_msg, char* str)
++{
++    int res = snprintf(str, MSG_STR_MAX_LEN, "%lu_{port_id:%u,scna:%u,event:%s}",
++                       smh_msg->msgid,
++                       smh_msg->helper_msg_info.link_info.port_id,
++                       smh_msg->helper_msg_info.link_info.scna,
++                       smh_msg->helper_msg_info.link_info.link_event ? "up" : "down");
++    if ((size_t)res >= MSG_STR_MAX_LEN) {
++        logging_warn("link event msg str size exceeds the max value\n");
++        return -1;
++    }
++    return 0;
++}
++
+ static int convert_smh_msg_to_str(struct sentry_msg_helper_msg* smh_msg, char* str)
+ {
+     int res;
+@@ -307,6 +321,9 @@ static int convert_smh_msg_to_str(struct sentry_msg_helper_msg* smh_msg, char* s
+         case SMH_MESSAGE_UB_MEM_ERR:
+             res = convert_ub_mem_err_smh_msg_to_str(smh_msg, str);
+             break;
++        case SMH_MESSAGE_LINK_EVENT:
++            res = convert_link_event_smh_msg_to_str(smh_msg, str);
++            break;
+         default:
+             logging_warn("Unknown msg type: %d\n", smh_msg->type);
+             return -1;
+@@ -367,6 +384,9 @@ static unsigned short convert_msg_type_to_xalarm_type(enum sentry_msg_helper_msg
+         case SMH_MESSAGE_UB_MEM_ERR:
+             xalarm_type = ALARM_UBUS_MEM_EVENT;
+             break;
++        case SMH_MESSAGE_LINK_EVENT:
++            xalarm_type = ALARM_LINK_EVENT;
++            break;
+         default:
+             logging_warn("Unknown msg type: %d\n", msg_type);
+             break;
+@@ -435,7 +455,7 @@ static void* sender_thread(void* arg)
+         if (ret < 0) {
+             continue;
+         }
+-        logging_info("convert_smh_msg_to_str success, msgid is %u\n", smh_msg.msgid);
++        logging_info("convert_smh_msg_to_str success, msgid is %lu\n", smh_msg.msgid);
+ 
+         unsigned short alarm_type = convert_msg_type_to_xalarm_type(smh_msg.type);
+         if (alarm_type == 0) {
+diff --git a/src/sentryPlugins/sentry_msg_monitor/smh_common_type.h b/src/sentryPlugins/sentry_msg_monitor/smh_common_type.h
+index 31cd352..27fa186 100644
+--- a/src/sentryPlugins/sentry_msg_monitor/smh_common_type.h
++++ b/src/sentryPlugins/sentry_msg_monitor/smh_common_type.h
+@@ -69,6 +69,9 @@ enum sentry_msg_helper_msg_type {
+     SMH_MESSAGE_UB_MEM_ERR,
+     SMH_MESSAGE_PANIC_ACK,
+     SMH_MESSAGE_KERNEL_REBOOT_ACK,
++    SMH_MESSAGE_HEARTBEAT,
++    SMH_MESSAGE_HEARTBEAT_ACK,
++    SMH_MESSAGE_LINK_EVENT,
+     SMH_MESSAGE_UNKNOWN,
+ };
+ 
+@@ -96,6 +99,11 @@ struct sentry_msg_helper_msg {
+             int fault_with_kill;
+             enum ras_err_type raw_ubus_mem_err_type;
+         } ub_mem_info;
++        struct {
++            uint16_t port_id;
++            unsigned int scna;
++            int link_event;
++        } link_info;
+     } helper_msg_info;
+     unsigned long res;
+ };
+diff --git a/src/services/syssentry/callbacks.py b/src/services/syssentry/callbacks.py
+index c916d62..537868d 100644
+--- a/src/services/syssentry/callbacks.py
++++ b/src/services/syssentry/callbacks.py
+@@ -191,6 +191,8 @@ def task_set(set_data):
+                 ret_code |= set_sentry_reporter_proc("power_off", set_data['power_off'])
+             if set_data.get('oom') is not None:
+                 ret_code |= set_sentry_reporter_proc("oom", set_data['oom'])
++            if set_data.get('link_event') is not None:
++                ret_code |= set_sentry_reporter_proc("link_event", set_data['link_event'])
+             if set_data.get('oom_policy') is not None:
+                 try:
+                     policy_dict = json.loads(set_data['oom_policy'])
+diff --git a/src/services/xalarm/xalarm_events.py b/src/services/xalarm/xalarm_events.py
+index 7c76a3f..17f62f3 100644
+--- a/src/services/xalarm/xalarm_events.py
++++ b/src/services/xalarm/xalarm_events.py
+@@ -43,8 +43,17 @@ ALARM_OOM_EVENT = 1005
+ ALARM_PANIC_EVENT = 1007
+ ALARM_KERNEL_REBOOT_EVENT = 1009
+ ALARM_UBUS_MEM_EVENT = 1013
+-SENTRY_REPORTER_MODULE_EVENT_ID_LIST = [ALARM_REBOOT_EVENT, ALARM_OOM_EVENT, ALARM_UBUS_MEM_EVENT]
+-SENTRY_REMOTE_REPORTER_MODULE_EVENT_ID_LIST = [ALARM_PANIC_EVENT, ALARM_KERNEL_REBOOT_EVENT]
++ALARM_LINK_EVENT = 1016
++SENTRY_REPORTER_MODULE_EVENT_ID_LIST = [
++    ALARM_REBOOT_EVENT,
++    ALARM_OOM_EVENT,
++    ALARM_UBUS_MEM_EVENT,
++    ALARM_LINK_EVENT,
++]
++SENTRY_REMOTE_REPORTER_MODULE_EVENT_ID_LIST = [
++    ALARM_PANIC_EVENT,
++    ALARM_KERNEL_REBOOT_EVENT,
++]
+ 
+ # Critical events that should never be disabled if it has already been enabled, even
+ # when no clients are subscribed. These events are essential for recording system anomalies.
+@@ -55,7 +64,8 @@ EVENT_PROC_NAME_DICT = {
+     ALARM_OOM_EVENT : "oom",
+     ALARM_PANIC_EVENT : "panic",
+     ALARM_KERNEL_REBOOT_EVENT : "kernel_reboot",
+-    ALARM_UBUS_MEM_EVENT : "ub_mem_fault"
++    ALARM_UBUS_MEM_EVENT : "ub_mem_fault",
++    ALARM_LINK_EVENT : "link_event",
+ }
+ 
+ 
+-- 
+2.43.0
+
