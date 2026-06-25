@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 45
+Release: 46
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -143,6 +143,7 @@ Patch112:  fix-xalarm-fix-service-stop-timeout-and-PID-lock-rel.patch
 Patch113:  fix-xalarm-add-graceful-shutdown-for-GLib-main-loop-.patch 
 Patch114:  update-bmc_ras_sentry-plugin.patch
 Patch115:  fix-sysSentry-service-restart-issues-PID-lock-releas.patch
+Patch116:  feat-add-link-event-alarm-reporting.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -416,6 +417,12 @@ This package provides soc_ring_sentry for the sysSentry.
 %attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Thu Jun 25 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-46
+- Type:feature
+- CVE:NA
+- SUG:NA
+- DESC:feat: add link event alarm reporting
+
 * Thu Jun 04 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-45
 - Type:bugfix
 - CVE:NA
