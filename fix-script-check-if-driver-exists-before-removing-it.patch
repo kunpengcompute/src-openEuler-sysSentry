@@ -1,0 +1,34 @@
+From 674e8bb92cea90c00d276b977fd6171a553e52a8 Mon Sep 17 00:00:00 2001
+From: tong_1001 <sxt1001@qq.com>
+Date: Sat, 27 Jun 2026 14:17:05 +0800
+Subject: [PATCH 2/6] fix(script): check if driver exists before removing it
+
+---
+ config/task_scripts/sentry_msg_monitor.sh | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/config/task_scripts/sentry_msg_monitor.sh b/config/task_scripts/sentry_msg_monitor.sh
+index 513e63f3d74f..6782327831f4 100644
+--- a/config/task_scripts/sentry_msg_monitor.sh
++++ b/config/task_scripts/sentry_msg_monitor.sh
+@@ -5,9 +5,13 @@ if [ "$(systemctl is-system-running)" = "stopping" ]; then
+ else
+     echo "[sentry] Manual stop, unloading driver"
+     /sbin/rmmod sentry_remote_reporter
+-    /sbin/rmmod sentry_uvb_comm
+-    /sbin/rmmod sentry_urma_comm
++    if lsmod | grep -q "^sentry_uvb_comm"; then
++	    /sbin/rmmod sentry_uvb_comm
++    fi
++    if lsmod | grep -q "^sentry_urma_comm"; then
++	    /sbin/rmmod sentry_urma_comm
++    fi
+     /sbin/rmmod sentry_reporter
+     /sbin/rmmod sentry_msg_helper
+     echo "[sentry] unload sentry kmod success"
+-fi
+\ No newline at end of file
++fi
+-- 
+2.43.0
+

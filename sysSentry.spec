@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 47
+Release: 48
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -146,6 +146,13 @@ Patch115:  fix-sysSentry-service-restart-issues-PID-lock-releas.patch
 Patch116:  feat-add-link-event-alarm-reporting.patch
 Patch117:  fix-event-switch-invalidation-after-sysSentry-servic.patch
 Patch118:  verify-event-switch-state-by-reading-proc-file-befor.patch
+Patch119:  feat-sentry_msg_monitor-add-kernel-driver-version-co.patch
+Patch120:  fix-script-check-if-driver-exists-before-removing-it.patch
+Patch121:  cleanup-uninstall-log_utils.h-file.patch
+Patch122:  fix-PYNAME-define.patch
+Patch123:  fix-security-build-options-bug-for-ebpf_collector.patch
+Patch124:  Fix-the-issue-of-missing-security-compilation-option.patch
+Patch125:  fix-bmc_ras_sentry-compile-failed-on-old-gcc.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -343,7 +350,6 @@ This package provides soc_ring_sentry for the sysSentry.
 %attr(-,root,root) %{_unitdir}/sentryCollector.service
 %attr(-,root,root) %{_libdir}/libsentry_log.so
 
-%exclude %{_includedir}/libsentry/log_utils.h
 %exclude %{_sysconfdir}/sysSentry/tasks/hbm_online_repair.mod
 %exclude %{python3_sitelib}/syssentry/bmc_*
 %exclude %{python3_sitelib}/syssentry/*/bmc_*
@@ -419,6 +425,17 @@ This package provides soc_ring_sentry for the sysSentry.
 %attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Thu Jul 09 2026 shixuantong <sxt1001@qq.com> - 1.0.3-48
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix PYNAME define
+       cleanup: uninstall log_utils.h file
+       Fix the issue of missing security compilation options
+       fix bmc_ras_sentry compile failed on old gcc
+       fix(script): check if driver exists before removing it
+       feat(sentry_msg_monitor): add kernel-driver version compatibility check on startup 
+
 * Fri Jun 26 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-47
 - Type:bugfix
 - CVE:NA
