@@ -1,0 +1,49 @@
+From 63b3b424cee48565ed2278757c03e17f3e83ae4e Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Thu, 6 Nov 2025 10:23:19 +0800
+Subject: [PATCH 02/16] fix error code for socket failed
+
+---
+ src/libs/libxalarm/register_xalarm.c                      | 5 +++--
+ src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c | 2 +-
+ 2 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/src/libs/libxalarm/register_xalarm.c b/src/libs/libxalarm/register_xalarm.c
+index 4204fce..d689d0a 100644
+--- a/src/libs/libxalarm/register_xalarm.c
++++ b/src/libs/libxalarm/register_xalarm.c
+@@ -363,7 +363,7 @@ int xalarm_Report(unsigned short usAlarmId, unsigned char ucAlarmLevel,
+     fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+     if (fd < 0) {
+         fprintf(stderr, "%s socket create error: %s\n", __func__, strerror(errno));
+-        return -1;
++        return -ENODEV;
+     }
+ 
+     ret = init_report_addr(&alarm_addr, PATH_REPORT_ALARM);
+@@ -779,7 +779,8 @@ int xalarm_report_event(unsigned short usAlarmId, char *pucParas)
+ 
+     fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+     if (fd < 0) {
+-        return -ENOTCONN;
++        fprintf(stderr, "%s socket create error: %s\n", __func__, strerror(errno));
++        return -ENODEV;
+     }
+ 
+     ret = init_report_addr(&alarm_addr, PATH_REPORT_ALARM);
+diff --git a/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c b/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
+index e62c936..efab827 100644
+--- a/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
++++ b/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
+@@ -235,7 +235,7 @@ static void* sender_thread(void* arg) {
+             if (ret == -EINVAL) {
+                 logging_warn("Send msg to xalarmd failed: (%d) Invalid input value, skip it\n", ret);
+                 break;
+-            } else if (ret == -ENOTCONN || ret == -ECOMM) {
++            } else if (ret == -ENOTCONN || ret == -ECOMM || ret == -ENODEV) {
+                 logging_warn("Send msg to xalarmd failed: (%d) Bad socket conn, try again\n", ret);
+                 sleep(RETRY_PERIOD);
+             } else if (ret < 0) {
+-- 
+2.27.0
+

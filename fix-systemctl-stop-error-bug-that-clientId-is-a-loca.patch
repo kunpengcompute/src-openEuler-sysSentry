@@ -1,0 +1,47 @@
+From 011e4f092ad0684d92e6895d7bd043bc468d58ef Mon Sep 17 00:00:00 2001
+From: guodashun <guodashun1@huawei.com>
+Date: Thu, 20 Mar 2025 15:20:59 +0800
+Subject: [PATCH 3/7] fix systemctl stop error bug that clientId is a local
+ variable
+
+---
+ src/services/syssentry/alarm.py     | 1 -
+ src/services/syssentry/syssentry.py | 3 +--
+ 2 files changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/src/services/syssentry/alarm.py b/src/services/syssentry/alarm.py
+index ad9d11c..a0220a0 100644
+--- a/src/services/syssentry/alarm.py
++++ b/src/services/syssentry/alarm.py
+@@ -38,7 +38,6 @@ alarm_list_lock = threading.Lock()
+ 
+ id_filter = []
+ id_base = 1001
+-clientId = -1
+ 
+ MILLISECONDS_UNIT_SECONDS = 1000
+ MAX_NUM_OF_ALARM_ID = 128
+diff --git a/src/services/syssentry/syssentry.py b/src/services/syssentry/syssentry.py
+index 625da9a..55a845b 100644
+--- a/src/services/syssentry/syssentry.py
++++ b/src/services/syssentry/syssentry.py
+@@ -40,8 +40,6 @@ from .alarm import alarm_register
+ 
+ from xalarm.register_xalarm import xalarm_unregister
+ 
+-clientId = -1
+-
+ CPU_EXIST = True
+ try:
+     from sentryPlugins.cpu_sentry.cpu_alarm import cpu_alarm_recv
+@@ -640,6 +638,7 @@ def main():
+         logging.error("get pid file lock failed, exist")
+         sys.exit(17)
+ 
++    clientId = -1
+     try:
+         signal.signal(signal.SIGINT, sig_handler)
+         signal.signal(signal.SIGTERM, sig_handler)
+-- 
+2.43.0
+

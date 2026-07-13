@@ -1,0 +1,68 @@
+From e24be56f37a447f26107b1c16021cb139d5126fa Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Thu, 27 Nov 2025 20:59:39 +0800
+Subject: [PATCH] build sentry_msg_monitor only under aarch64 architecture
+
+---
+ Makefile                                      |  6 +++++-
+ src/sentryPlugins/sentry_msg_monitor/Makefile | 10 ++++++++++
+ 2 files changed, 15 insertions(+), 1 deletion(-)
+
+diff --git a/Makefile b/Makefile
+index c450999..ee95d4a 100644
+--- a/Makefile
++++ b/Makefile
+@@ -26,6 +26,8 @@ PYDIR   = $(DESTDIR)$(PREFIX)/lib/$(PYNAME)/site-packages
+ PYTHON_VERSION := $(shell $(PYBIN) --version 2>&1 | awk '{print $$2}' | cut -d '.' -f 1,2)
+ PKGVER := syssentry-$(VERSION)-py$(PYTHON_VERSION)
+ PKGVEREGG := syssentry-$(VERSION)-py$(PYTHON_VERSION).egg-info
++
++ARCH := $(shell uname -m)
+ 
+ all: lib ebpf hbm_online_repair bmc_block_io soc_ring_sentry sentry_msg_monitor 
+ 
+@@ -150,11 +152,13 @@ isentry:
+ 	install -m 550 $(CURSRCDIR)/sentryPlugins/bmc_block_io/output/bmc_block_io $(BINDIR)
+ 	install -m 600 $(CURCONFIGDIR)/plugins/bmc_block_io.ini  $(ETCDIR)/sysSentry/plugins/
+ 	install -m 600 $(CURCONFIGDIR)/tasks/bmc_block_io.mod $(ETCDIR)/sysSentry/tasks/
+-
++
++ifeq ($(ARCH), aarch64)
+ 	# sentry_msg_monitor
+ 	install -m 550 $(CURSRCDIR)/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor $(BINDIR)
+ 	install -m 600 $(CURCONFIGDIR)/env/sentry_msg_monitor.env $(ETCDIR)/sysconfig/
+ 	install -m 600 $(CURCONFIGDIR)/tasks/sentry_msg_monitor.mod $(ETCDIR)/sysSentry/tasks/
++endif
+ 
+ 	# pysentry_notify
+ 	install -m 644 src/libsentry/python/pySentryNotify/sentry_notify.py $(PYDIR)/xalarm
+diff --git a/src/sentryPlugins/sentry_msg_monitor/Makefile b/src/sentryPlugins/sentry_msg_monitor/Makefile
+index a0a6de1..5025f54 100644
+--- a/src/sentryPlugins/sentry_msg_monitor/Makefile
++++ b/src/sentryPlugins/sentry_msg_monitor/Makefile
+@@ -12,6 +12,15 @@
+ # Author: Luckky
+ # Create: 2025-02-18
+ 
++ARCH := $(shell uname -m)
++
++ifneq ($(ARCH), aarch64)
++UNSUPPORTED_TARGETS := all install clean distclean uninstall
++$(UNSUPPORTED_TARGETS):
++	@echo "sentry_msg_monitor only supports aarch64 architecture (current: $(ARCH))"
++	@exit 0
++.DEFAULT_GOAL := all
++else
+ all: sentry_msg_monitor
+ 
+ sentry_msg_monitor:
+@@ -19,5 +28,6 @@ sentry_msg_monitor:
+ 
+ clean:
+ 	rm -f sentry_msg_monitor
++endif
+ 
+ .PHONY: all clean
+-- 
+2.27.0
+

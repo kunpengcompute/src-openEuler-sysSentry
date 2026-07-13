@@ -1,0 +1,83 @@
+From 4b293e9cd3a5446bf306150800e2c87565e63320 Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Wed, 18 Mar 2026 15:04:11 +0800
+Subject: [PATCH 3/5] fix fd leaks in sysSentry and xalarmd service
+
+---
+ src/services/syssentry/syssentry.py  | 11 ++++++++---
+ src/services/xalarm/xalarm_daemon.py | 11 ++++++++---
+ 2 files changed, 16 insertions(+), 6 deletions(-)
+
+diff --git a/src/services/syssentry/syssentry.py b/src/services/syssentry/syssentry.py
+index 9ad9114..bbede4e 100644
+--- a/src/services/syssentry/syssentry.py
++++ b/src/services/syssentry/syssentry.py
+@@ -472,15 +472,18 @@ def release_pidfile():
+     """
+     :return:
+     """
++    pid_file_fd = None
+     try:
+         pid_file_fd = open(SYSSENTRY_PID_FILE, 'w')
+         os.chmod(SYSSENTRY_PID_FILE, 0o600)
+         fcntl.flock(pid_file_fd, fcntl.LOCK_UN)
+-        pid_file_fd.close()
+-        PID_FILE_FLOCK.close()
+-        os.unlink(SYSSENTRY_PID_FILE)
+     except (IOError, FileNotFoundError):
+         logging.error("Failed to release PID file lock")
++    finally:
++        if not pid_file_fd:
++            pid_file_fd.close()
++        PID_FILE_FLOCK.close()
++        os.unlink(SYSSENTRY_PID_FILE)
+ 
+ 
+ def sigchld_handler(signum, _f):
+@@ -578,6 +581,8 @@ def main():
+ 
+     if not chk_and_set_pidfile():
+         logging.error("get pid file lock failed, exist")
++        if not PID_FILE_FLOCK:
++            PID_FILE_FLOCK.close()
+         sys.exit(17)
+ 
+     client_id = -1
+diff --git a/src/services/xalarm/xalarm_daemon.py b/src/services/xalarm/xalarm_daemon.py
+index 843064d..0581abe 100644
+--- a/src/services/xalarm/xalarm_daemon.py
++++ b/src/services/xalarm/xalarm_daemon.py
+@@ -51,15 +51,18 @@ def release_pidfile():
+     """
+     :return:
+     """
++    pid_file_fd = None
+     try:
+         pid_file_fd = open(XALARMD_PID_FILE, 'w')
+         os.chmod(XALARMD_PID_FILE, 0o600)
+         fcntl.flock(pid_file_fd, fcntl.LOCK_UN)
+-        pid_file_fd.close()
+-        PID_FILE_FLOCK.close()
+-        os.unlink(XALARMD_PID_FILE)
+     except (IOError, FileNotFoundError):
+         logging.error("Failed to release PID file lock")
++    finally:
++        if not pid_file_fd:
++            pid_file_fd.close()
++        PID_FILE_FLOCK.close()
++        os.unlink(XALARMD_PID_FILE)
+ 
+ 
+ def signal_handler(signum, _f):
+@@ -88,6 +91,8 @@ def daemon_init():
+ 
+     if not chk_and_set_pidfile():
+         logging.error("get pid file lock failed, exist")
++        if not PID_FILE_FLOCK:
++            PID_FILE_FLOCK.close()
+         sys.exit(17)
+ 
+     logging.info("xalarm daemon init success")
+-- 
+2.27.0
+

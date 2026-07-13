@@ -1,0 +1,58 @@
+From 7422667c3c6f6c99f931b8a7a7faf2e36d632456 Mon Sep 17 00:00:00 2001
+From: tong_1001 <shixuantong1@huawei.com>
+Date: Tue, 19 May 2026 21:19:33 +0800
+Subject: [PATCH] fix: keep critical events enabled during service shutdown
+
+When systemd stops xalarmd service during reboot, client connections
+are closed which triggers event switches to be disabled. This causes
+panic, kernel_reboot events to be turned off, preventing
+proper recording of system anomalies during shutdown.
+
+Add CRITICAL_EVENTS set for events that must remain enabled regardless
+of client subscription state. These events are essential for capturing
+system-level anomalies.
+---
+ src/services/xalarm/xalarm_events.py | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/src/services/xalarm/xalarm_events.py b/src/services/xalarm/xalarm_events.py
+index 1649211..ee0eb21 100644
+--- a/src/services/xalarm/xalarm_events.py
++++ b/src/services/xalarm/xalarm_events.py
+@@ -44,6 +44,10 @@ ALARM_UBUS_MEM_EVENT = 1013
+ SENTRY_REPORTER_MODULE_EVENT_ID_LIST = [ALARM_REBOOT_EVENT, ALARM_OOM_EVENT, ALARM_UBUS_MEM_EVENT]
+ SENTRY_REMOTE_REPORTER_MODULE_EVENT_ID_LIST = [ALARM_PANIC_EVENT, ALARM_KERNEL_REBOOT_EVENT]
+ 
++# Critical events that should never be disabled if it has already been enabled, even
++# when no clients are subscribed. These events are essential for recording system anomalies.
++CRITICAL_EVENTS = [ALARM_PANIC_EVENT, ALARM_KERNEL_REBOOT_EVENT]
++
+ EVENT_PROC_NAME_DICT = {
+     ALARM_REBOOT_EVENT : "power_off",
+     ALARM_OOM_EVENT : "oom",
+@@ -97,6 +101,12 @@ def disable_event(event_id: int) -> bool:
+     Returns:
+         bool: True if successful
+     """
++    # Critical events should never be disabled if it has already been enabled.
++    # If necessary, it is recommended that the administrator proactively disable it
++    if event_id in CRITICAL_EVENTS:
++        logging.info("Event %d is critical, keeping enabled", event_id)
++        return False
++
+     try:
+         set_sentry_reporter_module_switch(event_id, DISABLE_EVENT_INPUT)
+         logging.info("Event %d disabled - no clients subscribed", event_id)
+@@ -213,7 +223,7 @@ def unregister_client_events(client_fd: int, event_ids: list) -> None:
+                         break
+ 
+                 if not still_needed and event_id in enabled_events:
+-                    disable_event(event_id)
+-                    enabled_events.discard(event_id)
++                    if disable_event(event_id):
++                        enabled_events.discard(event_id)
+ 
+         logging.info("Client fd %d unregistered events: %s", client_fd, event_ids)
+-- 
+2.43.0
+

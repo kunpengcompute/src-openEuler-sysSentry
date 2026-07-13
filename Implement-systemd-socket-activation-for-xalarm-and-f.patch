@@ -1,0 +1,936 @@
+From cba2403ba7438c58415c637ce07fd48f3c21a145 Mon Sep 17 00:00:00 2001
+From: luckky <guodashun1@huawei.com>
+Date: Mon, 16 Mar 2026 11:36:17 +0800
+Subject: [PATCH] Implement systemd socket activation for xalarm and fix socket
+ permission issues
+
+- Add systemd socket activation support with dynamic socket type detection
+- Remove hardcoded file descriptor indices, verify socket types (STREAM/DGRAM)
+- Create xalarmd.socket unit with proper socket configuration
+- Update xalarmd.service to depend on socket unit and add ACL configuration guide
+- Remove socket file creation and permission management from service code
+- Delete unused permission constants and functions (SOCKET_FILE_PERMISSON, etc.)
+- Update Makefile to install and manage xalarmd.socket unit
+- Add ACL configuration guide for regular user access
+- Fix socket permission from 0666 to 0660 in systemd socket unit
+- Remove fallback mechanism, fully rely on systemd socket activation
+
+This resolves the issue where ACL permissions were lost when xalarm service
+restarted unexpectedly. Socket files are now managed by systemd, ensuring
+ACL permissions persist across service restarts.
+---
+ Makefile                                      |   5 +
+ config/service/xalarmd.service                |  17 +-
+ config/service/xalarmd.socket                 |  22 ++
+ .../test/test_xalarm_read_config_exception.sh |  14 +-
+ ...alarm_register_and_unregister_exception.sh |   6 +-
+ .../test/test_xalarm_restart_exception.sh     |   7 +-
+ selftest/test/test_xalarm_send_message.sh     |  30 +-
+ .../test/test_xalarm_upgrade_exception.sh     |   4 +-
+ src/libs/libxalarm/register_xalarm.c          |   8 +-
+ src/libs/pyxalarm/register_xalarm.py          |   7 +-
+ .../python/pySentryNotify/sentry_notify.py    |   2 -
+ src/services/xalarm/xalarm_daemon.py          |  19 +-
+ src/services/xalarm/xalarm_server.py          | 361 ++++++++----------
+ src/services/xalarm/xalarm_transfer.py        |   3 +-
+ 14 files changed, 235 insertions(+), 270 deletions(-)
+ create mode 100644 config/service/xalarmd.socket
+
+diff --git a/Makefile b/Makefile
+index e359dcd..97c4da3 100644
+--- a/Makefile
++++ b/Makefile
+@@ -100,6 +100,7 @@ isentry:
+ 	## 安装 systemd 服务文件
+ 	install -m 600 $(CURCONFIGDIR)/service/sysSentry.service $(SYSTEMDDIR)
+ 	install -m 600 $(CURCONFIGDIR)/service/xalarmd.service $(SYSTEMDDIR)
++	install -m 600 $(CURCONFIGDIR)/service/xalarmd.socket $(SYSTEMDDIR)
+ 	install -m 600 $(CURCONFIGDIR)/service/sentryCollector.service $(SYSTEMDDIR)
+ 
+ 	## 安装python源代码文件到相应的目录
+@@ -201,6 +202,7 @@ clean: ebpf_clean hbm_clean bmc_clean srs_clean smm_clean
+ 	rm -rf $(CURLIBDIR)/build
+ 	rm -rf $(CURSRCDIR)/build
+ 	rm -rf $(CURSRCDIR)/libsentry/c/log/build
++	rm -rf $(CURSRCDIR)/sentryPlugins/bmc_ras_sentry/build/
+ 	rm -rf $(CURSRCDIR)/syssentry.egg-info
+ 	rm -rf $(CURSRCDIR)/SENTRY_FILES
+ 
+@@ -231,6 +233,7 @@ uninstall:
+ 	rm -rf $(PYDIR)/xalarm
+ 	rm -rf $(SYSTEMDDIR)/sysSentry.service
+ 	rm -rf $(SYSTEMDDIR)/xalarmd.service
++	rm -rf $(SYSTEMDDIR)/xalarmd.socket
+ 	rm -rf $(SYSTEMDDIR)/sentryCollector.service
+ 	systemctl daemon-reload
+ 
+@@ -246,6 +249,8 @@ test:
+ 
+ startup:
+ 	systemctl daemon-reload
++	systemctl enable xalarmd.socket
++	systemctl start xalarmd.socket
+ 	systemctl restart xalarmd
+ 	systemctl restart sysSentry
+ 	systemctl restart sentryCollector
+diff --git a/config/service/xalarmd.service b/config/service/xalarmd.service
+index 6d8418c..6552117 100644
+--- a/config/service/xalarmd.service
++++ b/config/service/xalarmd.service
+@@ -1,14 +1,21 @@
+ [Unit]
+-Description = xalarm daemon for alarm messages forwarding
+- 
++Description=xalarm daemon for alarm messages forwarding
++# Require socket unit to be started
++Requires=dbus.service
++Requires=xalarmd.socket
++After=xalarmd.socket
++
+ [Service]
+-Type = forking
++Type=forking
+ ExecStart=/usr/bin/python3 /usr/bin/xalarmd
++# To grant regular users access to xalarm socket, add set ACL commands here:
++# ExecStartPre=/bin/setfacl -m u:username:rw /var/run/xalarm/alarm
++# ExecStartPre=/bin/setfacl -m u:username:rw /var/run/xalarm/report
+ ExecStop=/bin/kill $MAINPID
+ KillMode=process
+ Restart=on-failure
+ RestartSec=3s
+- 
++
+ [Install]
+-WantedBy = multi-user.target
++WantedBy=multi-user.target
+ 
+diff --git a/config/service/xalarmd.socket b/config/service/xalarmd.socket
+new file mode 100644
+index 0000000..ac1bb2e
+--- /dev/null
++++ b/config/service/xalarmd.socket
+@@ -0,0 +1,22 @@
++[Unit]
++Description=xalarm daemon socket for alarm messages forwarding
++# Socket must be created before the service starts
++Before=xalarmd.service
++
++[Socket]
++RuntimeDirectory=xalarm
++# Stream socket for client connections (alarm)
++ListenStream=/run/xalarm/alarm
++# Datagram socket for alarm reports (report)
++ListenDatagram=/run/xalarm/report
++# Socket file permissions: 0660 (rw-rw----), owned by root
++SocketMode=0660
++# Directory permissions: 0755 (rwxr-xr-x)
++RuntimeDirectoryMode=0755
++# Don't accept connections individually, service handles all connections
++Accept=no
++# remove socket files when xalarm daemon socket stop
++RemoveOnStop=yes
++
++[Install]
++WantedBy=sockets.target
+diff --git a/selftest/test/test_xalarm_read_config_exception.sh b/selftest/test/test_xalarm_read_config_exception.sh
+index 46cc188..80d0ff6 100644
+--- a/selftest/test/test_xalarm_read_config_exception.sh
++++ b/selftest/test/test_xalarm_read_config_exception.sh
+@@ -12,7 +12,7 @@ set +e
+ function pre_test() {
+     cp /etc/sysSentry/xalarm.conf /etc/sysSentry/xalarm.conf.bak
+     rm -f ./tmp_log
+-    kill $(pgrep -w xalarmd)
++    systemctl stop xalarmd.socket xalarmd.service
+     sleep 1
+ }
+ 
+@@ -21,7 +21,7 @@ function do_test() {
+     # 异常的alarm id
+     start_line=$(expr $(wc -l < /var/log/sysSentry/xalarm.log) + 1)
+     echo -e "[filter]\nid_mask = 999,9999,aaa,test-and-run,7869-2431" > /etc/sysSentry/xalarm.conf
+-    xalarmd
++    systemctl start xalarmd.socket xalarmd.service
+     end_line=$(wc -l < /var/log/sysSentry/xalarm.log)
+     sed -n "${start_line}, ${end_line}p" /var/log/sysSentry/xalarm.log >> ./tmp_log
+     wait_cmd_ok "grep \"invalid alarm id 999, ignored\" ./tmp_log" 1 3
+@@ -42,9 +42,9 @@ function do_test() {
+     rm -f /etc/sysSentry/xalarm.conf
+     start_line=$(expr $(wc -l < /var/log/sysSentry/xalarm.log) + 1)
+     echo -e "[no_filter]\nid_mask = 123" > /etc/sysSentry/xalarm.conf
+-    kill $(pgrep -w xalarmd)
++    systemctl stop xalarmd.socket xalarmd.service
+     sleep 1
+-    xalarmd
++    systemctl start xalarmd.socket xalarmd.service
+     end_line=$(wc -l < /var/log/sysSentry/xalarm.log)
+     sed -n "${start_line}, ${end_line}p" /var/log/sysSentry/xalarm.log >> ./tmp_log
+     wait_cmd_ok "grep \"no filter conf\" ./tmp_log" 1 3
+@@ -53,9 +53,9 @@ function do_test() {
+     rm -f /etc/sysSentry/xalarm.conf
+     start_line=$(expr $(wc -l < /var/log/sysSentry/xalarm.log) + 1)
+     echo -e "[filter]\nid_mask_number = 123" > /etc/sysSentry/xalarm.conf
+-    kill $(pgrep -w xalarmd)
++    systemctl stop xalarmd.socket xalarmd.service
+     sleep 1
+-    xalarmd
++    systemctl start xalarmd.socket xalarmd.service
+     end_line=$(wc -l < /var/log/sysSentry/xalarm.log)
+     sed -n "${start_line}, ${end_line}p" /var/log/sysSentry/xalarm.log >> ./tmp_log
+     wait_cmd_ok "grep \"no id_mask conf\" ./tmp_log" 1 3
+@@ -67,7 +67,7 @@ function post_test() {
+     cat ./tmp_log
+     rm -f /etc/sysSentry/xalarm.conf ./tmp_log
+     cp /etc/sysSentry/xalarm.conf.bak /etc/sysSentry/xalarm.conf
+-    kill $(pgrep -w xalarmd)
++    systemctl stop xalarmd.socket xalarmd.service
+     sleep 1
+ }
+ 
+diff --git a/selftest/test/test_xalarm_register_and_unregister_exception.sh b/selftest/test/test_xalarm_register_and_unregister_exception.sh
+index 86dde59..9cf6158 100644
+--- a/selftest/test/test_xalarm_register_and_unregister_exception.sh
++++ b/selftest/test/test_xalarm_register_and_unregister_exception.sh
+@@ -13,7 +13,7 @@ function pre_test() {
+     rm -rf ./checklog test/xalarm/unreg_demo test/xalarm/send_demo test/xalarm/reg_demo
+     gcc test/xalarm/reg_demo.c -o test/xalarm/reg_demo -lxalarm
+     gcc test/xalarm/unreg_demo.c -o test/xalarm/unreg_demo -lxalarm
+-    xalarmd 
++    systemctl start xalarmd.socket xalarmd.service
+ }
+ 
+ function do_test() {
+@@ -33,11 +33,11 @@ function do_test() {
+ }
+ 
+ function post_test() {
+-    kill $(pgrep -w unreg_demo)
++    systemctl stop xalarmd.socket xalarmd.service
+     sleep 1
+     cat ./checklog
+     rm -rf ./checklog test/xalarm/unreg_demo test/xalarm/reg_demo
+-    kill $(pgrep -w xalarmd)
++    systemctl stop xalarmd.socket xalarmd.service
+     sleep 1
+ }
+ 
+diff --git a/selftest/test/test_xalarm_restart_exception.sh b/selftest/test/test_xalarm_restart_exception.sh
+index 236e4c3..eb9e3ca 100644
+--- a/selftest/test/test_xalarm_restart_exception.sh
++++ b/selftest/test/test_xalarm_restart_exception.sh
+@@ -11,14 +11,15 @@ set +e
+ 
+ function pre_test() {
+     rm -f ./tmp_log
+-    kill $(pgrep -w xalarmd)
++    systemctl stop xalarmd.socket xalarmd.service
+     sleep 1
+ }
+ 
+ function do_test() {
+     # 验证多次启动的场景
+     start_line=$(expr $(wc -l < /var/log/sysSentry/xalarm.log) + 1)
+-    /usr/bin/xalarmd
++    systemctl start xalarmd.socket
++    systemctl start xalarmd.service
+     /usr/bin/xalarmd
+     end_line=$(wc -l < /var/log/sysSentry/xalarm.log)
+ 
+@@ -35,7 +36,7 @@ function do_test() {
+ 
+ function post_test() {
+     rm -f ./tmp_log
+-    kill $(pgrep -w xalarmd)
++    systemctl stop xalarmd.socket xalarmd.service
+     sleep 1
+ }
+ 
+diff --git a/selftest/test/test_xalarm_send_message.sh b/selftest/test/test_xalarm_send_message.sh
+index 12496d2..3b9e820 100644
+--- a/selftest/test/test_xalarm_send_message.sh
++++ b/selftest/test/test_xalarm_send_message.sh
+@@ -13,9 +13,9 @@ function pre_test() {
+     rm -rf ./checklog ./tmp_log test/xalarm/send_demo test/xalarm/reg_demo
+     gcc test/xalarm/send_demo.c -o test/xalarm/send_demo -lxalarm
+     gcc test/xalarm/reg_demo.c -o test/xalarm/reg_demo -lxalarm
+-    kill $(pgrep -w xalarmd)
++    systemctl stop xalarmd.socket xalarmd.service
+     sleep 1
+-    xalarmd
++    systemctl start xalarmd.socket xalarmd.service
+ }
+ 
+ function do_test() {
+@@ -24,7 +24,7 @@ function do_test() {
+     expect_eq $? 0 "xalarm register success"
+ 
+     # 发送用户注册的alarm id消息
+-    ./test/xalarm/send_demo 1001 1 2 "cpu usage high warning" >> checklog 2>&1 &
++    ./test/xalarm/send_demo 1001 1 2 "cpu usage high warning - 1" >> checklog 2>&1 &
+     wait_cmd_ok "grep \"id:1001\" ./checklog" 1 3
+     expect_eq $? 0 "alarm id check"
+ 
+@@ -34,32 +34,32 @@ function do_test() {
+     wait_cmd_ok "grep \"type:2\" ./checklog" 1 3
+     expect_eq $? 0 "alarm type check"
+ 
+-    wait_cmd_ok "grep \"cpu usage high warning\" ./checklog" 1 3
++    wait_cmd_ok "grep \"cpu usage high warning - 1\" ./checklog" 1 3
+     expect_eq $? 0 "alarm message check"
+ 	
+     # 发送用户未注册的alarm id消息
+     start_line=$(wc -l < ./checklog)
+-    ./test/xalarm/send_demo 1007 1 2 "cpu usage high warning" >> checklog 2>&1 &
++    ./test/xalarm/send_demo 1007 1 2 "cpu usage high warning - 2" >> checklog 2>&1 &
+     end_line=$(wc -l < ./checklog)
+     expect_eq $end_line $start_line "send unregistered alarm id to xalarm"
+ 
+     # 验证不合法参数
+     start_line=$(expr $(wc -l < ./checklog) + 1)
+-    ./test/xalarm/send_demo 9000 2 1 "cpu usage high" >> checklog 2>&1 &
++    ./test/xalarm/send_demo 9000 2 1 "cpu usage high - 3" >> checklog 2>&1 &
+     end_line=$(wc -l < ./checklog)
+     sed -n "${start_line}, ${end_line}p" ./checklog > ./tmp_log
+     wait_cmd_ok "grep \"xalarm_Report: alarm info invalid\" ./tmp_log" 1 3
+     expect_eq $? 0 "alarm id check"
+  
+     start_line=$(expr $(wc -l < ./checklog) + 1)
+-    ./test/xalarm/send_demo 1002 7 -1 "cpu usage high" >> checklog 2>&1 &
++    ./test/xalarm/send_demo 1002 7 -1 "cpu usage high - 4" >> checklog 2>&1 &
+     end_line=$(wc -l < ./checklog)
+     sed -n "${start_line}, ${end_line}p" ./checklog > ./tmp_log
+     wait_cmd_ok "grep \"xalarm_Report: alarm info invalid\" ./tmp_log" 1 3
+     expect_eq $? 0 "alarm type check"
+  
+     start_line=$(expr $(wc -l < ./checklog) + 1)
+-    ./test/xalarm/send_demo 1002 2 -1 "cpu usage high" >> checklog 2>&1 &
++    ./test/xalarm/send_demo 1002 2 -1 "cpu usage high - 5" >> checklog 2>&1 &
+     end_line=$(wc -l < ./checklog)
+     sed -n "${start_line}, ${end_line}p" ./checklog > ./tmp_log
+     wait_cmd_ok "grep \"xalarm_Report: alarm info invalid\" ./tmp_log" 1 3
+@@ -67,25 +67,25 @@ function do_test() {
+ 
+     # 验证解注册
+     sleep 10
+-    ./test/xalarm/send_demo 1001 1 2 "cpu usage high warning" >> checklog 2>&1 &
++    ./test/xalarm/send_demo 1001 1 2 "cpu usage high warning - 6" >> checklog 2>&1 &
+     wait_cmd_ok "grep \"unregister xalarm success\" ./checklog" 1 3
+     expect_eq $? 0 "check unregister xalarm"
+ 
+     # 停止xalarmd服务后发消息
+-    kill $(pgrep -w xalarmd)
+-    sleep 1
++    systemctl stop xalarmd.socket xalarmd.service
++    sleep 3
+ 
+-    ./test/xalarm/send_demo 1001 1 2 "cpu usage high warning" >> checklog 2>&1 &
+-    wait_cmd_ok "grep \"xalarm_Report: sendto failed errno: 2\" ./checklog" 1 3
++    ./test/xalarm/send_demo 1001 1 2 "cpu usage high warning - 7" >> checklog 2>&1 &
++    wait_cmd_ok "grep \"xalarm_Report: sendto failed errno\" ./checklog" 1 3
+     expect_eq $? 0 "xalarm send message while stop xalarmd service"
+ }
+ 
+ function post_test() {
+-    kill $(pgrep -w xalarmd)
++    systemctl stop xalarmd.socket xalarmd.service
+     sleep 1
+     cat ./checklog
+     rm -rf ./checklog ./tmp_log test/xalarm/send_demo test/xalarm/reg_demo
+-    kill $(pgrep -w xalarmd)
++    systemctl stop xalarmd.socket xalarmd.service
+     sleep 1
+ }
+ 
+diff --git a/selftest/test/test_xalarm_upgrade_exception.sh b/selftest/test/test_xalarm_upgrade_exception.sh
+index 32b2549..a53ad85 100644
+--- a/selftest/test/test_xalarm_upgrade_exception.sh
++++ b/selftest/test/test_xalarm_upgrade_exception.sh
+@@ -13,7 +13,7 @@ function pre_test() {
+     rm -rf ./checklog test/xalarm/upgrade_demo test/xalarm/send_demo
+     gcc test/xalarm/upgrade_demo.c -o test/xalarm/upgrade_demo -lxalarm
+     gcc test/xalarm/send_demo.c -o test/xalarm/send_demo -lxalarm
+-    xalarmd
++    systemctl start xalarmd.socket xalarmd.service
+ }
+ 
+ function do_test() {
+@@ -43,7 +43,7 @@ function post_test() {
+     sleep 1
+     cat ./checklog
+     rm -rf ./checklog test/xalarm/upgrade_demo test/xalarm/send_demo
+-    kill $(pgrep -w xalarmd)
++    systemctl stop xalarmd.socket xalarmd.service
+     sleep 1
+ }
+ 
+diff --git a/src/libs/libxalarm/register_xalarm.c b/src/libs/libxalarm/register_xalarm.c
+index 2ebd927..a451000 100644
+--- a/src/libs/libxalarm/register_xalarm.c
++++ b/src/libs/libxalarm/register_xalarm.c
+@@ -31,8 +31,6 @@
+ #define DIR_XALARM "/var/run/xalarm"
+ #define PATH_REG_ALARM "/var/run/xalarm/alarm"
+ #define PATH_REPORT_ALARM "/var/run/xalarm/report"
+-#define ALARM_DIR_PERMISSION 0755
+-#define ALARM_SOCKET_PERMISSION 0666
+ #define TIME_UNIT_MILLISECONDS 1000
+ 
+ #define MAX_PARAS_LEN 8191
+@@ -104,10 +102,8 @@ static int create_unix_socket(const char *path)
+     }
+ 
+     if (access(DIR_XALARM, F_OK) == -1) {
+-        if (mkdir(DIR_XALARM, ALARM_DIR_PERMISSION) == -1) {
+-            printf("mkdir %s failed\n", DIR_XALARM);
+-            goto release_socket;
+-        }
++        printf("xalarm directory %s does not exist, service may not be started\n", DIR_XALARM);
++        goto release_socket;
+     }
+ 
+     if (memset(&alarm_addr, 0, sizeof(alarm_addr)) == NULL) {
+diff --git a/src/libs/pyxalarm/register_xalarm.py b/src/libs/pyxalarm/register_xalarm.py
+index 91debf7..38c96be 100644
+--- a/src/libs/pyxalarm/register_xalarm.py
++++ b/src/libs/pyxalarm/register_xalarm.py
+@@ -16,9 +16,6 @@ MAX_ALARM_ID = (MIN_ALARM_ID + MAX_NUM_OF_ALARM_ID - 1)
+ DIR_XALARM = "/var/run/xalarm"
+ PATH_REG_ALARM = "/var/run/xalarm/alarm"
+ PATH_REPORT_ALARM = "/var/run/xalarm/report"
+-ALARM_DIR_PERMISSION = 0o0755
+-ALARM_REG_SOCK_PERMISSION = 0o0700
+-ALARM_SOCKET_PERMISSION = 0o0700
+ TIME_UNIT_MILLISECONDS = 1000
+ ALARM_REGISTER_INFO = None
+ 
+@@ -71,8 +68,8 @@ class AlarmRegister:
+             sock.setblocking(False)
+ 
+             if not os.access(DIR_XALARM, os.F_OK):
+-                os.makedirs(DIR_XALARM)
+-                os.chmod(DIR_XALARM, ALARM_DIR_PERMISSION)
++                sys.stderr.write(f"xalarm directory {DIR_XALARM} does not exist, service may not be started\n")
++                return None
+ 
+             sock.connect(PATH_REG_ALARM)
+             return sock
+diff --git a/src/libsentry/python/pySentryNotify/sentry_notify.py b/src/libsentry/python/pySentryNotify/sentry_notify.py
+index 8dbf778..3ae5618 100644
+--- a/src/libsentry/python/pySentryNotify/sentry_notify.py
++++ b/src/libsentry/python/pySentryNotify/sentry_notify.py
+@@ -21,8 +21,6 @@ MAX_PUC_PARAS_LEN = 8192
+ 
+ DIR_XALARM = "/var/run/xalarm"
+ PATH_REPORT_ALARM = "/var/run/xalarm/report"
+-ALARM_DIR_PERMISSION = 0o750
+-ALARM_SOCKET_PERMISSION = 0o700
+ 
+ 
+ def check_params(alarm_id, alarm_level, alarm_type, puc_paras) -> bool:
+diff --git a/src/services/xalarm/xalarm_daemon.py b/src/services/xalarm/xalarm_daemon.py
+index 14a41cd..843064d 100644
+--- a/src/services/xalarm/xalarm_daemon.py
++++ b/src/services/xalarm/xalarm_daemon.py
+@@ -22,10 +22,8 @@ import fcntl
+ import socket
+ 
+ from .xalarm_config import config_init, get_log_level
+-from .xalarm_server import server_loop, SOCK_FILE
++from .xalarm_server import server_loop
+ 
+-ALARM_DIR = "/var/run/xalarm"
+-ALARM_DIR_PERMISSION = 0o755
+ ALARM_LOGFILE = '/var/log/sysSentry/xalarm.log'
+ XALARMD_PID_FILE = "/var/run/xalarm/xalarmd.pid"
+ PID_FILE_FLOCK = None
+@@ -68,10 +66,6 @@ def signal_handler(signum, _f):
+     """signal handler
+     """
+     if signum == signal.SIGTERM:
+-        try:
+-            os.unlink(SOCK_FILE)
+-        except FileNotFoundError:
+-            pass
+         release_pidfile()
+         sys.exit(0)
+ 
+@@ -116,10 +110,6 @@ def alarm_process_create():
+     if not os.path.exists(os.path.dirname(ALARM_LOGFILE)):
+         os.mkdir(os.path.dirname(ALARM_LOGFILE), 0o700)
+ 
+-    if not os.path.exists(ALARM_DIR):
+-        os.mkdir(ALARM_DIR)
+-        os.chmod(ALARM_DIR, ALARM_DIR_PERMISSION)
+-
+     log_level = get_log_level()
+     log_format = "%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s"
+ 
+@@ -131,4 +121,11 @@ def alarm_process_create():
+ 
+     logging.info("xalarm daemon init")
+ 
++    listen_pid = int(os.environ.get('LISTEN_PID', '0'))
++    # Verify that the PID matches
++    if listen_pid != os.getpid():
++        logging.error("pid verify failed, systemd socket activation maybe not available or invalid")
++        logging.error("Please ensure xalarmd.socket is enabled and started")
++        logging.error("Run: systemctl enable xalarmd.socket && systemctl start xalarmd.socket")
++
+     daemon_main()
+diff --git a/src/services/xalarm/xalarm_server.py b/src/services/xalarm/xalarm_server.py
+index 429dc32..f729366 100644
+--- a/src/services/xalarm/xalarm_server.py
++++ b/src/services/xalarm/xalarm_server.py
+@@ -18,10 +18,13 @@ import socket
+ import os
+ import logging
+ import select
+-import stat
+ import threading
+-
+ from time import sleep
++
++import dbus
++from gi.repository import GLib
++from dbus.mainloop.glib import DBusGMainLoop
++
+ from .xalarm_api import alarm_bin2stu, alarm_stu2str
+ from .xalarm_transfer import (
+     check_filter,
+@@ -32,89 +35,91 @@ from .xalarm_transfer import (
+ )
+ 
+ 
+-ALARM_DIR = "/var/run/xalarm"
+-USER_RECV_SOCK = "/var/run/xalarm/alarm"
+-SOCK_FILE = "/var/run/xalarm/report"
+ ALARM_REPORT_LEN = 8216
+-ALARM_DIR_PERMISSION = 0o755
+-SOCKET_FILE_PERMISSON = 0o666
+-PERMISSION_MASK = 0o777
+ PERIOD_CHECK_TIME = 3
+ ALARM_LISTEN_QUEUE_LEN = 5
+ PERIOD_SCANN_TIME = 60
+ fd_to_socket_lock = threading.Lock()
+ 
+-def check_permission(path, permission):
+-    """check whether the permission of path is right
+-    """
+-    return (os.stat(path).st_mode & PERMISSION_MASK) == permission
+-
+-
+-def check_socket_file(path):
+-    if not os.path.exists(path):
+-        return False
+ 
+-    file_stat = os.stat(path)
+-    # path is not a socket file
+-    if not stat.S_ISSOCK(file_stat.st_mode):
+-        return False
+-    return True
+-
+-
+-def clear_sock_file(sock_file):
+-    """unlink unix socket if exist
++def get_systemd_sockets():
+     """
+-    if os.path.exists(sock_file):
+-        os.unlink(sock_file)
+-
+-def clear_sock_conn(sock_fd, epoll_fd):
+-    if sock_fd is None:
+-        return
+-    if sock_fd.fileno() == -1:
+-        return
+-    if epoll_fd is not None:
+-        epoll_fd.unregister(sock_fd.fileno())
+-        epoll_fd.close()
+-    sock_fd.close()
++    Get sockets from systemd socket activation
++    Returns (alarm_sock, socket_epoll) and (report_sock, report_epoll)
++    """
++    try:
++        listen_fds = int(os.environ.get('LISTEN_FDS', '0'))
++        # we have at least 2 sockets
++        if listen_fds < 2:
++            logging.error("fd verify failed, systemd socket activation maybe not available or invalid")
++            logging.error("Please ensure xalarmd.socket is enabled and started")
++            logging.error("Run: systemctl enable xalarmd.socket && systemctl start xalarmd.socket")
++            return None, None
++
++        # File descriptors start from 3 (SD_LISTEN_FDS_START)
++        # Need to verify socket types to ensure correct mapping
++        # Expected: alarm socket (STREAM), report socket (DGRAM)
++        systemd_alarm_sock = None
++        systemd_report_sock = None
++
++        # Check all passed file descriptors
++        for fd_offset in range(listen_fds):
++            fd = 3 + fd_offset
++            try:
++                # Get socket type to determine which socket this is
++                # Use numeric constants for better compatibility, SOL_SOCKET = 1, SO_TYPE = 3
++                test_sock = socket.fromfd(fd, socket.AF_UNIX, socket.SOCK_STREAM)
++                sock_type_val = test_sock.getsockopt(1, 3)
++                test_sock.close()
++
++                if sock_type_val == socket.SOCK_STREAM:
++                    # STREAM socket -> alarm socket
++                    if systemd_alarm_sock is not None:
++                        logging.error("Multiple STREAM sockets found, expected only one")
++                        return None, None
++                    systemd_alarm_sock = socket.fromfd(fd, socket.AF_UNIX, socket.SOCK_STREAM)
++                    logging.info("Found STREAM socket at FD %d (alarm socket)", fd)
++                elif sock_type_val == socket.SOCK_DGRAM:
++                    # DGRAM socket -> report socket
++                    if systemd_report_sock is not None:
++                        logging.error("Multiple DGRAM sockets found, expected only one")
++                        return None, None
++                    systemd_report_sock = socket.fromfd(fd, socket.AF_UNIX, socket.SOCK_DGRAM)
++                    logging.info("Found DGRAM socket at FD %d (report socket)", fd)
++                else:
++                    logging.error("Unknown socket type %d at FD %d", sock_type_val, fd)
++                    return None, None
++            except Exception as e:
++                logging.error("Failed to check socket type at FD %d: %s", fd, str(e))
++                return None, None
++
++        # Verify we found both required sockets
++        if systemd_alarm_sock is None:
++            logging.error("STREAM socket (alarm) not found")
++            return None, None
++        if systemd_report_sock is None:
++            logging.error("DGRAM socket (report) not found")
++            return None, None
++
++        # Create epoll for alarm socket
++        systemd_alarm_epoll = select.epoll()
++        systemd_alarm_epoll.register(systemd_alarm_sock.fileno(), select.EPOLLIN)
++
++        # Create epoll for report socket
++        systemd_report_epoll = select.epoll()
++        systemd_report_epoll.register(systemd_report_sock.fileno(), select.EPOLLIN)
++
++        logging.info("Successfully obtained sockets from systemd socket activation")
++        logging.info("Alarm socket (STREAM): FD %d, Report socket (DGRAM): FD %d",
++                     systemd_alarm_sock.fileno(), systemd_report_sock.fileno())
++        return (systemd_alarm_sock, systemd_alarm_epoll), (systemd_report_sock, systemd_report_epoll)
+ 
++    except Exception as e:
++        logging.error("Failed to get systemd sockets: %s", str(e))
++        logging.error("Please ensure xalarmd.socket is enabled and started")
++        logging.error("Run: systemctl enable xalarmd.socket && systemctl start xalarmd.socket")
++        return None, None
+ 
+-def create_sock_conn(sock_file, sock_type):
+-    sock_fd, epoll_fd = (None, None)
+-    try:
+-        sock_fd = socket.socket(socket.AF_UNIX, sock_type)
+-        sock_fd.bind(sock_file)
+-
+-        if sock_type == socket.SOCK_STREAM:
+-            sock_fd.listen(ALARM_LISTEN_QUEUE_LEN)
+-            sock_fd.setblocking(False)
+-
+-        epoll_fd = select.epoll()
+-        epoll_fd.register(sock_fd.fileno(), select.EPOLLIN)
+-        os.chmod(sock_file, SOCKET_FILE_PERMISSON)
+-        logging.info("socket file %s has been created", sock_file)
+-        return sock_fd, epoll_fd
+-    except socket.error as e:
+-        logging.error("failed to bind %s socket, reason is %s", sock_file, str(e))
+-        clear_sock_conn(sock_fd, epoll_fd)
+-
+-    return sock_fd, epoll_fd
+-
+-def recover_sock_path_and_permission():
+-    # if directory not exists or permission denied, remake
+-    if not os.path.exists(ALARM_DIR):
+-        logging.info("xalarmd run dir not exists, create %s", ALARM_DIR)
+-        os.mkdir(ALARM_DIR)
+-    if not check_permission(ALARM_DIR, ALARM_DIR_PERMISSION):
+-        logging.info("xalarmd run dir %s permission set not properly, recover as default permission", ALARM_DIR)
+-        os.chmod(ALARM_DIR, ALARM_DIR_PERMISSION)
+-    if os.path.exists(SOCK_FILE) and not check_permission(SOCK_FILE, SOCKET_FILE_PERMISSON):
+-        logging.info("socket file %s permission %s set not properly, recover as default permission",
+-                    SOCK_FILE, oct(os.stat(SOCK_FILE).st_mode & PERMISSION_MASK))
+-        os.chmod(SOCK_FILE, SOCKET_FILE_PERMISSON)
+-    if os.path.exists(USER_RECV_SOCK) and not check_permission(USER_RECV_SOCK, SOCKET_FILE_PERMISSON):
+-        logging.info("socket file %s permission %s set not properly, recover as default permission",
+-                    USER_RECV_SOCK, oct(os.stat(USER_RECV_SOCK).st_mode & PERMISSION_MASK))
+-        os.chmod(USER_RECV_SOCK, SOCKET_FILE_PERMISSON)
+ 
+ def period_task_to_cleanup_connections():
+     global alarm_sock
+@@ -131,6 +136,7 @@ def period_task_to_cleanup_connections():
+             continue
+         cleanup_closed_connections(alarm_sock, alarm_epoll, fd_to_socket, fd_to_socket_lock)
+ 
++
+ def monitor_sentry_service():
+     """
+     Monitor sysSentry service status via systemd D-Bus
+@@ -139,92 +145,26 @@ def monitor_sentry_service():
+     global fd_to_socket
+     global fd_to_socket_lock
+ 
+-    try:
+-        import dbus
+-        from gi.repository import GLib
+-        from dbus.mainloop.glib import DBusGMainLoop
+-    except ImportError as e:
+-        logging.error("Failed to import dbus or GLib: %s, systemd monitoring disabled", str(e))
+-        return
++    DBusGMainLoop(set_as_default=True)
++    bus = dbus.SystemBus()
++    systemd = bus.get_object('org.freedesktop.systemd1',
++                            '/org/freedesktop/systemd1/unit/sysSentry_2eservice')
+ 
+-    try:
+-        DBusGMainLoop(set_as_default=True)
+-        bus = dbus.SystemBus()
+-        systemd = bus.get_object('org.freedesktop.systemd1',
+-                                '/org/freedesktop/systemd1/unit/sysSentry_2eservice')
+-
+-        def on_properties_changed(interface, changed, invalidated):
+-            if 'ActiveState' in changed:
+-                state = changed['ActiveState']
+-                logging.info("sysSentry service state changed to: %s", state)
+-                if state in ['inactive', 'failed']:
+-                    logging.warning("sysSentry service is down, broadcasting alarm to all clients")
+-                    broadcast_sentry_down(alarm_sock, fd_to_socket, fd_to_socket_lock)
+-
+-        systemd.connect_to_signal(dbus_interface='org.freedesktop.DBus.Properties',
+-                                  signal_name='PropertiesChanged',
+-                                  handler_function=on_properties_changed)
+-
+-        logging.info("sysSentry service monitoring started")
+-        loop = GLib.MainLoop()
+-        loop.run()
+-    except Exception as e:
+-        logging.error("Failed to monitor sysSentry service: %s", str(e))
++    def on_properties_changed(interface, changed, invalidated):
++        if 'ActiveState' in changed:
++            state = changed['ActiveState']
++            logging.info("sysSentry service state changed to: %s", state)
++            if state in ['inactive', 'failed']:
++                logging.warning("sysSentry service is down, broadcasting alarm to all clients")
++                broadcast_sentry_down(alarm_sock, fd_to_socket, fd_to_socket_lock)
+ 
++    systemd.connect_to_signal(dbus_interface='org.freedesktop.DBus.Properties',
++                              signal_name='PropertiesChanged',
++                              handler_function=on_properties_changed)
+ 
+-def watch_socket_file_and_dir():
+-    global conn_thread
+-    global alarm_epoll
+-    global report_epoll
+-    global conn_thread_should_stop
+-    global report_sock
+-    global alarm_sock
+-    global fd_to_socket
+-    global fd_to_socket_lock
+-    while True:
+-        try:
+-            recover_sock_path_and_permission()
+-            if not check_socket_file(SOCK_FILE):
+-                logging.info("socket file %s not found or socket file been replaced, recovering ...", SOCK_FILE)
+-                clear_sock_conn(report_sock, report_epoll)
+-                clear_sock_file(SOCK_FILE)
+-                # if create socket socket, will retry to create because socket file was cleared in last step
+-                report_sock, report_epoll = create_sock_conn(SOCK_FILE, socket.SOCK_DGRAM)
+-            
+-            if not check_socket_file(USER_RECV_SOCK):
+-                logging.info("socket file %s not found or socket file been replaced, recovering ...", USER_RECV_SOCK)
+-                # set conn_thread_should_stop as True
+-                conn_thread_should_stop.set()
+-                # Ensure that conn_thread has been stopped before clean and release resources
+-                conn_thread.join()
+-
+-                # Now only transmit_alarm will use this lock
+-                # Ensure fd_to_socket dict resource has been released
+-                with fd_to_socket_lock:
+-                    for stored_sock_fd, stored_sock in fd_to_socket.items():
+-                        if stored_sock is None:
+-                            continue
+-                        if alarm_sock is not None and (stored_sock.fileno() != alarm_sock.fileno()):
+-                            stored_sock.close()
+-                    clear_sock_conn(alarm_sock, alarm_epoll)
+-                    clear_sock_file(USER_RECV_SOCK)
+-                    
+-                    alarm_sock, alarm_epoll = create_sock_conn(USER_RECV_SOCK, socket.SOCK_STREAM)
+-                    fd_to_socket = {alarm_sock.fileno(): alarm_sock,}
+-
+-                # set conn_thread_should_stop as False
+-                conn_thread_should_stop.clear()
+-                conn_thread = start_wait_for_conn_thread(
+-                    alarm_sock,
+-                    alarm_epoll,
+-                    fd_to_socket,
+-                    conn_thread_should_stop,
+-                    fd_to_socket_lock
+-                )
+-        except Exception as e:
+-            logging.error("Error watch socket file thread: %s", str(e))
+-
+-        sleep(PERIOD_CHECK_TIME)
++    logging.info("sysSentry service monitoring started")
++    loop = GLib.MainLoop()
++    loop.run()
+ 
+ 
+ def start_wait_for_conn_thread(alarm_sock_, alarm_epoll_,
+@@ -247,9 +187,13 @@ def server_loop(alarm_config):
+     """alarm daemon process loop
+     """
+     logging.info("server loop waiting for messages")
+-    clear_sock_file(SOCK_FILE)
+-    clear_sock_file(USER_RECV_SOCK)
+-    recover_sock_path_and_permission()
++
++    # Get sockets from systemd socket activation
++    systemd_sockets = get_systemd_sockets()
++    if systemd_sockets[0] is None:
++        logging.error("Failed to get systemd sockets, exiting")
++        return
++
+     global report_sock
+     global alarm_sock
+     global alarm_epoll
+@@ -258,8 +202,8 @@ def server_loop(alarm_config):
+     global conn_thread_should_stop
+     global conn_thread
+     global fd_to_socket_lock
+-    report_sock, report_epoll = create_sock_conn(SOCK_FILE, socket.SOCK_DGRAM)
+-    alarm_sock, alarm_epoll = create_sock_conn(USER_RECV_SOCK, socket.SOCK_STREAM)
++
++    (alarm_sock, alarm_epoll), (report_sock, report_epoll) = systemd_sockets
+     fd_to_socket = {alarm_sock.fileno(): alarm_sock,}
+ 
+     conn_thread_should_stop = threading.Event()
+@@ -275,57 +219,54 @@ def server_loop(alarm_config):
+     cleanup_thread.daemon = True
+     cleanup_thread.start()
+ 
+-    watch_thread = threading.Thread(target=watch_socket_file_and_dir)
+-    watch_thread.daemon = True
+-    watch_thread.start()
+-
+     systemd_monitor_thread = threading.Thread(target=monitor_sentry_service)
+     systemd_monitor_thread.daemon = True
+     systemd_monitor_thread.start()
+ 
+-    while True:
+-        try:
+-            # set timeout as 1 seconds to avoid main process blocked by recvfrom
+-            # which will cause socket cannot be rebuild
+-            events = report_epoll.poll(1.0)
+-            data = None
+-            for fileno, event in events:  
+-                if fileno == report_sock.fileno():  
+-                    data, _ = report_sock.recvfrom(ALARM_REPORT_LEN)
+-
+-            if not data:
+-                continue
+-            if len(data) != ALARM_REPORT_LEN:
+-                logging.debug("server receive report msg length wrong %d",
+-                                len(data))
+-                continue
+-            alarm_info = alarm_bin2stu(data)
+-            alarm_str = alarm_stu2str(alarm_info)
+-            logging.info("server recieve report msg, %s", alarm_str)
+-            if not check_filter(alarm_info, alarm_config):
+-                continue
+-            transmit_alarm(
+-                alarm_sock,
+-                alarm_epoll,
+-                fd_to_socket,
+-                data,
+-                alarm_str,
+-                fd_to_socket_lock
+-            )
+-        except Exception as e:
+-            logging.error(f"Error server:{e}")
+-            
+-    conn_thread_should_stop.set()
+-    conn_thread.join()
+-    cleanup_thread.join()
+-    watch_thread.join()
+-
+-    alarm_epoll.unregister(alarm_sock.fileno())
+-    alarm_epoll.close()
+-    alarm_sock.close()
+-    os.unlink(USER_RECV_SOCK)
+-
+-    report_sock.close()
++    try:
++        while True:
++            try:
++                # set timeout as 1 seconds to avoid main process blocked by recvfrom
++                # which will cause socket cannot be rebuild
++                events = report_epoll.poll(1.0)
++                data = None
++                for fileno, event in events:
++                    if fileno == report_sock.fileno():
++                        data, _ = report_sock.recvfrom(ALARM_REPORT_LEN)
++
++                if not data:
++                    continue
++                if len(data) != ALARM_REPORT_LEN:
++                    logging.debug("server receive report msg length wrong %d",
++                                    len(data))
++                    continue
++                alarm_info = alarm_bin2stu(data)
++                alarm_str = alarm_stu2str(alarm_info)
++                logging.info("server recieve report msg, %s", alarm_str)
++                if not check_filter(alarm_info, alarm_config):
++                    continue
++                transmit_alarm(
++                    alarm_sock,
++                    alarm_epoll,
++                    fd_to_socket,
++                    data,
++                    alarm_str,
++                    fd_to_socket_lock
++                )
++            except Exception as e:
++                logging.error(f"Error server:{e}")
++    finally:
++        conn_thread_should_stop.set()
++        conn_thread.join()
++        cleanup_thread.join()
++        systemd_monitor_thread.join()
++
++        alarm_epoll.unregister(alarm_sock.fileno())
++        alarm_epoll.close()
++        alarm_sock.close()
++
++        report_epoll.close()
++        report_sock.close()
+ 
+ 
+ 
+diff --git a/src/services/xalarm/xalarm_transfer.py b/src/services/xalarm/xalarm_transfer.py
+index 69e27b7..f30b44a 100644
+--- a/src/services/xalarm/xalarm_transfer.py
++++ b/src/services/xalarm/xalarm_transfer.py
+@@ -25,6 +25,7 @@ MAX_ID_NUMBER = 1128
+ MAX_CONNECTION_NUM = 100 
+ TEST_CONNECT_BUFFER_SIZE = 32
+ MAX_RETRY_TIMES = 3
++SYSSENTRY_DOWN_ALARM_ID = 1128
+ 
+ 
+ def check_filter(alarm_info, alarm_filter):
+@@ -113,7 +114,7 @@ def broadcast_sentry_down(server_socket, fd_to_socket, fd_to_socket_lock):
+ 
+     to_remove = []
+ 
+-    alarm_info = Xalarm(1128, 1, 1, 0, 0, "sysSentry service is down")
++    alarm_info = Xalarm(SYSSENTRY_DOWN_ALARM_ID, 1, 1, 0, 0, "sysSentry service is down")
+     bin_data = alarm_stu2bin(alarm_info)
+ 
+     with fd_to_socket_lock:
+-- 
+2.27.0
+

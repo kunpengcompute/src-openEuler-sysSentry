@@ -1,0 +1,109 @@
+From dacdbdf634c2e31f13d34bbc8a42bef4151bd379 Mon Sep 17 00:00:00 2001
+From: tong_1001 <shixuantong1@huawei.com>
+Date: Fri, 20 Mar 2026 11:34:48 +0800
+Subject: [PATCH] feat: add OOM rate limit policy configuration support for
+ sentry_reporter
+
+Add support for configuring OOM event rate limiting via sentryctl command.
+Users can now set rate limit policies using JSON format:
+  sentryctl set sentry_reporter --oom_policy='{RR_KSWAPD: 5, RR_DIRECT_RECLAIM: 3, RR_HUGEPAGE_RECLAIM: 2}'
+
+Features:
+- Add oom_policy parameter to sentryctl sentry_reporter subcommand
+- Implement JSON parsing and validation in callbacks.py
+- Add set_oom_rate_limit_policy() function in sentry_proc.py
+- Validate event types (RR_KSWAPD, RR_DIRECT_RECLAIM, RR_HUGEPAGE_RECLAIM)
+- Validate limit values (must be integer >= 0)
+- Convert JSON format to kernel format for proc file write
+
+Reliability:
+- Comprehensive input validation (JSON syntax, event types, value ranges)
+- Clear error messages for invalid inputs
+- At least one event type must be specified
+---
+ src/services/syssentry/callbacks.py   | 31 +++++++++++++++++++++++++++
+ src/services/syssentry/sentry_proc.py |  9 ++++++++
+ src/services/syssentry/sentryctl      |  1 +
+ 3 files changed, 41 insertions(+)
+
+diff --git a/src/services/syssentry/callbacks.py b/src/services/syssentry/callbacks.py
+index efcd887..c916d62 100644
+--- a/src/services/syssentry/callbacks.py
++++ b/src/services/syssentry/callbacks.py
+@@ -26,6 +26,7 @@ from .sentry_proc import (
+     set_urma_heartbeat,
+     set_uvb_proc,
+     set_urma_proc,
++    set_oom_rate_limit_policy,
+     MAX_URMA_EID_LENGTH
+ )
+ 
+@@ -190,6 +191,36 @@ def task_set(set_data):
+                 ret_code |= set_sentry_reporter_proc("power_off", set_data['power_off'])
+             if set_data.get('oom') is not None:
+                 ret_code |= set_sentry_reporter_proc("oom", set_data['oom'])
++            if set_data.get('oom_policy') is not None:
++                try:
++                    policy_dict = json.loads(set_data['oom_policy'])
++                    if not isinstance(policy_dict, dict):
++                        return "failed", "oom_policy must be a JSON object"
++
++                    valid_event_types = ["RR_KSWAPD", "RR_DIRECT_RECLAIM", "RR_HUGEPAGE_RECLAIM"]
++                    policy_parts = []
++
++                    for event_type, limit in policy_dict.items():
++                        if event_type not in valid_event_types:
++                            return "failed", f"Invalid event type: {event_type}."
++
++                        if not isinstance(limit, int):
++                            return "failed", f"Limit value for {event_type} must be an integer"
++
++                        if limit < 0:
++                            return "failed", f"Limit value for {event_type} must be >= 0"
++
++                        policy_parts.append(f"{event_type}:{limit}")
++
++                    if not policy_parts:
++                        return "failed", "oom_policy must contain at least one event type"
++
++                    kernel_format = ",".join(policy_parts)
++                    ret_code |= set_oom_rate_limit_policy(kernel_format)
++                except json.JSONDecodeError:
++                    return "failed", "oom_policy must be valid JSON format"
++                except Exception as e:
++                    return "failed", f"Failed to parse oom_policy: {str(e)}"
+         else:
+             return "failed", "Unknown task name: %s" % set_ko_name
+         if ret_code != 0:
+diff --git a/src/services/syssentry/sentry_proc.py b/src/services/syssentry/sentry_proc.py
+index a85ef4c..15e7f98 100644
+--- a/src/services/syssentry/sentry_proc.py
++++ b/src/services/syssentry/sentry_proc.py
+@@ -103,3 +103,12 @@ def set_urma_proc(server_eid, client_jetty_id):
+                 return -1
+     write_urma_info = " ".join((server_eid, str(client_jetty_id)))
+     return write_proc_file("sentry_urma_comm", "client_info", write_urma_info)
++
++
++def set_oom_rate_limit_policy(policy_json):
++    """
++    Set OOM rate limit policy via proc file
++    policy_json: JSON string format like '{"RR_KSWAPD": 5, "RR_DIRECT_RECLAIM": 3, "RR_HUGEPAGE_RECLAIM": 2}'
++    Returns: 0 on success, negative error code on failure
++    """
++    return write_proc_file("sentry_reporter", "oom_rate_limit", policy_json)
+diff --git a/src/services/syssentry/sentryctl b/src/services/syssentry/sentryctl
+index 50f9606..40178b9 100644
+--- a/src/services/syssentry/sentryctl
++++ b/src/services/syssentry/sentryctl
+@@ -186,6 +186,7 @@ if __name__ == '__main__':
+             {"name" : "ub_mem_fault", "type" : str, "choices": ["on", "off"], "required" : False, "help": "Enable/Disable UB mem event"},
+             {"name" : "power_off", "type": str, "choices": ["on", "off"], "required" : False, "help": "Enable/Disable power off event"},
+             {"name" : "oom", "type" : str, "choices": ["on", "off"], "required" : False, "help": "Enable/Disable oom event"},
++            {"name" : "oom_policy", "type": str, "choices": None, "required" : False, "help": "Set OOM rate limit policy in JSON format, e.g. '{\"RR_KSWAPD\": 5, \"RR_DIRECT_RECLAIM\": 3, \"RR_HUGEPAGE_RECLAIM\": 2}'"},
+         ],
+     }
+     parser_set = subparsers.add_parser('set', help='set plugins params')
+-- 
+2.43.0
+

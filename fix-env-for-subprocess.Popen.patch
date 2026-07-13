@@ -1,0 +1,25 @@
+From 8d6ca181b85ee32837e8891a1003d24826902f08 Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Sat, 29 Mar 2025 10:58:17 +0800
+Subject: [PATCH] fix env for subprocess.Popen
+
+---
+ src/services/syssentry/global_values.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/services/syssentry/global_values.py b/src/services/syssentry/global_values.py
+index 931b8ab..7cb99e0 100644
+--- a/src/services/syssentry/global_values.py
++++ b/src/services/syssentry/global_values.py
+@@ -76,7 +76,7 @@ class InspectTask:
+         # ccnfig env_file
+         self.env_file = ""
+         # env conf to popen arg
+-        self.environ_conf = {}
++        self.environ_conf = None
+         # start mode
+         self.conflict = "up"
+         # alarm id
+-- 
+2.27.0
+
