@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 48
+Release: 49
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -153,6 +153,8 @@ Patch122:  fix-PYNAME-define.patch
 Patch123:  fix-security-build-options-bug-for-ebpf_collector.patch
 Patch124:  Fix-the-issue-of-missing-security-compilation-option.patch
 Patch125:  fix-bmc_ras_sentry-compile-failed-on-old-gcc.patch
+Patch126:  fix-potential-overflow-in-xalarm_report_event.patch
+Patch127:  Fix-CTL-message-length-overflow-when-data-exceeds-3-.patch 
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -425,6 +427,13 @@ This package provides soc_ring_sentry for the sysSentry.
 %attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Thu Jul 16 2026 shixuantong <sxt1001@qq.com> - 1.0.3-49
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix potential overflow in  xalarm_report_event()
+       Fix CTL message length overflow when data exceeds 3 digits 
+
 * Thu Jul 09 2026 shixuantong <sxt1001@qq.com> - 1.0.3-48
 - Type:bugfix
 - CVE:NA
