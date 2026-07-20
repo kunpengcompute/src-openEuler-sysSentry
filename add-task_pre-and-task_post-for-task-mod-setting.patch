@@ -1,0 +1,294 @@
+From 086e276fcc7a83fbb1478aa911196a77a3eaff60 Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Sat, 29 Nov 2025 15:16:30 +0800
+Subject: [PATCH] add task_pre and task_post for task mod setting
+
+---
+ config/tasks/sentry_msg_monitor.mod     |  2 +
+ src/services/syssentry/cron_process.py  | 18 ++++++--
+ src/services/syssentry/global_values.py | 58 +++++++++++++++++++++++--
+ src/services/syssentry/load_mods.py     | 13 +++++-
+ src/services/syssentry/syssentry.py     |  4 +-
+ src/services/syssentry/utils.py         |  5 ++-
+ 6 files changed, 86 insertions(+), 14 deletions(-)
+
+diff --git a/config/tasks/sentry_msg_monitor.mod b/config/tasks/sentry_msg_monitor.mod
+index 4847255..cbb85f5 100644
+--- a/config/tasks/sentry_msg_monitor.mod
++++ b/config/tasks/sentry_msg_monitor.mod
+@@ -1,5 +1,7 @@
+ [common]
+ enabled=yes
++task_pre=modprobe sentry_reporter;modprobe sentry_remote_reporter
++task_post=rmmod sentry_remote_reporter;rmmod sentry_uvb_comm;rmmod sentry_urma_comm;rmmod sentry_reporter;rmmod sentry_msg_helper
+ task_start=/usr/bin/sentry_msg_monitor
+ task_stop=kill $pid
+ type=period
+diff --git a/src/services/syssentry/cron_process.py b/src/services/syssentry/cron_process.py
+index fab350e..21f3a93 100644
+--- a/src/services/syssentry/cron_process.py
++++ b/src/services/syssentry/cron_process.py
+@@ -17,6 +17,7 @@ import os
+ import time
+ import logging
+ import subprocess
++import shlex
+ 
+ from .utils import get_current_time_string
+ from .result import ResultLevel, RESULT_LEVEL_ERR_MSG_DICT
+@@ -28,8 +29,9 @@ from .mod_status import set_runtime_status, WAITING_STATUS, RUNNING_STATUS, \
+ 
+ class PeriodTask(InspectTask):
+     """period task class"""
+-    def __init__(self, name: str, task_type: str, task_start: str, task_stop: str, interval):
+-        super().__init__(name, task_type, task_start, task_stop)
++    def __init__(self, name: str, task_type: str, task_pre: str, task_post: str,
++                 task_start: str, task_stop: str, interval):
++        super().__init__(name, task_type, task_pre, task_post, task_start, task_stop)
+         self.interval = int(interval)
+         self.last_exec_timestamp = 0
+         self.runtime_status = WAITING_STATUS
+@@ -37,13 +39,14 @@ class PeriodTask(InspectTask):
+ 
+     def stop(self):
+         self.period_enabled = False
+-        cmd_list = self.task_stop.split()
++        cmd_list = shlex.split(self.task_stop)
+         if cmd_list[-1] == "$pid":
+             cmd_list[-1] = str(self.pid)
+         try:
+             subprocess.Popen(cmd_list, stdout=subprocess.PIPE, close_fds=True)
+         except OSError:
+             logging.error("task stop Popen failed, invalid cmd")
++        self.post()
+         if self.runtime_status != RUNNING_STATUS:
+             self.runtime_status = EXITED_STATUS
+ 
+@@ -57,6 +60,13 @@ class PeriodTask(InspectTask):
+         self.result_info["end_time"] = ""
+         self.result_info["error_msg"] = ""
+         self.result_info["details"] = {}
++
++        if not self.pre_done:
++            pre_res = self.pre()
++            if pre_res != 0:
++                self.post()
++                return False, "task pre cmd failed"
++
+         if not self.period_enabled:
+             self.period_enabled = True
+ 
+@@ -67,7 +77,7 @@ class PeriodTask(InspectTask):
+         if self.env_file:
+             self.load_env_file()
+ 
+-        cmd_list = self.task_start.split()
++        cmd_list = shlex.split(self.task_start)
+         try:
+             logfile = open(self.log_file, 'a')
+             os.chmod(self.log_file, 0o600)
+diff --git a/src/services/syssentry/global_values.py b/src/services/syssentry/global_values.py
+index 92b6237..21ca5b9 100644
+--- a/src/services/syssentry/global_values.py
++++ b/src/services/syssentry/global_values.py
+@@ -17,9 +17,10 @@ import subprocess
+ import logging
+ import time
+ import os
++import shlex
+ 
+ from .result import ResultLevel, RESULT_LEVEL_ERR_MSG_DICT
+-from .utils import get_current_time_string
++from .utils import get_current_time_string, run_cmd
+ from .mod_status import set_runtime_status
+ from .mod_status import RUNNING_STATUS, EXITED_STATUS, NONZERO_EXITED_STATUS, FAILED_STATUS, WAITING_STATUS
+ 
+@@ -44,7 +45,7 @@ TASKS_STORAGE_PATH = "/etc/sysSentry/tasks"
+ 
+ class InspectTask:
+     """oneshot task class"""
+-    def __init__(self, name: str, task_type: str, start_task: str, stop_task: str):
++    def __init__(self, name: str, task_type: str, pre_task: str, post_task: str, start_task: str, stop_task: str):
+         self.name = name
+         self.type = task_type
+         self.status = "ERROR"
+@@ -52,6 +53,8 @@ class InspectTask:
+         self.runtime_status = EXITED_STATUS
+         self.pid = -1
+         # task attribute
++        self.task_pre = pre_task
++        self.task_post = post_task
+         self.task_start = start_task
+         self.task_stop = stop_task
+         # task heartbeat attribute
+@@ -83,6 +86,45 @@ class InspectTask:
+         # alarm id
+         self.alarm_id = -1
+         self.alarm_clear_time = DEFAULT_ALARM_CLEAR_TIME
++        # pre task flag
++        self.pre_done = False
++
++    def pre(self):
++        """
++        task pre function, it should be executed before start()
++        """
++        if self.task_pre is None:
++            return 0
++        pre_cmd_list = self.task_pre.split(";")
++        for pre_cmd_i in pre_cmd_list:
++            result = run_cmd(pre_cmd_i)
++            if result.stderr:
++                logging.error("task %s pre cmd (%s) execute failed, error msg is %s",
++                              self.name, pre_cmd_i, result.stderr)
++                self.runtime_status = FAILED_STATUS
++                return -1
++        self.pre_done = True
++        logging.info(f"task {self.name} pre cmd success")
++        return 0
++
++    def post(self):
++        """
++        task post function, it should be executed after stop() or after pre() failed
++        """
++        if self.task_post is None:
++            return 0
++        self.pre_done = False
++        post_success = True
++        post_cmd_list = self.task_post.split(";")
++        for post_cmd_i in post_cmd_list:
++            result = run_cmd(post_cmd_i)
++            if result.stderr:
++                post_success = False
++                logging.warning("task %s post cmd (%s) execute failed, error msg is %s",
++                                self.name, post_cmd_i, result.stderr)
++        if post_success:
++            logging.info(f"task {self.name} post cmd success")
++        return 0
+ 
+     def start(self):
+         """
+@@ -94,6 +136,13 @@ class InspectTask:
+         self.result_info["end_time"] = ""
+         self.result_info["error_msg"] = ""
+         self.result_info["details"] = {}
++
++        if not self.pre_done:
++            pre_res = self.pre()
++            if pre_res != 0:
++                self.post()
++                return False, "task pre cmd failed"
++
+         if not self.period_enabled:
+             self.period_enabled = True
+         if self.runtime_status in (EXITED_STATUS, FAILED_STATUS, NONZERO_EXITED_STATUS):
+@@ -105,7 +154,7 @@ class InspectTask:
+             if self.env_file:
+                 self.load_env_file()
+ 
+-            cmd_list = self.task_start.split()
++            cmd_list = shlex.split(self.task_start)
+             try:
+                 logfile = open(self.log_file, 'a')
+                 os.chmod(self.log_file, 0o600)
+@@ -138,7 +187,7 @@ class InspectTask:
+         """stop"""
+         self.period_enabled = False
+         if self.runtime_status == RUNNING_STATUS:
+-            cmd_list = self.task_stop.split()
++            cmd_list = shlex.split(self.task_stop)
+             if cmd_list[-1] == "$pid":
+                 cmd_list[-1] = str(self.pid)
+             try:
+@@ -146,6 +195,7 @@ class InspectTask:
+             except OSError:
+                 logging.error("task %s stop Popen failed")
+             logging.debug("stop task %s", self.name)
++            self.post()
+ 
+     def get_status(self):
+         """get status"""
+diff --git a/src/services/syssentry/load_mods.py b/src/services/syssentry/load_mods.py
+index 46fd361..53460c1 100644
+--- a/src/services/syssentry/load_mods.py
++++ b/src/services/syssentry/load_mods.py
+@@ -31,6 +31,8 @@ CONF_TASK = 'common'
+ CONF_NAME = 'name'
+ CONF_TYPE = 'type'
+ CONF_ENABLED = 'enabled'
++CONF_TASK_PRE = "task_pre"
++CONF_TASK_POST = "task_post"
+ CONF_TASK_START = 'task_start'
+ CONF_TASK_STOP = 'task_stop'
+ CONF_TASK_RELOAD = 'task_reload'
+@@ -176,6 +178,12 @@ def parse_mod_conf(mod_name, mod_conf):
+     is_enabled = (mod_conf.get(CONF_TASK, CONF_ENABLED) == 'yes')
+ 
+     task_type = mod_conf.get(CONF_TASK, CONF_TYPE)
++    task_pre_cmd = None
++    task_post_cmd = None
++    if mod_conf.has_option(CONF_TASK, CONF_TASK_PRE):
++        task_pre_cmd = mod_conf.get(CONF_TASK, CONF_TASK_PRE)
++    if mod_conf.has_option(CONF_TASK, CONF_TASK_POST):
++        task_post_cmd = mod_conf.get(CONF_TASK, CONF_TASK_POST)
+     task_start_cmd = mod_conf.get(CONF_TASK, CONF_TASK_START)
+     task_stop_cmd = mod_conf.get(CONF_TASK, CONF_TASK_STOP)
+     heartbeat_interval = -1
+@@ -188,11 +196,12 @@ def parse_mod_conf(mod_name, mod_conf):
+     if task_type == PERIOD_CONF:
+         logging.debug("task is a period task")
+         cron_delay = parse_period_delay(mod_conf)
+-        task = PeriodTask(mod_name, task_type.upper(), task_start_cmd, task_stop_cmd, cron_delay)
++        task = PeriodTask(mod_name, task_type.upper(), task_pre_cmd, task_post_cmd,
++                          task_start_cmd, task_stop_cmd, cron_delay)
+         task.task_stop = task_stop_cmd
+     else:
+         task_type = ONESHOT_TYPE
+-        task = InspectTask(mod_name, task_type, task_start_cmd, task_stop_cmd)
++        task = InspectTask(mod_name, task_type, task_pre_cmd, task_post_cmd, task_start_cmd, task_stop_cmd)
+     task.heartbeat_interval = heartbeat_interval
+     task.load_enabled = is_enabled
+ 
+diff --git a/src/services/syssentry/syssentry.py b/src/services/syssentry/syssentry.py
+index ee10534..23de7ec 100644
+--- a/src/services/syssentry/syssentry.py
++++ b/src/services/syssentry/syssentry.py
+@@ -668,8 +668,8 @@ def main():
+         client_id = alarm_register()
+         main_loop()
+ 
+-    except Exception:
+-        pass
++    except Exception as e:
++        logging.error(traceback.format_exc())
+     finally:
+         if client_id != -1:
+             xalarm_unregister(client_id)
+diff --git a/src/services/syssentry/utils.py b/src/services/syssentry/utils.py
+index 21afb8f..8c749e4 100644
+--- a/src/services/syssentry/utils.py
++++ b/src/services/syssentry/utils.py
+@@ -14,18 +14,19 @@ some common function
+ """
+ import logging
+ import subprocess
++import shlex
+ from datetime import datetime, timezone, timedelta
+ 
+ 
+ def run_cmd(cmd):
+     """run cmd use subprocess.run"""
+-    result = subprocess.run(cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
++    result = subprocess.run(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+     return result
+ 
+ 
+ def run_popen(cmd):
+     """run cmd use subprocess.Popen"""
+-    pipe = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
++    pipe = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+     return pipe
+ 
+ 
+-- 
+2.27.0
+

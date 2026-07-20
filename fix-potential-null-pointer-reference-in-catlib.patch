@@ -1,0 +1,45 @@
+From a737fadc0e9944471900832f24ae68696f30944e Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Tue, 17 Mar 2026 14:57:36 +0800
+Subject: [PATCH 15/17] fix potential null pointer reference in catlib
+
+---
+ src/sentryPlugins/cpu_sentry/catlib/cli_param_checker.c      | 5 ++++-
+ .../cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol_result.c  | 5 ++++-
+ 2 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/src/sentryPlugins/cpu_sentry/catlib/cli_param_checker.c b/src/sentryPlugins/cpu_sentry/catlib/cli_param_checker.c
+index 6ea35a5..92feba7 100644
+--- a/src/sentryPlugins/cpu_sentry/catlib/cli_param_checker.c
++++ b/src/sentryPlugins/cpu_sentry/catlib/cli_param_checker.c
+@@ -49,7 +49,10 @@ void checkset_cpulist(char *getopt_optarg, catcli_request_body *p_request_body,
+             char *subSavePtr = NULL;
+             char *subSplit = strtok_r(split, "-", &subSavePtr);
+             long coreid_before = strtol(subSplit, NULL, DECIMAL);
+-            long coreid_after = strcmp(subSavePtr, "") == 0 ? -1 : strtol(subSavePtr, NULL, DECIMAL);
++            long coreid_after = -1;
++            if (subSavePtr) {
++                coreid_after = strcmp(subSavePtr, "") == 0 ? -1 : strtol(subSavePtr, NULL, DECIMAL);
++            }
+             if (coreid_before > total_core || coreid_after > total_core) {
+                 strncpy(errs->cpulist_err,
+                     "The specified \"cpulist\" contain cpu core id which has exceeded the max cpu core id,correct "
+diff --git a/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol_result.c b/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol_result.c
+index 5b45ced..0a26b09 100644
+--- a/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol_result.c
++++ b/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol_result.c
+@@ -79,7 +79,10 @@ static cat_return_t parse_patrol_result(char *buf, core_list_st *fault_list)
+         char *sub_save_ptr = NULL;
+         char *subSplit = strtok_r(split, line_split, &sub_save_ptr);
+         int coreid_before = (int) strtol(subSplit, NULL, number_base);
+-        int coreid_after = strcmp(sub_save_ptr, "") == 0 ? -1 : (int) strtol(sub_save_ptr, NULL, 10);
++        int coreid_after = -1;
++        if (sub_save_ptr) {
++            coreid_after = strcmp(sub_save_ptr, "") == 0 ? -1 : (int) strtol(sub_save_ptr, NULL, 10);
++        }
+         if (coreid_after < 0) {
+             insert_core_to_list(fault_list, coreid_before);
+         } else {
+-- 
+2.27.0
+

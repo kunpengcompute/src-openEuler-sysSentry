@@ -1,0 +1,146 @@
+From 3ef2de80d2315e0e5bd8e49c46941ea260ebeb60 Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Mon, 16 Mar 2026 10:48:31 +0800
+Subject: [PATCH] refact xalarm_unregister_event and xalarm_report_event API
+
+---
+ src/libs/libxalarm/register_xalarm.c          | 25 ++++++++++++-------
+ src/libs/libxalarm/register_xalarm.h          |  4 +--
+ .../sentry_msg_monitor/sentry_msg_monitor.c   | 10 ++++----
+ 3 files changed, 23 insertions(+), 16 deletions(-)
+
+diff --git a/src/libs/libxalarm/register_xalarm.c b/src/libs/libxalarm/register_xalarm.c
+index a3f65f2..2ebd927 100644
+--- a/src/libs/libxalarm/register_xalarm.c
++++ b/src/libs/libxalarm/register_xalarm.c
+@@ -683,18 +683,19 @@ int xalarm_register_event(struct alarm_register **register_info, struct alarm_su
+     return 0;
+ }
+ 
+-void xalarm_unregister_event(struct alarm_register *register_info)  
++void xalarm_unregister_event(struct alarm_register **register_info)
+ {
+-    if (register_info == NULL) {
++    if (register_info == NULL || *register_info == NULL) {
+         return;
+     }
+     // close client fd socket connection resource
+-    if (register_info->register_fd != -1) {
+-        (void)close(register_info->register_fd);
+-        register_info->register_fd = -1;
++    if ((*register_info)->register_fd != -1) {
++        (void)close((*register_info)->register_fd);
++        (*register_info)->register_fd = -1;
+     }
+ 
+-    free(register_info);
++    free(*register_info);
++    *register_info = NULL;
+ }
+ 
+ int xalarm_get_event(struct alarm_msg* msg, struct alarm_register *register_info)
+@@ -760,17 +761,19 @@ int xalarm_get_event(struct alarm_msg* msg, struct alarm_register *register_info
+     }
+ }
+ 
+-int xalarm_report_event(unsigned short usAlarmId, char *pucParas)
++int xalarm_report_event(unsigned short usAlarmId, char *pucParas, size_t len)
+ {
+     int ret, fd;
+     struct alarm_info info;
+     struct sockaddr_un alarm_addr;
+ 
+     if (usAlarmId < MIN_ALARM_ID || usAlarmId > MAX_ALARM_ID) {
++        fprintf(stderr, "%s: invalid alarm id", __func__);
+         return -EINVAL;
+     }
+ 
+-    if (pucParas == NULL || (int)strlen(pucParas) > MAX_PARAS_LEN) {
++    if (pucParas == NULL || strlen(pucParas) != len || len > MAX_PARAS_LEN) {
++        fprintf(stderr, "%s: invalid report msg or len", __func__);
+         return -EINVAL;
+     }
+ 
+@@ -779,8 +782,12 @@ int xalarm_report_event(unsigned short usAlarmId, char *pucParas)
+     info.ucAlarmLevel = MINOR_ALM;
+     info.ucAlarmType = ALARM_TYPE_OCCUR;
+     gettimeofday(&info.AlarmTime, NULL);
+-    strncpy((char *)info.pucParas, (char *)pucParas, MAX_PARAS_LEN - 1);
+ 
++    ret = snprintf(info.pucParas, sizeof(info.pucParas), "%s", pucParas);
++    if (ret < 0 || ret >= sizeof(info.pucParas)) {
++        fprintf(stderr, "%s: snprintf failed\n", __func__);
++        return -EINVAL;
++    }
+ 
+     fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+     if (fd < 0) {
+diff --git a/src/libs/libxalarm/register_xalarm.h b/src/libs/libxalarm/register_xalarm.h
+index da80467..113f52e 100644
+--- a/src/libs/libxalarm/register_xalarm.h
++++ b/src/libs/libxalarm/register_xalarm.h
+@@ -99,10 +99,10 @@ struct alarm_register {
+     char alarm_enable_bitmap[MAX_NUM_OF_ALARM_ID];
+ };
+  
+-int xalarm_report_event(unsigned short usAlarmId, char *pucParas);
++int xalarm_report_event(unsigned short usAlarmId, char *pucParas, size_t len);
+ int xalarm_register_event(struct alarm_register** register_info, struct alarm_subscription_info id_filter);
+ int xalarm_get_event(struct alarm_msg* msg, struct alarm_register *register_info);
+-void xalarm_unregister_event(struct alarm_register *register_info);
++void xalarm_unregister_event(struct alarm_register **register_info);
+ 
+ int xalarm_Register(alarm_callback_func callback, struct alarm_subscription_info id_filter);
+ void xalarm_UnRegister(int client_id);
+diff --git a/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c b/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
+index 4bce1b8..ee4e4c2 100644
+--- a/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
++++ b/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
+@@ -47,7 +47,7 @@
+ struct receiver_cleanup_data {
+     int fd;
+     struct alarm_msg *al_msg;
+-    struct alarm_register* register_info;
++    struct alarm_register** register_info;
+ };
+ 
+ struct sender_cleanup_data {
+@@ -440,7 +440,7 @@ static void* sender_thread(void* arg)
+         }
+         retry_num = 0;
+         for (int i = 0; i < MAX_RETRY_NUM; i++) {
+-            ret = xalarm_report_event(alarm_type, str);
++            ret = xalarm_report_event(alarm_type, str, strlen(str));
+             if (ret == 0) {
+                 logging_info("Send msg success: alarm_type: %d\n", alarm_type);
+                 break;
+@@ -546,7 +546,7 @@ re_register:
+     struct receiver_cleanup_data rcd = {
+         .fd = fd,
+         .al_msg = al_msg,
+-        .register_info = register_info
++        .register_info = &register_info
+     };
+     pthread_cleanup_push(receiver_cleanup, &rcd);
+ 
+@@ -554,7 +554,7 @@ re_register:
+         ret = xalarm_get_event(al_msg, register_info);
+         if (ret == -ENOTCONN || ret == -ECONNRESET || ret == -EBADF) {
+             logging_warn("Failed to get msg: (%d) Xalarmd service exception, try to re-register\n", ret);
+-            xalarm_unregister_event(register_info);
++            xalarm_unregister_event(&register_info);
+             goto re_register;
+         } else if (ret < 0) {
+             logging_error("xalarm_get_event return %d\n", ret);
+@@ -601,7 +601,7 @@ re_register:
+     }
+ 
+ un_register:
+-    xalarm_unregister_event(register_info);
++    xalarm_unregister_event(&register_info);
+ receiver_err:
+     free(al_msg);
+     close(fd);
+-- 
+2.27.0
+

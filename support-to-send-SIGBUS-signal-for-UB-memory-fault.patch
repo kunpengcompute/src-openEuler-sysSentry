@@ -1,0 +1,494 @@
+From 7290595e4bd5728dbe7e1c8c215e026eb0f84cbd Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Mon, 10 Nov 2025 17:37:02 +0800
+Subject: [PATCH 12/16] support to send SIGBUS signal for UB memory fault
+
+Feature issue:
+https://gitee.com/openeuler/release-management/issues/ID45WQ
+---
+ src/libsentry/c/log/log_utils.h               |  13 +-
+ src/sentryPlugins/sentry_msg_monitor/Makefile |   2 +-
+ .../sentry_msg_monitor/sentry_msg_monitor.c   |  20 +-
+ .../sentry_msg_monitor/smh_common_type.h      |   5 +-
+ .../sentry_msg_monitor/ub_fault_lib.c         | 252 ++++++++++++++++++
+ .../sentry_msg_monitor/ub_fault_lib.h         |  27 ++
+ src/services/syssentry/sentryctl              |   9 +-
+ 7 files changed, 316 insertions(+), 12 deletions(-)
+ create mode 100644 src/sentryPlugins/sentry_msg_monitor/ub_fault_lib.c
+ create mode 100644 src/sentryPlugins/sentry_msg_monitor/ub_fault_lib.h
+
+diff --git a/src/libsentry/c/log/log_utils.h b/src/libsentry/c/log/log_utils.h
+index 2cd74e2..774fa97 100644
+--- a/src/libsentry/c/log/log_utils.h
++++ b/src/libsentry/c/log/log_utils.h
+@@ -31,20 +31,23 @@ typedef enum {
+      level == LOG_ERROR ? "ERROR" :  \
+      "UNKNOWN_LEVEL")
+ 
+-#define PRINT_LOG_PREFIX(level, file, line) do {                    \
+-    time_t t = time(NULL);                                          \
+-    struct tm *local_time = localtime(&t);                          \
+-    fprintf(LOG_FD(level), "%d-%02d-%02d %02d:%02d:%02d,000 - %s - [%s:%d] - ", \
++#define PRINT_LOG_PREFIX(level, file, line)                         \
++    do {                                                            \
++        struct timespec ts;                                         \
++        clock_gettime(CLOCK_REALTIME, &ts);                         \
++        struct tm *local_time = localtime(&ts.tv_sec);              \
++        fprintf(LOG_FD(level), "%d-%02d-%02d %02d:%02d:%02d,%03ld - %s - [%s:%d] - ", \
+             local_time->tm_year + 1900,                             \
+             local_time->tm_mon + 1,                                 \
+             local_time->tm_mday,                                    \
+             local_time->tm_hour,                                    \
+             local_time->tm_min,                                     \
+             local_time->tm_sec,                                     \
++            ts.tv_nsec / 1000000L,                                  \
+             LOG_LEVEL_STRING(level),                                \
+             basename(file),                                         \
+             line);                                                  \
+-} while (0)
++    } while (0)
+ 
+ // configure Env for log 
+ #define LOG_LEVEL_ENV "LOG_LEVEL"
+diff --git a/src/sentryPlugins/sentry_msg_monitor/Makefile b/src/sentryPlugins/sentry_msg_monitor/Makefile
+index c74ee07..82e0d6e 100644
+--- a/src/sentryPlugins/sentry_msg_monitor/Makefile
++++ b/src/sentryPlugins/sentry_msg_monitor/Makefile
+@@ -15,7 +15,7 @@
+ all: sentry_msg_monitor
+ 
+ sentry_msg_monitor:
+-	gcc sentry_msg_monitor.c -fstack-protector-strong -Wall -D_FORTIFY_SOURCE=2 -O2 -g -Wl,-z,relro -Wl,-z,now -fPIE -pie -I../../libsentry/c/log -L../../libsentry/c/log/build -I../../libs/libxalarm -L../../libs/build/libxalarm -lobmm -lxalarm -lsentry_log -ljson-c -pthread -o sentry_msg_monitor
++	gcc sentry_msg_monitor.c ub_fault_lib.c -fstack-protector-strong -Wall -D_FORTIFY_SOURCE=2 -O2 -g -Wl,-z,relro -Wl,-z,now -fPIE -pie -I../../libsentry/c/log -L../../libsentry/c/log/build -I../../libs/libxalarm -L../../libs/build/libxalarm -lobmm -lxalarm -lsentry_log -ljson-c -pthread -o sentry_msg_monitor
+ 
+ clean:
+ 	rm -f sentry_msg_monitor
+diff --git a/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c b/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
+index 5a08078..6b2bfd7 100644
+--- a/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
++++ b/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
+@@ -29,6 +29,7 @@
+ #include "register_xalarm.h"
+ #include "log_utils.h"
+ #include "smh_common_type.h"
++#include "ub_fault_lib.h"
+ 
+ #define TOOL_NAME "sentry_msg_monitor"
+ #define SMH_DEV_PATH "/dev/sentry_msg_helper"
+@@ -40,6 +41,8 @@
+ #define RETRY_PERIOD 1
+ #define XALARM_GENERAL_MSG_ITEM_CNT 2 // msgid_res
+ #define XALARM_PANIC_MSG_ITEM_CNT 4 // msgid_{cna:cna,eid:eid}_res
++#define PYHS_ADDR_HEX_STR_MAX_LEN 20
++
+ struct receiver_cleanup_data {
+     struct alarm_msg *al_msg;
+     struct alarm_register* register_info;
+@@ -243,7 +246,13 @@ static int convert_ub_mem_err_smh_msg_to_str(struct sentry_msg_helper_msg* smh_m
+         return -1;
+     }
+ 
+-    char hex_str[20];
++    if (smh_msg->helper_msg_info.ub_mem_info.mem_type == FD_MODE
++        && smh_msg->helper_msg_info.ub_mem_info.fault_with_kill) {
++        logging_info("ub mem event raw type is %d, sending SIGBUS signal to process\n", raw_err_type);
++        find_and_send_sigbus_to_thread(id, obmm_offset);
++    }
++
++    char hex_str[PYHS_ADDR_HEX_STR_MAX_LEN];
+     int ret = snprintf(hex_str, sizeof(hex_str), "0x%lx", (long)pa);
+     if (ret < 0) {
+         logging_error("convert pa to string failed\n");
+@@ -401,12 +410,14 @@ static void* sender_thread(void* arg)
+                 goto sender_err;
+             }
+         }
+-        logging_debug("Read dev success!\n");
++        logging_info("Read dev success!\n");
+ 
+         ret = convert_smh_msg_to_str(&smh_msg, str);
+         if (ret < 0) {
+             continue;
+         }
++        logging_info("convert_smh_msg_to_str success, msgid is %u\n", smh_msg.msgid);
++
+         unsigned short alarm_type = convert_msg_type_to_xalarm_type(smh_msg.type);
+         if (alarm_type == 0) {
+             logging_warn("Send msg to xalarmd failed: Get unknown type msg, skip it\n");
+@@ -417,7 +428,7 @@ static void* sender_thread(void* arg)
+         for (int i = 0; i < MAX_RETRY_NUM; i++) {
+             ret = xalarm_report_event(alarm_type, str);
+             if (ret == 0) {
+-                logging_info("Send msg success: alarm_type: %d, str: %s\n", alarm_type, str);
++                logging_info("Send msg success: alarm_type: %d\n", alarm_type);
+                 break;
+             }
+             if (ret == -EINVAL) {
+@@ -531,7 +542,7 @@ re_register:
+             logging_error("xalarm_get_event return %d\n", ret);
+             goto un_register;
+         } else {
+-            logging_info("Get msg: alarm_type: %d, str: %s\n", al_msg->usAlarmId, al_msg->pucParas);
++            logging_info("Get msg: alarm_type: %d\n", al_msg->usAlarmId);
+         }
+ 
+         ret = convert_str_to_smh_msg(al_msg, &smh_msg);
+@@ -610,5 +621,6 @@ int main()
+ 
+ err_release:
+     release_pid_file(pid_fd);
++    logging_info("sentry_msg_monitor end with ret %d!\n", ret);
+     return ret;
+ }
+diff --git a/src/sentryPlugins/sentry_msg_monitor/smh_common_type.h b/src/sentryPlugins/sentry_msg_monitor/smh_common_type.h
+index 8035231..31cd352 100644
+--- a/src/sentryPlugins/sentry_msg_monitor/smh_common_type.h
++++ b/src/sentryPlugins/sentry_msg_monitor/smh_common_type.h
+@@ -69,6 +69,7 @@ enum sentry_msg_helper_msg_type {
+     SMH_MESSAGE_UB_MEM_ERR,
+     SMH_MESSAGE_PANIC_ACK,
+     SMH_MESSAGE_KERNEL_REBOOT_ACK,
++    SMH_MESSAGE_UNKNOWN,
+ };
+ 
+ struct sentry_msg_helper_msg {
+@@ -89,8 +90,10 @@ struct sentry_msg_helper_msg {
+             uint32_t cna;
+             char eid[EID_MAX_LEN];
+         } remote_info;
+-	struct {
++        struct {
+             uint64_t pa;
++            int mem_type;
++            int fault_with_kill;
+             enum ras_err_type raw_ubus_mem_err_type;
+         } ub_mem_info;
+     } helper_msg_info;
+diff --git a/src/sentryPlugins/sentry_msg_monitor/ub_fault_lib.c b/src/sentryPlugins/sentry_msg_monitor/ub_fault_lib.c
+new file mode 100644
+index 0000000..7d96b62
+--- /dev/null
++++ b/src/sentryPlugins/sentry_msg_monitor/ub_fault_lib.c
+@@ -0,0 +1,252 @@
++/*
++ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
++ * sysSentry is licensed under the Mulan PSL v2.
++ * You can use this software according to the terms and conditions of the Mulan PSL v2.
++ * You may obtain a copy of Mulan PSL v2 at:
++ *     http://license.coscl.org.cn/MulanPSL2
++ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FIT FOR A PARTICULAR
++ * PURPOSE.
++ * See the Mulan PSL v2 for more details.
++
++ * Description: ub fault lib
++ * Author: sxt1001
++ * Create: 2025-11-10
++*/
++
++#include <stdlib.h>
++#include <fcntl.h>
++#include <signal.h>
++#include <unistd.h>
++#include <dirent.h>
++#include <stdbool.h>
++#include <ctype.h>
++
++#include "log_utils.h"
++#include "ub_fault_lib.h"
++
++#define COMMAND_STR_MAX_LEN 512
++#define OBMM_SHMDEV_NAME_MAX_LEN 256
++#define COMMAND_OUTPUT_LINE_MAX_LEN 1024
++#define ID_CAPACITY 10
++#define PERM_STRING_LEN 8
++
++static int find_processes_by_device(const char *obmm_shmdev_name, pid_t **pids, int *count)
++{
++    char command[COMMAND_STR_MAX_LEN];
++    FILE *fp;
++    char line[COMMAND_OUTPUT_LINE_MAX_LEN];
++    int capacity = ID_CAPACITY;
++    int found = 0;
++
++    if (!obmm_shmdev_name) {
++        logging_error("obmm_shmdev_name is empty\n");
++        return -1;
++    }
++    snprintf(command, sizeof(command), "/usr/bin/lsof \"%s\" | awk 'NR > 1 {print $2}'", obmm_shmdev_name);
++
++    *pids = malloc(capacity * sizeof(pid_t));
++    if (!*pids) {
++        logging_error("malloc failed for pids\n");
++        return -1;
++    }
++
++    fp = popen(command, "r");
++    if (!fp) {
++        logging_error("popen failed\n");
++        free(*pids);
++        *pids = NULL;
++        return -1;
++    }
++
++    while (fgets(line, sizeof(line), fp)) {
++        pid_t pid = atoi(line);
++
++        int duplicate = 0;
++        for (int i = 0; i < found; i++) {
++            if ((*pids)[i] == pid) {
++                duplicate = 1;
++                break;
++            }
++        }
++
++        if (!duplicate) {
++            if (found >= capacity) {
++                capacity *= 2;
++                pid_t *new_pids = realloc(*pids, capacity * sizeof(pid_t));
++                if (!new_pids) {
++                    logging_error("realloc failed\n");
++                    break;
++                }
++                *pids = new_pids;
++            }
++            (*pids)[found++] = pid;
++        }
++    }
++
++    pclose(fp);
++    *count = found;
++    return 0;
++}
++
++static bool is_accessing_faulty_address(const char *obmm_shmdev_name, const char *tid_maps_str, unsigned long obmm_offset, unsigned long *virt_addr)
++{
++    FILE *tid_maps_fp;
++    char line[COMMAND_OUTPUT_LINE_MAX_LEN];
++    int found = 0;
++
++    if (!obmm_shmdev_name || !tid_maps_str) {
++        logging_error("Invalid parameter\n");
++        return false;
++    }
++
++    tid_maps_fp = fopen(tid_maps_str, "r");
++    if (!tid_maps_fp) {
++        logging_error("fopen %s failed\n", tid_maps_str);
++        return false;
++    }
++
++    while (fgets(line, sizeof(line), tid_maps_fp)) {
++        unsigned long start, end;
++        char perms[PERM_STRING_LEN];
++        unsigned long offset;
++        char other_maps_line[COMMAND_OUTPUT_LINE_MAX_LEN];
++
++        if (!strstr(line, obmm_shmdev_name)) {
++            continue;
++        }
++
++        // parse maps line
++        if (sscanf(line, "%lx-%lx %7s %lx %1024s",
++                   &start, &end, perms, &offset, other_maps_line) < 5) {
++            logging_error("parse [%s] failed.\n", line);
++            continue;
++        }
++
++        // check offset
++        logging_debug("start to check offset for [%s]\n", line);
++        if (obmm_offset <= ((end - start) + offset) && obmm_offset >= offset) {
++            *virt_addr = start - offset + obmm_offset;
++            found = 1;
++        }
++
++        if (found) {
++            break;
++        }
++    }
++    fclose(tid_maps_fp);
++
++    return found ? true : false;
++}
++
++static bool is_positive_integer(const char *str) {
++    if (!str || *str == '\0')
++        return false;
++
++    while (*str) {
++        if (!isdigit((unsigned char)*str)) {
++            return false;
++        }
++        str++;
++    }
++    return true;
++}
++
++static int check_process_mapping(const char *obmm_shmdev_name, pid_t pid, unsigned long obmm_offset,
++                                 unsigned long *virt_addr, pid_t **tids, int *tid_count)
++{
++    char p_task_path[MAX_PATH];
++    struct dirent *entry;
++    int capacity = ID_CAPACITY;
++    int found = 0;
++
++    *tids = malloc(capacity * sizeof(pid_t));
++    if (!*tids) {
++        logging_error("malloc failed for tids\n");
++        return -1;
++    }
++
++    // We need to send a SIGBUS signal to the thread, check /proc/$pid/task/$tid/maps
++    snprintf(p_task_path, sizeof(p_task_path), "/proc/%d/task/", pid);
++
++    DIR *dir = opendir(p_task_path);
++    if (!dir) {
++        logging_error("opendir %s failed\n", p_task_path);
++        return -1;
++    }
++
++    while ((entry = readdir(dir)) != NULL) {
++        if (entry->d_type == DT_DIR && is_positive_integer(entry->d_name)) {
++            char tid_maps_path[MAX_PATH];
++            pid_t tid = atoi(entry->d_name);
++            logging_debug("start to check /proc/%d/task/%d/maps\n", pid, tid);
++            snprintf(tid_maps_path, sizeof(tid_maps_path), "/proc/%d/task/%d/maps", pid, tid);
++            if (is_accessing_faulty_address(obmm_shmdev_name, tid_maps_path, obmm_offset, virt_addr)) {
++                if (found >= capacity) {
++                    capacity *= 2;
++                    pid_t *new_tids = realloc(*tids, capacity * sizeof(pid_t));
++                    if (!new_tids) {
++                        logging_error("realloc new_tids failed\n");
++                        break;
++                    }
++                    *tids = new_tids;
++                }
++                (*tids)[found++] = tid;
++            }
++        }
++    }
++    *tid_count = found;
++    closedir(dir);
++    return found ? 0 : -1;
++}
++
++static int send_sigbus_to_thread(pid_t tid, unsigned long virt_addr)
++{
++    union sigval value;
++    int ret;
++
++    value.sival_ptr = (void *)virt_addr;
++
++    ret = sigqueue(tid, SIGBUS, value);
++    if (ret) {
++        logging_error("sigqueue failed\n");
++    }
++    return ret;
++}
++
++int find_and_send_sigbus_to_thread(mem_id memid, unsigned long obmm_offset)
++{
++    pid_t *pids = NULL;
++    int pid_count = 0;
++    char obmm_shmdev_name[OBMM_SHMDEV_NAME_MAX_LEN];
++
++    snprintf(obmm_shmdev_name, sizeof(obmm_shmdev_name), "/dev/obmm_shmdev%lu", memid);
++
++    if (find_processes_by_device(obmm_shmdev_name, &pids, &pid_count) != 0) {
++        logging_error("find_processes_by_device failed\n");
++        if (pids) {
++            free(pids);
++        }
++        return -1;
++    }
++
++    for (int pid_idx = 0; pid_idx < pid_count; pid_idx++) {
++        unsigned long virt_addr;
++        pid_t *tids = NULL;
++        int tid_count = 0;
++        if (check_process_mapping(obmm_shmdev_name, pids[pid_idx], obmm_offset, &virt_addr, &tids, &tid_count) == 0) {
++            for (int tid_idx = 0; tid_idx < tid_count; tid_idx++) {
++                logging_info("Sending SIGBUS to thread %d for process %d\n", tids[tid_idx], pids[pid_idx]);
++                send_sigbus_to_thread(tids[tid_idx], virt_addr);
++            }
++        }
++        if (tids) {
++            free(tids);
++        }
++    }
++
++    if (pids) {
++        free(pids);
++    }
++    return 0;
++}
+diff --git a/src/sentryPlugins/sentry_msg_monitor/ub_fault_lib.h b/src/sentryPlugins/sentry_msg_monitor/ub_fault_lib.h
+new file mode 100644
+index 0000000..eece608
+--- /dev/null
++++ b/src/sentryPlugins/sentry_msg_monitor/ub_fault_lib.h
+@@ -0,0 +1,27 @@
++/*
++ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
++ * sysSentry is licensed under the Mulan PSL v2.
++ * You can use this software according to the terms and conditions of the Mulan PSL v2.
++ * You may obtain a copy of Mulan PSL v2 at:
++ *     http://license.coscl.org.cn/MulanPSL2
++ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FIT FOR A PARTICULAR
++ * PURPOSE.
++ * See the Mulan PSL v2 for more details.
++
++ * Description: header file for ub mem event
++ * Author: sxt1001
++ * Create: 2025-11-10
++*/
++
++#ifndef SENTRY_UB_FAULT_LIB_H
++#include <stdint.h>
++#include <libobmm.h>
++
++#define MAX_PATH 128
++#define PAGE_SIZE 4096
++#define FD_MODE 0
++#define NUMA_MODE 1
++
++int find_and_send_sigbus_to_thread(mem_id memid, unsigned long obmm_offset);
++#endif
+diff --git a/src/services/syssentry/sentryctl b/src/services/syssentry/sentryctl
+index d94a044..ec683b7 100644
+--- a/src/services/syssentry/sentryctl
++++ b/src/services/syssentry/sentryctl
+@@ -61,6 +61,9 @@ def write_proc_file(proc_dir, proc_name, proc_value):
+     finally:
+         return exit_code
+ 
++def set_sentry_reporter_proc(proc_value):
++    return write_proc_file("sentry_reporter", "ub_mem_fault_with_kill", proc_value)
++
+ def set_remote_reporter_proc(proc_name, proc_value):
+     return write_proc_file("sentry_remote_reporter", proc_name, proc_value)
+ 
+@@ -240,6 +243,9 @@ if __name__ == '__main__':
+         "sentry_uvb_comm" : [
+             {"name": "server_cna", "type": str, "choices": None, "required" : True, "help": "server cna array"},
+         ],
++        "sentry_reporter" : [
++            {"name" : "ub_mem_fault_with_kill", "type" : "str", "choices":  ["on", "off"], "required" : False, "help" : "Enable/Disable sending SIGBUS signal with UB mem event"},
++        ],
+     }
+     parser_set = subparsers.add_parser('set', help='set plugins params')
+     parsers_set_plugin_param = parser_set.add_subparsers(dest="set_task")
+@@ -319,7 +325,8 @@ if __name__ == '__main__':
+                 ret_code += set_urma_heartbeat(client_args.heartbeat)
+         elif client_args.set_task == "sentry_uvb_comm":
+             ret_code += set_uvb_proc(client_args.server_cna)
+-
++        elif client_args.set_task == "sentry_reporter":
++            ret_code += set_sentry_reporter_proc(client_args.ub_mem_fault_with_kill)
+         sys.exit(ret_code)
+     else:
+         parser.print_help()
+-- 
+2.27.0
+
