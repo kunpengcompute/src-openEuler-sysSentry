@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 27
+Release: 49
 License: Mulan PSL v2
 Group: System Environment/Daemons
 Source0: https://gitee.com/openeuler/sysSentry/releases/download/v%{version}/%{name}-%{version}.tar.gz
@@ -68,6 +68,93 @@ Patch56:   fix-the-potential-KeyError-exception-in-task_get_ala.patch
 Patch57:   fix-potential-stack-overflow-issue-in-hbm_online_rep.patch
 Patch58:   fix-potential-crash-issue-in-bmc_recv.patch
 Patch59:   fix-period-type-task-abnormal-status.patch
+# PR-295
+Patch60:   fix-potential-overflow-in-report_result.patch
+Patch61:   fix-potential-memory-leak-issues-in-sentry_msg_monit.patch
+Patch62:   fix-some-codecheck-warning.patch
+Patch63:   set-log-level-in-sentry_msg_monitor.patch
+# PR-300
+Patch64:   fix-the-problem-of-checking-the-return-value-of-the-.patch
+# PR-301
+Patch65:   xalarm-add-sysSentry.service-status-monitoring.patch
+Patch66:   refact-xalarm_unregister_event-and-xalarm_report_eve.patch
+Patch67:   refact-sentryctl-set-cmd.patch
+Patch68:   Implement-systemd-socket-activation-for-xalarm-and-f.patch
+Patch69:   implement-systemd-socket-activation-for-sysSentry.patch
+# PR-296
+Patch70:   fix-potential-resource-leak-in-get_debugfs_dir.patch
+Patch71:   fix-potential-buffer-overflow-in-create_trace_instan.patch
+Patch72:   fix-potential-double-free-in-sentry_msg_monitor.patch
+Patch73:   add-cmd-security-check.patch
+Patch74:   add-exception-handling-for-sentryCollector.patch
+Patch75:   fix-potential-DoS-attack-risks-and-resource-leaks.patch
+Patch76:   change-some-msg-log-level.patch
+Patch77:   fix-memset-usage.patch
+Patch78:   fix-potential-memory-leak-in-print_map_res.patch
+Patch79:   fix-potential-null-pointer-reference-in-extract_devi.patch
+Patch80:   fix-crash-in-cpu_alarm.patch
+Patch81:   use-snprintf-instead-of-sprintf-strcpy-strncpy.patch
+Patch82:   fix-build-warning.patch
+Patch83:   check-cpu-info-in-parse_patrol_result.patch
+Patch84:   fix-potential-null-pointer-reference-in-catlib.patch
+Patch85:   fix-socket-fd-leaks.patch
+Patch86:   fix-NameError-in-task_get_alarm.patch
+# PR-303
+Patch87:   fix-fd-leaks-in-get_socket_id.patch
+Patch88:   fix-resource-leaks-in-ebpf_collector.patch
+Patch89:   fix-fd-leaks-in-sysSentry-and-xalarmd-service.patch
+Patch90:   fix-potential-overflow-which-cause-the-allocated-mem.patch
+Patch91:   fix-fd-leaks-in-sentry_msg_monitor.patch
+# PR-299
+Patch92:   rename-bmc_block_io-to-bmc_ras_sentry.patch
+Patch93:   BMC-Ras-Sentry-add-config-bmc_events.patch
+Patch94:   Support-report-bmc-block-ras-sentry.patch
+# PR-302
+Patch95:   bmc_ras_sentry-add-new-way-to-get-disk-SN-to-block-n.patch
+Patch96:   bmc_ras_sentry-add-way-to-get-disk-SN.patch
+# PR-305
+Patch97:   delete-cmd-security-check.patch
+# PR-304
+Patch98:   feat-add-OOM-rate-limit-policy-configuration-support.patch
+# PR-306
+Patch99:   check-pid-result-and-add-some-log.patch
+# PR-307
+Patch100:  add-some-error-info.patch
+# PR-311
+Patch101:  fix-integer-overflow-rish-in-QueryEvents.patch
+# PR-312
+Patch102:  fix-potential-fd-leak-issue.patch
+Patch103:  fix-the-infinite-loop-for-cleanup_thread-thread.patch
+Patch104:  fix-error-log-for-task-stop-function.patch
+# PR-316
+Patch105:  feat-xalarm-add-event-registration-and-switch-manage.patch
+Patch106:  compile-cpu_sentry-plugin.patch
+# PR-328
+Patch107:  change-os-name-in-service-desc.patch
+Patch108:  delete-sensitive-information-content.patch
+# PR-332
+Patch109:  fix-build-warning-for-catlib.patch
+# PR-338
+Patch110:  fix-keep-critical-events-enabled-during-service-shut.patch
+# PR-336
+Patch111:  xalarm-auto-load-driver-when-proc-not-found.patch
+# PR-337
+Patch112:  fix-xalarm-fix-service-stop-timeout-and-PID-lock-rel.patch
+Patch113:  fix-xalarm-add-graceful-shutdown-for-GLib-main-loop-.patch 
+Patch114:  update-bmc_ras_sentry-plugin.patch
+Patch115:  fix-sysSentry-service-restart-issues-PID-lock-releas.patch
+Patch116:  feat-add-link-event-alarm-reporting.patch
+Patch117:  fix-event-switch-invalidation-after-sysSentry-servic.patch
+Patch118:  verify-event-switch-state-by-reading-proc-file-befor.patch
+Patch119:  feat-sentry_msg_monitor-add-kernel-driver-version-co.patch
+Patch120:  fix-script-check-if-driver-exists-before-removing-it.patch
+Patch121:  cleanup-uninstall-log_utils.h-file.patch
+Patch122:  fix-PYNAME-define.patch
+Patch123:  fix-security-build-options-bug-for-ebpf_collector.patch
+Patch124:  Fix-the-issue-of-missing-security-compilation-option.patch
+Patch125:  fix-bmc_ras_sentry-compile-failed-on-old-gcc.patch
+Patch126:  fix-potential-overflow-in-xalarm_report_event.patch
+Patch127:  Fix-CTL-message-length-overflow-when-data-exceeds-3-.patch 
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -80,6 +167,7 @@ BuildRequires: numactl-libs numactl-devel
 Provides:      pyxalarm = %{version}-%{release}
 Obsoletes:     pyxalarm < 1.0.3-25
 Requires:      libbpf nvme-cli
+Requires:      python3-dbus dbus-daemon python3-gobject-base
 
 %define PYTHON_VERSION %{python3_version}
 %define PKGVER syssentry-%{version}-py%{PYTHON_VERSION}.egg-info
@@ -138,6 +226,15 @@ Requires:       sysSentry = %{version}-%{release}
 %description -n pysentry_collect
 This package provides Supports collect for plugins
 
+%package -n cpu_sentry
+Summary:        CPU fault inspection program
+Requires:       procps-ng
+Recommends:     sysSentry = %{version}-%{release}
+Recommends:     ipmitool
+
+%description -n cpu_sentry
+This package provides CPU fault detection
+
 %package -n hbm_online_repair
 Summary:        hbm_online_repair for the sysSentry
 Provides:       hbm_online_repair = %{version}-%{release}
@@ -160,15 +257,15 @@ Requires:       lsof libobmm ipmitool
 This package provides a plugin for sysSentry to listening specific messages
 %endif
 
-%package -n bmc_block_io
-Summary:        bmc_block_io for the sysSentry
-Provides:       bmc_block_io = %{version}-%{release}
+%package -n bmc_ras_sentry
+Summary:        bmc_ras_sentry for the sysSentry
+Provides:       bmc_ras_sentry = %{version}-%{release}
 BuildRequires:  json-c-devel
 Requires:       libxalarm ipmitool json-c
 Requires:       sysSentry = %{version}-%{release}
 
-%description -n bmc_block_io
-This package provides bmc_block_io for the sysSentry.
+%description -n bmc_ras_sentry
+This package provides bmc_ras_sentry for the sysSentry.
 
 %package -n soc_ring_sentry
 Summary:        soc_ring_sentry for the sysSentry
@@ -192,19 +289,11 @@ This package provides soc_ring_sentry for the sysSentry.
 /sbin/ldconfig
 
 %preun
-if [ "$1" = "0" ]; then
-    systemctl stop xalarmd.service
-    systemctl disable xalarmd.service
-    systemctl stop sysSentry.service
-    systemctl disable sysSentry.service
-    systemctl stop sentryCollector.service
-    systemctl disable sentryCollector.service
-fi
-rm -rf /var/run/xalarm | :
-rm -rf /var/run/sysSentry | :
+%systemd_preun xalarmd.socket sysSentry.socket xalarmd.service sysSentry.service sentryCollector.service
 
 %postun
 /sbin/ldconfig
+%systemd_postun_with_restart xalarmd.socket sysSentry.socket xalarmd.service sysSentry.service sentryCollector.service
 
 %files
 %defattr(-,root,root)
@@ -224,6 +313,7 @@ rm -rf /var/run/sysSentry | :
 %attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/task_scripts
 %attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/inspect.conf
 %attr(-,root,root) %{_unitdir}/sysSentry.service
+%attr(-,root,root) %{_unitdir}/sysSentry.socket
 
 # pysentry_collect
 %exclude %{python3_sitelib}/sentryCollector/collect_plugin.py
@@ -236,12 +326,19 @@ rm -rf /var/run/sysSentry | :
 %exclude %{_sysconfdir}/sysSentry/plugins/ai_block_io.ini
 %exclude %{_sysconfdir}/sysSentry/tasks/avg_block_io.mod
 %exclude %{_sysconfdir}/sysSentry/plugins/avg_block_io.ini
-%exclude %{_sysconfdir}/sysSentry/tasks/bmc_block_io.mod
-%exclude %{_sysconfdir}/sysSentry/plugins/bmc_block_io.ini
+%exclude %{_sysconfdir}/sysSentry/tasks/bmc_ras_sentry.mod
+%exclude %{_sysconfdir}/sysSentry/plugins/bmc_ras_sentry.ini
+
+# cpu inspection module
+%exclude %{_sysconfdir}/sysSentry/tasks/cpu_sentry.mod
+%exclude %{_sysconfdir}/sysSentry/plugins/cpu_sentry.ini
+%exclude %{_bindir}/cpu_sentry
+%exclude %{_bindir}/cat-cli
 
 # xalarm
 %attr(-,root,root) %{_bindir}/xalarmd
 %attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/xalarm.conf
+%attr(-,root,root) %{_unitdir}/xalarmd.socket
 %attr(-,root,root) %{_unitdir}/xalarmd.service
 
 # logrotate
@@ -255,7 +352,6 @@ rm -rf /var/run/sysSentry | :
 %attr(-,root,root) %{_unitdir}/sentryCollector.service
 %attr(-,root,root) %{_libdir}/libsentry_log.so
 
-%exclude %{_includedir}/libsentry/log_utils.h
 %exclude %{_sysconfdir}/sysSentry/tasks/hbm_online_repair.mod
 %exclude %{python3_sitelib}/syssentry/bmc_*
 %exclude %{python3_sitelib}/syssentry/*/bmc_*
@@ -297,6 +393,14 @@ rm -rf /var/run/sysSentry | :
 %attr(-,root,root) %{python3_sitelib}/sentryCollector/collect_plugin.py
 %attr(-,root,root) %{python3_sitelib}/sentryCollector/__pycache__/collect_plugin.*.pyc
 
+%files -n cpu_sentry
+%attr(-,root,root) %{_bindir}/cat-cli
+%attr(-,root,root) %{_bindir}/cpu_sentry
+%attr(-,root,root) %{_libdir}/libcpu_patrol.so
+%attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/cpu_sentry.mod
+%attr(-,root,root) %{_sysconfdir}/sysSentry/plugins/cpu_sentry.ini
+%attr(-,root,root) %{python3_sitelib}/sentryPlugins/cpu_sentry
+
 %files -n hbm_online_repair
 %attr(-,root,root) %{_bindir}/hbm_online_repair
 %attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysconfig/hbm_online_repair.env
@@ -312,10 +416,10 @@ rm -rf /var/run/sysSentry | :
 %attr(-,root,root) %{_sysconfdir}/sysSentry/task_scripts/sentry_msg_monitor.sh
 %endif
 
-%files -n bmc_block_io
-%attr(-,root,root) %{_bindir}/bmc_block_io
-%attr(-,root,root) %{_sysconfdir}/sysSentry/plugins/bmc_block_io.ini
-%attr(-,root,root) %{_sysconfdir}/sysSentry/tasks/bmc_block_io.mod
+%files -n bmc_ras_sentry
+%attr(-,root,root) %{_bindir}/bmc_ras_sentry
+%attr(-,root,root) %{_sysconfdir}/sysSentry/plugins/bmc_ras_sentry.ini
+%attr(-,root,root) %{_sysconfdir}/sysSentry/tasks/bmc_ras_sentry.mod
 
 %files -n soc_ring_sentry
 %attr(-,root,root) %{_bindir}/soc_ring_sentry
@@ -323,6 +427,182 @@ rm -rf /var/run/sysSentry | :
 %attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Thu Jul 16 2026 shixuantong <sxt1001@qq.com> - 1.0.3-49
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix potential overflow in  xalarm_report_event()
+       Fix CTL message length overflow when data exceeds 3 digits 
+
+* Thu Jul 09 2026 shixuantong <sxt1001@qq.com> - 1.0.3-48
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix PYNAME define
+       cleanup: uninstall log_utils.h file
+       Fix the issue of missing security compilation options
+       fix bmc_ras_sentry compile failed on old gcc
+       fix(script): check if driver exists before removing it
+       feat(sentry_msg_monitor): add kernel-driver version compatibility check on startup 
+
+* Fri Jun 26 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-47
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix event switch invalidation after sysSentry service restart
+       verify event switch state by reading proc file before skipping re-open
+
+* Thu Jun 25 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-46
+- Type:feature
+- CVE:NA
+- SUG:NA
+- DESC:feat: add link event alarm reporting
+
+* Thu Jun 04 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-45
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix sysSentry service restart issues: PID lock release and socket init
+
+* Wed Jun 03 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-44
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:sync bmc_ras_sentry bugfix patch 
+
+* Fri May 22 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-43
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix(xalarm): fix service stop timeout and PID lock release issues
+
+* Wed May 20 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-42
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:xalarm: auto load driver when proc not found
+
+* Tue May 19 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-41
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix: keep critical events enabled during service shutdown
+
+* Wed May 13 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-40
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix build warning for catlib
+
+* Mon May 11 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-39
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:change os name in service desc
+       delete sensitive information content
+
+* Thu Apr 30 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-38
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:add cpu_sentry
+
+* Wed Apr 22 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-37
+- Type:feature
+- CVE:NA
+- SUG:NA
+- DESC:feat(xalarm): add event registration and switch management
+
+* Mon Apr 20 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-36
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix error log for task stop function
+       fix integer overflow rish in QueryEvents
+       fix potential fd leak issue
+       fix the infinite loop for cleanup_thread-thread
+
+* Mon Apr 13 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-35
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:check pid result and add some log
+
+* Thu Apr 09 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-34
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:don't clean /var/run/xalarm and /var/run/sysSentry dirs
+       restart only the running service during the upgrade
+
+* Tue Apr 07 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-33
+- Type:feature
+- CVE:NA
+- SUG:NA
+- DESC:add OOM rate limit policy configuration support
+
+* Tue Mar 24 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-32
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:delete cmd security check
+
+* Mon Mar 23 2026 huwentao <huwentao19@h-partners.com> - 1.0.3-31
+- Type:feature
+- CVE:NA
+- SUG:NA
+- DESC:rename bmc_block_io to bmc_ras_sentry
+       BMC Ras Sentry add config bmc_events
+       Support report bmc block ras sentry
+       bmc_ras_sentry add new way to get disk SN to block name mapping
+       bmc_ras_sentry add way to get disk SN
+
+* Mon Mar 23 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-30
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix fd leaks in get_socket_id()
+       fix resource leaks in ebpf_collector
+       fix fd leaks in sysSentry and xalarmd service
+       fix potential overflow which cause the allocated memory to be too small
+       fix fd leaks in sentry_msg_monitor
+
+* Tue Mar 17 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-29
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix potential resource leak in get_debugfs_dir()
+       fix potential buffer overflow in create_trace_instance()
+       fix potential double free in sentry_msg_monitor
+       add cmd security check
+       add exception handling for sentryCollector
+       fix potential DoS attack risks and resource leaks
+       change some msg log level
+       fix memset usage
+       fix potential memory leak in print_map_res()
+       fix potential null pointer reference in extract_device_name()
+       fix crash in cpu_alarm
+       use snprintf instead of sprintf/strcpy/strncpy
+       fix build warning
+       check cpu info in parse_patrol_result()
+       fix potential null pointer reference in catlib
+       fix socket fd leaks
+       fix NameError in task_get_alarm()
+
+* Mon Mar 09 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-28
+- Type:bugfix
+- CVE:NA
+- SUG:NA
+- DESC:fix potential overflow in report_result()
+       fix potential memory leak issues in sentry_msg_monitor
+       set log level in sentry_msg_monitor
+       fix the problem of checking the return value of the pthread_create()
+       xalarm: add sysSentry.service status monitoring
+       Implement systemd socket activation for xalarm and fix socket permission issues
+       refact xalarm_unregister_event and xalarm_report_event API
+       refact sentryctl set cmd
+       implement systemd socket activation for sysSentry
+
 * Wed Feb 11 2026 shixuantong <shixuantong1@h-partners.com> - 1.0.3-27
 - Type:bugfix
 - CVE:NA
