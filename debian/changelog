@@ -1,0 +1,26 @@
+syssentry (1.0.3-4) UNRELEASED; urgency=medium
+
+  * sync ub related patches
+
+ -- Vanient <xiadanni1@huawei.com>  Tue, 28 Apr 2026 15:07:04 +0800
+
+syssentry (1.0.3-3) UNRELEASED; urgency=medium
+
+  * delete cmd check
+
+ -- shixuantong1 <shixuantong1@h-partners.com>  Wed, 25 Mar 2026 15:14:01 +0800
+
+syssentry (1.0.3-2) UNRELEASED; urgency=medium
+
+  * some bug fixes
+  * xalarm: add sysSentry.service status monitoring
+  * Implement sytemd socket activation for sysSentry and xalarmd service
+  * refact setryctl set cmd
+
+ -- shixuantong1 <shixuantong1@h-partners.com>  Tue, 24 Mar 2026 11:01:16 +0800
+
+syssentry (1.0.3-1) UNRELEASED; urgency=medium
+
+  * Initial release.
+
+ -- shixuantong1 <shixuantong1@h-partners.com>  Fri, 27 Feb 2026 16:34:16 +0800

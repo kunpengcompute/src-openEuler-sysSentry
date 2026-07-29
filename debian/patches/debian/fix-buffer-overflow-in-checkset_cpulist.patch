@@ -1,0 +1,25 @@
+From 697f9079081afef834b19116f1286a92f6f2f730 Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Thu, 6 Nov 2025 10:25:14 +0800
+Subject: [PATCH 05/16] fix buffer overflow in checkset_cpulist()
+
+---
+ src/sentryPlugins/cpu_sentry/catlib/cli_param_checker.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/sentryPlugins/cpu_sentry/catlib/cli_param_checker.c b/src/sentryPlugins/cpu_sentry/catlib/cli_param_checker.c
+index 71edf17..6ea35a5 100644
+--- a/src/sentryPlugins/cpu_sentry/catlib/cli_param_checker.c
++++ b/src/sentryPlugins/cpu_sentry/catlib/cli_param_checker.c
+@@ -29,7 +29,7 @@ void checkset_cpulist(char *getopt_optarg, catcli_request_body *p_request_body,
+     regcomp(&reg, CPULIST_REGEX, REG_EXTENDED); // 编译正则模式串
+     const size_t nmatch = 1;                    // 定义匹配结果最大允许数
+     regmatch_t pmatch[1];                       // 定义匹配结果在待匹配串中的下标范围
+-    char getopt_optarg_copy[strlen(getopt_optarg)];
++    char getopt_optarg_copy[strlen(getopt_optarg) + 1];
+     strcpy(getopt_optarg_copy,getopt_optarg);
+     int status = regexec(&reg, getopt_optarg_copy, nmatch, pmatch, 0);
+     regfree(&reg); // 释放正则表达式
+-- 
+2.27.0
+

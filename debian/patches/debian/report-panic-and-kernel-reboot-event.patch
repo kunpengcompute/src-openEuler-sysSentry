@@ -1,0 +1,874 @@
+From be8f08df6d3edd52a2b26e0058a4d84997e5957c Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Thu, 6 Nov 2025 10:26:25 +0800
+Subject: [PATCH 08/16] report panic and kernel reboot event
+
+Feature issue:
+https://gitee.com/openeuler/release-management/issues/ID45WQ
+
+1. UVB Communication: Dependent on Kernel (cis and odf modules).
+2. UMRA Communication: Dependent on Kernel and umdk.
+---
+ config/tasks/ai_block_io.mod                  |   2 +-
+ config/tasks/hbm_online_repair.mod            |   2 +-
+ config/tasks/rasdaemon.mod                    |   2 +-
+ config/tasks/sentry_msg_monitor.mod           |   2 +-
+ config/tasks/sentry_urma_comm.mod             |   6 +
+ src/libs/libxalarm/register_xalarm.h          |  16 +-
+ src/sentryPlugins/sentry_msg_monitor/Makefile |  16 +-
+ .../sentry_msg_monitor/sentry_msg_monitor.c   | 256 ++++++++++++------
+ .../sentry_msg_monitor/smh_common_type.h      |  63 +++--
+ src/services/syssentry/mod_status.py          |   1 +
+ src/services/syssentry/sentryctl              | 158 ++++++++++-
+ src/services/syssentry/syssentry.py           |   8 +-
+ 12 files changed, 419 insertions(+), 113 deletions(-)
+ create mode 100644 config/tasks/sentry_urma_comm.mod
+
+diff --git a/config/tasks/ai_block_io.mod b/config/tasks/ai_block_io.mod
+index 82f4f0b..947ad39 100644
+--- a/config/tasks/ai_block_io.mod
++++ b/config/tasks/ai_block_io.mod
+@@ -4,4 +4,4 @@ task_start=/usr/bin/python3 /usr/bin/ai_block_io
+ task_stop=pkill -f /usr/bin/ai_block_io
+ type=oneshot
+ alarm_id=1002
+-alarm_clear_time=5
+\ No newline at end of file
++alarm_clear_time=5
+diff --git a/config/tasks/hbm_online_repair.mod b/config/tasks/hbm_online_repair.mod
+index 4dcef43..5c69fa6 100644
+--- a/config/tasks/hbm_online_repair.mod
++++ b/config/tasks/hbm_online_repair.mod
+@@ -6,4 +6,4 @@ type=period
+ interval=10
+ onstart=yes
+ env_file=/etc/sysconfig/hbm_online_repair.env
+-conflict=up
+\ No newline at end of file
++conflict=up
+diff --git a/config/tasks/rasdaemon.mod b/config/tasks/rasdaemon.mod
+index ed6f3c6..f0d8290 100644
+--- a/config/tasks/rasdaemon.mod
++++ b/config/tasks/rasdaemon.mod
+@@ -5,4 +5,4 @@ task_stop=kill $pid
+ type=oneshot
+ onstart=yes
+ env_file=/etc/sysconfig/rasdaemon
+-conflict=up
+\ No newline at end of file
++conflict=up
+diff --git a/config/tasks/sentry_msg_monitor.mod b/config/tasks/sentry_msg_monitor.mod
+index c7dabce..4847255 100644
+--- a/config/tasks/sentry_msg_monitor.mod
++++ b/config/tasks/sentry_msg_monitor.mod
+@@ -6,4 +6,4 @@ type=period
+ interval=10
+ onstart=yes
+ env_file=/etc/sysconfig/sentry_msg_monitor.env
+-conflict=up
+\ No newline at end of file
++conflict=up
+diff --git a/config/tasks/sentry_urma_comm.mod b/config/tasks/sentry_urma_comm.mod
+new file mode 100644
+index 0000000..ad775a5
+--- /dev/null
++++ b/config/tasks/sentry_urma_comm.mod
+@@ -0,0 +1,6 @@
++[common]
++enabled=yes
++task_start=modprobe sentry_urma_comm
++task_stop=rmmod sentry_urma_comm
++type=oneshot
++onstart=no
+diff --git a/src/libs/libxalarm/register_xalarm.h b/src/libs/libxalarm/register_xalarm.h
+index 80fd635..cbb21b7 100644
+--- a/src/libs/libxalarm/register_xalarm.h
++++ b/src/libs/libxalarm/register_xalarm.h
+@@ -20,12 +20,16 @@
+ #define MEMORY_ALARM_ID 1001
+ 
+ #define ALARM_REBOOT_EVENT 1003
+-#define ALARM_REBOOT_ACK_EVENT 1004
+-#define ALARM_OOM_EVENT 1005
+-#define ALARM_OOM_ACK_EVENT 1006
+-
+-#define MINOR_ALM 1
+-#define MAJOR_ALM 2
++#define ALARM_REBOOT_ACK_EVENT 1004
++#define ALARM_OOM_EVENT 1005
++#define ALARM_OOM_ACK_EVENT 1006
++#define ALARM_PANIC_EVENT 1007
++#define ALARM_PANIC_ACK_EVENT 1008
++#define ALARM_KERNEL_REBOOT_EVENT 1009
++#define ALARM_KERNEL_REBOOT_ACK_EVENT 1010
++
++#define MINOR_ALM 1
++#define MAJOR_ALM 2
+ #define CRITICAL_ALM 3
+ 
+ #define ALARM_TYPE_OCCUR 1
+diff --git a/src/sentryPlugins/sentry_msg_monitor/Makefile b/src/sentryPlugins/sentry_msg_monitor/Makefile
+index dbc2a57..2f423b2 100644
+--- a/src/sentryPlugins/sentry_msg_monitor/Makefile
++++ b/src/sentryPlugins/sentry_msg_monitor/Makefile
+@@ -1,7 +1,21 @@
++# Copyright (c) 2025 Huawei Technologies Co., Ltd.
++# sysSentry is licensed under the Mulan PSL v2.
++# You can use this software according to the terms and conditions of the Mulan PSL v2.
++# You may obtain a copy of Mulan PSL v2 at:
++#      http://license.coscl.org.cn/MulanPSL2
++# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR
++# IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FIT FOR A PARTICULAR
++# PURPOSE.
++# See the Mulan PSL v2 for more details.
++
++# Description: build file for sentry_msg_monitor
++# Author: Luckky
++# Create: 2025-02-18
++
+ all: sentry_msg_monitor
+ 
+ sentry_msg_monitor:
+-	gcc sentry_msg_monitor.c -Wall -o3 -I../../libsentry/c/log -L../../libsentry/c/log/build -I../../libs/libxalarm -L../../libs/build/libxalarm -lxalarm -lsentry_log -ljson-c -pthread -o sentry_msg_monitor
++	gcc sentry_msg_monitor.c -fstack-protector-strong -Wall -D_FORTIFY_SOURCE=2 -O2 -g -Wl,-z,relro -Wl,-z,now -fPIE -pie -I../../libsentry/c/log -L../../libsentry/c/log/build -I../../libs/libxalarm -L../../libs/build/libxalarm -lxalarm -lsentry_log -ljson-c -pthread -o sentry_msg_monitor
+ 
+ clean:
+ 	rm -f sentry_msg_monitor
+diff --git a/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c b/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
+index efab827..bfe9356 100644
+--- a/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
++++ b/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
+@@ -1,3 +1,19 @@
++/*
++ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
++ * sysSentry is licensed under the Mulan PSL v2.
++ * You can use this software according to the terms and conditions of the Mulan PSL v2.
++ * You may obtain a copy of Mulan PSL v2 at:
++ *     http://license.coscl.org.cn/MulanPSL2
++ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FIT FOR A PARTICULAR
++ * PURPOSE.
++ * See the Mulan PSL v2 for more details.
++
++ * Description: sentry msg monitor
++ * Author: Luckky
++ * Create: 2025-02-18
++ */
++
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <unistd.h>
+@@ -20,7 +36,8 @@
+ #define DEFAULT_LOG_LEVEL LOG_INFO
+ #define MAX_RETRY_NUM 3
+ #define RETRY_PERIOD 1
+-#define XALARM_MSG_ITEM_CNT 2 // msgid_res
++#define XALARM_GENERAL_MSG_ITEM_CNT 2 // msgid_res
++#define XALARM_PANIC_MSG_ITEM_CNT 4 // msgid_{cna:cna,eid:eid}_res
+ struct receiver_cleanup_data {
+     struct alarm_msg *al_msg;
+     struct alarm_register* register_info;
+@@ -82,93 +99,152 @@ static int release_pid_file(int fd)
+ 
+ static int smh_dev_get_fd(void)
+ {
+-	int smh_dev_fd;
++    int smh_dev_fd;
+     smh_dev_fd = open(SMH_DEV_PATH, O_RDWR);
+     if (smh_dev_fd < 0) {
+         logging_error("Failed to open smh_dev_fd for %s.\n", SMH_DEV_PATH);
+     }
+ 
+-	return smh_dev_fd;
++    return smh_dev_fd;
+ }
+ 
+-static int convert_smh_msg_to_str(struct sentry_msg_helper_msg* smh_msg, char* str)
++static int convert_power_off_smh_smg_to_str(const struct sentry_msg_helper_msg* smh_msg, char* str)
++{
++    int res;
++    res = snprintf(str, MSG_STR_MAX_LEN, "%lu", smh_msg->msgid);
++    if ((size_t)res >= MSG_STR_MAX_LEN) {
++        logging_warn("msg str size exceeds the max value\n");
++        return -1;
++    }
++    return 0;
++}
++
++static int convert_oom_smh_smg_to_str(const struct sentry_msg_helper_msg* smh_msg, char* str)
+ {
+     int res;
+-    char *nid_str = NULL;
+     size_t offset = 0;
+-    switch (smh_msg->type) {
+-    case SMH_MESSAGE_POWER_OFF:
+-        res = snprintf(str, MSG_STR_MAX_LEN, "%lu", smh_msg->msgid);
+-        if ((size_t)res >= MSG_STR_MAX_LEN) {
+-            logging_warn("msg str size exceeds the max value\n");
+-            return -1;
+-        }
+-        break;
+-    case SMH_MESSAGE_OOM:
+-        nid_str = (char *) calloc (MSG_STR_MAX_LEN, sizeof(char));
+-        if (!nid_str) {
+-            logging_error("Failed to allocate memory!");
+-            return -1;
+-        }
+-        for (int i = 0; i < MAX_NUMA_NODES; i++) {
+-            res = snprintf(nid_str + offset, MSG_STR_MAX_LEN - offset, "%d%s", 
+-                        smh_msg->oom_info.nid[i], (i < MAX_NUMA_NODES - 1) ? "," : "");
+-            if ((size_t)res >= MSG_STR_MAX_LEN) {
+-                logging_warn("msg str size exceeds the max value\n");
+-                free(nid_str);
+-                nid_str = NULL;
+-                return -1;
+-            }
+-            offset += res;
+-        }
+-        res = snprintf(str, MSG_STR_MAX_LEN,
+-            "%lu_{nr_nid:%d,nid:[%s],sync:%d,timeout:%d,reason:%d}",
+-            smh_msg->msgid,
+-            smh_msg->oom_info.nr_nid,
+-            nid_str,
+-            smh_msg->oom_info.sync,
+-            smh_msg->oom_info.timeout,
+-            smh_msg->oom_info.reason
+-        );
+-        free(nid_str);
+-        nid_str = NULL;
++
++    char *nid_str = (char *) calloc (MSG_STR_MAX_LEN, sizeof(char));
++    if (!nid_str) {
++        logging_error("Failed to allocate memory!");
++        return -1;
++    }
++    for (int i = 0; i < OOM_EVENT_MAX_NUMA_NODES ; i++) {
++        res = snprintf(nid_str + offset, MSG_STR_MAX_LEN - offset, "%d%s",
++                       smh_msg->helper_msg_info.oom_info.nid[i],
++                       (i < OOM_EVENT_MAX_NUMA_NODES - 1) ? "," : "");
+         if ((size_t)res >= MSG_STR_MAX_LEN) {
+             logging_warn("msg str size exceeds the max value\n");
++            free(nid_str);
++            nid_str = NULL;
+             return -1;
+         }
+-        break;
+-    default:
+-        logging_warn("Unknown msg type: %d\n", smh_msg->type);
++        offset += res;
++    }
++    res = snprintf(str, MSG_STR_MAX_LEN,
++                   "%lu_{nr_nid:%d,nid:[%s],sync:%d,timeout:%d,reason:%d}",
++                   smh_msg->msgid,
++                   smh_msg->helper_msg_info.oom_info.nr_nid,
++                   nid_str,
++                   smh_msg->helper_msg_info.oom_info.sync,
++                   smh_msg->helper_msg_info.oom_info.timeout,
++                   smh_msg->helper_msg_info.oom_info.reason);
++    free(nid_str);
++    nid_str = NULL;
++    if ((size_t)res >= MSG_STR_MAX_LEN) {
++        logging_warn("msg str size exceeds the max value\n");
+         return -1;
+     }
+     return 0;
+ }
+ 
+-static int convert_str_to_smh_msg(char* str, struct sentry_msg_helper_msg* smh_msg)
++static int convert_remote_smh_smg_to_str(const struct sentry_msg_helper_msg* smh_msg, char* str)
+ {
+-    int n;
+-    if (!(sscanf(str, "%lu_%lu%n", &(smh_msg->msgid), &(smh_msg->res), &n) == XALARM_MSG_ITEM_CNT)
+-        || strlen(str) != n) {
+-        logging_warn("Invalid msg str format, str is %s\n", str);
++    int res = snprintf(str, MSG_STR_MAX_LEN, "%lu_{cna:%u,eid:%s}",
++                       smh_msg->msgid,
++                       smh_msg->helper_msg_info.remote_info.cna,
++                       smh_msg->helper_msg_info.remote_info.eid);
++    if ((size_t)res >= MSG_STR_MAX_LEN) {
++        logging_warn("msg str size exceeds the max value\n");
+         return -1;
+     }
+     return 0;
+ }
+ 
++static int convert_smh_msg_to_str(struct sentry_msg_helper_msg* smh_msg, char* str)
++{
++    int res;
++    switch (smh_msg->type) {
++        case SMH_MESSAGE_POWER_OFF:
++            res = convert_power_off_smh_smg_to_str(smh_msg, str);
++            break;
++        case SMH_MESSAGE_OOM:
++            res = convert_oom_smh_smg_to_str(smh_msg, str);
++            break;
++        case SMH_MESSAGE_PANIC:
++        case SMH_MESSAGE_KERNEL_REBOOT:
++            res = convert_remote_smh_smg_to_str(smh_msg, str);
++            break;
++        default:
++            logging_warn("Unknown msg type: %d\n", smh_msg->type);
++            return -1;
++    }
++    return res;
++}
++
++static int convert_str_to_smh_msg(struct alarm_msg *al_msg, struct sentry_msg_helper_msg* smh_msg)
++{
++    int n, ret = 0;
++    unsigned short alarm_ack_type = al_msg->usAlarmId;
++    switch (alarm_ack_type) {
++        case ALARM_REBOOT_ACK_EVENT:
++        case ALARM_OOM_ACK_EVENT:
++            if (!(sscanf(al_msg->pucParas, "%lu_%lu%n",
++                         &(smh_msg->msgid),
++                         &(smh_msg->res),
++                         &n) == XALARM_GENERAL_MSG_ITEM_CNT) || strlen(al_msg->pucParas) != n) {
++                logging_warn("Invalid msg str format, str is %s\n", al_msg->pucParas);
++                ret = -1;
++            }
++            break;
++        case ALARM_PANIC_ACK_EVENT:
++        case ALARM_KERNEL_REBOOT_ACK_EVENT:
++            if (!(sscanf(al_msg->pucParas, "%lu_{cna:%u,eid:%39[^}]}_%lu%n",
++                &(smh_msg->msgid),
++                &(smh_msg->helper_msg_info.remote_info.cna),
++                smh_msg->helper_msg_info.remote_info.eid,
++                &(smh_msg->res),
++                &n) == XALARM_PANIC_MSG_ITEM_CNT) || strlen(al_msg->pucParas) != n) {
++                logging_warn("Invalid msg str format, str is %s\n", al_msg->pucParas);
++                ret = -1;
++            }
++            break;
++        default:
++            ret = -1;
++            logging_warn("Unknown ack event type: %d\n", alarm_ack_type);
++    }
++    return ret;
++}
++
+ static unsigned short convert_msg_type_to_xalarm_type(enum sentry_msg_helper_msg_type msg_type)
+ {
+     unsigned short xalarm_type = 0;
+-    switch (msg_type)
+-    {
+-    case SMH_MESSAGE_POWER_OFF:
+-        xalarm_type = ALARM_REBOOT_EVENT;
+-        break;
+-    case SMH_MESSAGE_OOM:
+-        xalarm_type = ALARM_OOM_EVENT;
+-        break;
+-    default:
+-        logging_warn("Unknown msg type: %d\n", msg_type);
+-        break;
++    switch (msg_type) {
++        case SMH_MESSAGE_POWER_OFF:
++            xalarm_type = ALARM_REBOOT_EVENT;
++            break;
++        case SMH_MESSAGE_OOM:
++            xalarm_type = ALARM_OOM_EVENT;
++            break;
++        case SMH_MESSAGE_PANIC:
++            xalarm_type = ALARM_PANIC_EVENT;
++            break;
++        case SMH_MESSAGE_KERNEL_REBOOT:
++            xalarm_type = ALARM_KERNEL_REBOOT_EVENT;
++            break;
++        default:
++            logging_warn("Unknown msg type: %d\n", msg_type);
++            break;
+     }
+     return xalarm_type;
+ }
+@@ -183,8 +259,9 @@ static void sender_cleanup(void* arg)
+     logging_info("Sender thread cleanup over\n");
+ }
+ 
+-static void* sender_thread(void* arg) {
+-    int ret;
++static void* sender_thread(void* arg)
++{
++    int ret, retry_num;
+     int fd = smh_dev_get_fd();
+     if (fd < 0) {
+         goto close_recv;
+@@ -221,22 +298,26 @@ static void* sender_thread(void* arg) {
+         if (ret < 0) {
+             continue;
+         }
+-        unsigned short al_type = convert_msg_type_to_xalarm_type(smh_msg.type);
+-        if (al_type == 0) {
++        unsigned short alarm_type = convert_msg_type_to_xalarm_type(smh_msg.type);
++        if (alarm_type == 0) {
+             logging_warn("Send msg to xalarmd failed: Get unknown type msg, skip it\n");
+             continue;
+         }
++
++        retry_num = 0;
+         for (int i = 0; i < MAX_RETRY_NUM; i++) {
+-            ret = xalarm_report_event(al_type, str);
++            ret = xalarm_report_event(alarm_type, str);
+             if (ret == 0) {
+-                logging_info("Send msg success: al_type: %d, str: %s\n", al_type, str);
++                logging_info("Send msg success: alarm_type: %d, str: %s\n", alarm_type, str);
+                 break;
+             }
+             if (ret == -EINVAL) {
+                 logging_warn("Send msg to xalarmd failed: (%d) Invalid input value, skip it\n", ret);
+                 break;
+             } else if (ret == -ENOTCONN || ret == -ECOMM || ret == -ENODEV) {
+-                logging_warn("Send msg to xalarmd failed: (%d) Bad socket conn, try again\n", ret);
++                retry_num++;
++                logging_warn("Send msg to xalarmd failed: (%d) Bad socket conn, start the %dth retry in %d seconds.\n",
++                             ret, retry_num, RETRY_PERIOD);
+                 sleep(RETRY_PERIOD);
+             } else if (ret < 0) {
+                 logging_warn("xalarm_report_event return %d\n", ret);
+@@ -244,7 +325,7 @@ static void* sender_thread(void* arg) {
+             }
+         }
+         if (ret == -ENOTCONN || ret == -ECOMM) {
+-            logging_warn("Send msg to xalarmd failed: (%d) Bad socket conn, skip it\n", ret);
++            logging_warn("Send msg to xalarmd failed after %d retries: Bad socket conn, skip it.\n", retry_num);
+         }
+     }
+ 
+@@ -254,8 +335,9 @@ sender_err:
+     str = NULL;
+ close_recv:
+     partner_t = *(pthread_t*)arg;
+-    if (partner_t)
++    if (partner_t) {
+         pthread_cancel(partner_t);
++    }
+     logging_error("Sender thread exited unexpectedly\n");
+     pthread_cleanup_pop(0);
+     return NULL;
+@@ -274,8 +356,9 @@ static void receiver_cleanup(void* arg)
+     logging_info("Receiver thread cleanup over\n");
+ }
+ 
+-static void* receiver_thread(void* arg) {
+-    int ret, fd;
++static void* receiver_thread(void* arg)
++{
++    int ret, fd, retry_num;
+     struct alarm_msg *al_msg;
+     struct sentry_msg_helper_msg smh_msg;
+     pthread_t partner_t;
+@@ -299,13 +382,18 @@ re_register:
+     };
+     id_filter.id_list[0] = ALARM_REBOOT_ACK_EVENT;
+     id_filter.id_list[1] = ALARM_OOM_ACK_EVENT;
++    id_filter.id_list[2] = ALARM_PANIC_ACK_EVENT;
++    id_filter.id_list[3] = ALARM_KERNEL_REBOOT_ACK_EVENT;
+ 
++    retry_num = 0;
+     for (int i = 0; i < MAX_RETRY_NUM; i++) {
+         ret = xalarm_register_event(&register_info, id_filter);
+-        if (ret == 0)
++        if (ret == 0) {
+             break;
++        }
+         if (ret == -ENOTCONN) {
+-            logging_warn("Failed to register xalarm, try to re-register again\n");
++            retry_num++;
++            logging_warn("Failed to register xalarm, start the %dth retry in %d seconds.\n", retry_num, RETRY_PERIOD);
+             sleep(RETRY_PERIOD);
+         } else {
+             logging_error("xalarm_register_event return %d\n", ret);
+@@ -313,7 +401,8 @@ re_register:
+         }
+     }
+     if (ret == -ENOTCONN) {
+-        logging_error("Failed to register xalarm: (%d) bad connection\n", ret);
++        logging_error("Failed to register xalarm after %d retries: bad connection, "
++                      "enter the error handling process\n", retry_num);
+         goto receiver_err;
+     }
+ 
+@@ -333,24 +422,28 @@ re_register:
+             logging_error("xalarm_get_event return %d\n", ret);
+             goto un_register;
+         } else {
+-            logging_info("Get msg: al_type: %d, str: %s\n", al_msg->usAlarmId, al_msg->pucParas);
++            logging_info("Get msg: alarm_type: %d, str: %s\n", al_msg->usAlarmId, al_msg->pucParas);
+         }
+ 
+-        ret = convert_str_to_smh_msg(al_msg->pucParas, &smh_msg);
++        ret = convert_str_to_smh_msg(al_msg, &smh_msg);
+         if (ret < 0) {
+             logging_warn("Convert str failed: Bad format '%s', skip it\n", al_msg->pucParas);
+             continue;
+         }
++        retry_num = 0;
+         for (int i = 0; i < MAX_RETRY_NUM; i++) {
+             errno = 0;
+             ret = ioctl(fd, SMH_MSG_ACK, &smh_msg);
+-            if (ret == 0)
++            if (ret == 0) {
+                 break;
++            }
+             if (errno == ERESTART || errno == ETIME || errno == ENOENT) {
+                 logging_warn("Ack to kernel failed: ioctl return %d, skip it\n", errno);
+                 break;
+             } else if (errno == EFAULT) {
+-                logging_warn("Ack to kernel failed: (%d) Copy from user failed, try again\n", errno);
++                retry_num++;
++                logging_warn("Ack to kernel failed: (%d) Copy from user failed, start the %dth retry in %d seconds.\n",
++                             errno, retry_num, RETRY_PERIOD);
+                 sleep(RETRY_PERIOD);
+             } else if (ret < 0) {
+                 logging_error("Ack to kernel failed: ioctl return %d\n", errno);
+@@ -358,7 +451,7 @@ re_register:
+             }
+         }
+         if (errno == EFAULT) {
+-            logging_warn("Ack to kernel failed: (%d) Copy from user failed, skip it\n", errno);
++            logging_warn("Ack to kernel failed after %d retries: Copy from user failed, skip it\n", retry_num);
+         }
+     }
+ 
+@@ -369,8 +462,9 @@ receiver_err:
+     close(fd);
+ close_send:
+     partner_t = *(pthread_t*)arg;
+-    if (partner_t)
++    if (partner_t) {
+         pthread_cancel(partner_t);
++    }
+     logging_error("Receiver thread exited unexpectedly\n");
+     pthread_cleanup_pop(0);
+     return NULL;
+@@ -391,8 +485,8 @@ int main()
+         logging_error("Failed to create sender thread");
+         goto err_release;
+     }
+-    ret = pthread_create(&receiver, NULL, receiver_thread, &sender);
+ 
++    ret = pthread_create(&receiver, NULL, receiver_thread, &sender);
+     if (ret) {
+         logging_error("Failed to create receiver thread");
+         pthread_cancel(sender);
+diff --git a/src/sentryPlugins/sentry_msg_monitor/smh_common_type.h b/src/sentryPlugins/sentry_msg_monitor/smh_common_type.h
+index bd01556..0ccbb12 100644
+--- a/src/sentryPlugins/sentry_msg_monitor/smh_common_type.h
++++ b/src/sentryPlugins/sentry_msg_monitor/smh_common_type.h
+@@ -1,35 +1,66 @@
++/*
++ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
++ * sysSentry is licensed under the Mulan PSL v2.
++ * You can use this software according to the terms and conditions of the Mulan PSL v2.
++ * You may obtain a copy of Mulan PSL v2 at:
++ *     http://license.coscl.org.cn/MulanPSL2
++ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FIT FOR A PARTICULAR
++ * PURPOSE.
++ * See the Mulan PSL v2 for more details.
++
++ * Description: header file for sentry msg monitor
++ * Author: Luckky
++ * Create: 2025-02-18
++*/
++
+ #ifndef SMH_COMMON_TYPE_H
+ #define SMH_COMMON_TYPE_H
+ 
+ #include <stdint.h>
+ 
+ #define SMH_TYPE ('}')
+-#define MAX_NUMA_NODES 8
++#define OOM_EVENT_MAX_NUMA_NODES 8
++#define EID_MAX_LEN 40 // eid str len 39 + '\0'
+ 
+ enum {
+-	SMH_CMD_MSG_ACK = 0x10,
++    SMH_CMD_MSG_ACK = 0x10,
+ };
+ 
+ #define SMH_MSG_ACK _IO(SMH_TYPE, SMH_CMD_MSG_ACK)
+ 
+ enum sentry_msg_helper_msg_type {
+-	SMH_MESSAGE_POWER_OFF,
+-	SMH_MESSAGE_OOM,
+-	SMH_MESSAGE_MAX,
++    SMH_MESSAGE_POWER_OFF,
++    SMH_MESSAGE_OOM,
++    SMH_MESSAGE_PANIC,
++    SMH_MESSAGE_KERNEL_REBOOT,
++    SMH_MESSAGE_MAX,
++    // Add ACK events HERE (below SMH_MESSAGE_MAX)
++    SMH_MESSAGE_PANIC_ACK,
++    SMH_MESSAGE_KERNEL_REBOOT_ACK,
++    SMH_MESSAGE_UNKNOWN,
+ };
+ 
+ struct sentry_msg_helper_msg {
+-	enum sentry_msg_helper_msg_type type;
+-	uint64_t msgid;
+-	// reboot_info is empty
+-	struct {
+-		int nr_nid;
+-		int nid[MAX_NUMA_NODES];
+-		int sync;
+-		int timeout;
+-		int reason;
+-	} oom_info;
+-	unsigned long res;
++    enum sentry_msg_helper_msg_type type;
++    uint64_t msgid;
++    uint64_t start_send_time;
++    uint64_t timeout_time;
++    // reboot_info is empty
++    union {
++        struct {
++            int nr_nid;
++            int nid[OOM_EVENT_MAX_NUMA_NODES];
++            int sync;
++            int timeout;
++            int reason;
++        } oom_info;
++        struct {
++            uint32_t cna;
++            char eid[EID_MAX_LEN];
++        } remote_info;
++    } helper_msg_info;
++    unsigned long res;
+ };
+ 
+ #endif
+diff --git a/src/services/syssentry/mod_status.py b/src/services/syssentry/mod_status.py
+index 78d7262..574493a 100644
+--- a/src/services/syssentry/mod_status.py
++++ b/src/services/syssentry/mod_status.py
+@@ -28,6 +28,7 @@ FAILED_STATUS = "FAILED"
+ WAITING_STATUS = "WAITING"
+ 
+ 
++
+ def set_task_status(task_name, status_code):
+     """set task status"""
+     task_type = TasksMap.get_task_type(task_name)
+diff --git a/src/services/syssentry/sentryctl b/src/services/syssentry/sentryctl
+index c2e3cef..d94a044 100644
+--- a/src/services/syssentry/sentryctl
++++ b/src/services/syssentry/sentryctl
+@@ -23,11 +23,92 @@ import json
+ CTL_SOCKET_PATH = "/var/run/sysSentry/control.sock"
+ MAX_PARAM_LENGTH = 256
+ 
++MAX_DIE_NUM = 2
++MAX_UVB_CNA_STR_LEN = 22
++MAX_URMA_EID_LENGTH = 39
++MAX_NODES = 32
++MIN_PANIC_TIMEOUT_MS = 0
++MAX_PANIC_TIMEOUT_MS = 3600000
++MIN_KERNEL_REBOOT_TIMEOUT_MS = 0
++MAX_KERNEL_REBOOT_TIMEOUT_MS = 3600000
++MIN_CLIENT_JETTY_ID = 3
++MAX_CLIENT_JETTY_ID = 1023
++
+ RESULT_MSG_DATA_LEN = 4
+ CTL_MSG_LEN_LEN = 3
+ ALARM_MSG_DATA_LEN = 6
+ DEFAULT_ALARM_TIME_RANGE = 10
+ 
++def write_proc_file(proc_dir, proc_name, proc_value):
++    """
++    Don't use 'shell=True' for subprocess.run/subprocess.Popen, it's not safe. However, if 'shell=true'
++    is not set, it is difficult to modify the proc file for subprocess.run/subprocess.Popen.
++    """
++    exit_code = 0
++    try:
++        with open("/proc/%s/%s" % (proc_dir, proc_name), mode="w") as f:
++            f.write(str(proc_value) + "\n")
++    except PermissionError as e:
++        exit_code = -e.errno
++        print("sentryctl: error: set %s failed for %s, the user does not have the permission!" % (proc_dir, proc_name))
++    except FileNotFoundError as e:
++        exit_code = -e.errno
++        print("sentryctl: error: set %s failed for %s, the proc file does not exist!" % (proc_dir, proc_name))
++    except Exception as e:
++        exit_code = getattr(e, 'errno', -1)
++        exit_code = -exit_code if exit_code > 0 else -1
++        print("sentryctl: error: set %s failed for %s" % (proc_dir, proc_name))
++    finally:
++        return exit_code
++
++def set_remote_reporter_proc(proc_name, proc_value):
++    return write_proc_file("sentry_remote_reporter", proc_name, proc_value)
++
++def set_urma_heartbeat(proc_value):
++    return write_proc_file("sentry_urma_comm", "heartbeat", proc_value)
++
++def set_uvb_proc(server_cna_str):
++    if len(server_cna_str.strip()) == 0:
++        print("Invalid args for server_cna")
++        sys.exit(-1)
++    server_cna_list = server_cna_str.strip().split(";")
++    if len(server_cna_list) > MAX_NODES:
++        print("Exceeded the maximum number (%d) of nodes supported." % MAX_NODES)
++        sys.exit(-1)
++    for cna in server_cna_list:
++        if len(cna.strip()) == 0:
++            print("Find invalid cna (%s) for server_cna" % cna)
++            sys.exit(-1)
++        if len(cna.strip()) > MAX_UVB_CNA_STR_LEN:
++            print("Invalid cna (%s) for server_cna" % cna)
++            sys.exit(-1)
++    server_cna_string =";".join(server_cna_list)
++    return write_proc_file("sentry_uvb_comm", "server_cna", server_cna_string)
++
++def set_urma_proc(server_eid, client_jetty_id):
++    if len(server_eid.strip()) == 0:
++        print("Invalid args for server_eid, server_eid is empty string")
++        sys.exit(-1)
++    if client_jetty_id < MIN_CLIENT_JETTY_ID or client_jetty_id > MAX_CLIENT_JETTY_ID:
++        print("Invalid args for client_jetty_id")
++        sys.exit(-1)
++
++    server_eid_list = server_eid.strip().split(";")
++    if len(server_eid_list) > MAX_DIE_NUM:
++        print("Invalid args for server_eid, server_eid contains an extra semicolon.")
++        sys.exit(-1)
++    for server_eid_i in server_eid_list:
++        if len(server_eid_i) == 0:
++            print("Invalid args for server_eid, server_eid is empty string")
++            sys.exit(-1)
++        server_eid_list_i = server_eid_i.split(",")
++        for eid_i in server_eid_list_i:
++            if len(eid_i.strip()) != MAX_URMA_EID_LENGTH:
++                print("Invalid args for server_eid, the length of the eid ({}) does not equal {}.".format(eid_i, MAX_URMA_EID_LENGTH))
++                sys.exit(-1)
++    write_urma_info = " ".join((server_eid, str(client_jetty_id)))
++    return write_proc_file("sentry_urma_comm", "client_info", write_urma_info)
++
+ def status_output_format(res_data):
+     """format output"""
+     print(f"status: {res_data}")
+@@ -140,8 +221,34 @@ if __name__ == '__main__':
+     parser_get_alarm.add_argument('-d', '--detailed', action='store_true', help='Print Detailed Information')
+     parser_list = subparsers.add_parser('list', help='show all loaded task mod')
+ 
+-    client_args = parser.parse_args()
++    set_cmd_args_plugins_info = {
++        "sentry_remote_reporter": [
++            {"name" : "cna", "type": int, "choices": None, "required" : False, "help": "set cna info, it is uint32_t integer"},
++            {"name" : "eid", "type": str, "choices": None, "required" : False, "help": "set local eid info"},
++            {"name" : "uvb_comm", "type": str, "choices":  ["on", "off"], "required" : False, "help": "Select the UVB communication mode"},
++            {"name" : "urma_comm", "type": str, "choices":  ["on", "off"], "required" : False, "help": "Select the URMA communication mode"},
++            {"name" : "panic", "type": str, "choices": ["on", "off"], "required" : False, "help": "Panic event control switch"},
++            {"name" : "kernel_reboot", "type": str, "choices": ["on", "off"], "required" : False, "help": "Kernel reboot event control switch"},
++            {"name" : "panic_timeout_ms", "type": int, "choices": None, "required" : False, "help": "set panic timeout, value range is [%d, %d]" %(MIN_PANIC_TIMEOUT_MS, MAX_PANIC_TIMEOUT_MS)},
++            {"name" : "kernel_reboot_timeout_ms", "type": int, "choices": None, "required" : False, "help": "set kernel reboot timeout, value range is [%d, %d]" %(MIN_KERNEL_REBOOT_TIMEOUT_MS, MAX_KERNEL_REBOOT_TIMEOUT_MS)},
++        ],
++        "sentry_urma_comm" : [
++            {"name" : "server_eid", "type": str, "choices": None, "required" : False, "help": "Info about other nodes to be connected to the current node"},
++            {"name" : "client_jetty_id", "type": int, "choices": None, "required" : False, "help": "jetty id of the current node, value range is [%d, %d]" %(MIN_CLIENT_JETTY_ID, MAX_CLIENT_JETTY_ID)},
++            {"name" : "heartbeat", "type": str, "choices":  ["on", "off"], "required" : False, "help": "Heartbeat detection function switch, default off"},
++        ],
++        "sentry_uvb_comm" : [
++            {"name": "server_cna", "type": str, "choices": None, "required" : True, "help": "server cna array"},
++        ],
++    }
++    parser_set = subparsers.add_parser('set', help='set plugins params')
++    parsers_set_plugin_param = parser_set.add_subparsers(dest="set_task")
++    for plugin_name, args_info in set_cmd_args_plugins_info.items():
++        parser_set_plugin_param = parsers_set_plugin_param.add_parser(plugin_name, help="set task args for %s" % plugin_name)
++        for arg in args_info:
++            parser_set_plugin_param.add_argument("--" + arg["name"], type = arg["type"], choices = arg["choices"], required = arg["required"], help = arg["help"])
+ 
++    client_args = parser.parse_args()
+     if client_args.cmd_type == 'list':
+         req_msg_struct = {"type": "mod_list", "data":""}
+     elif client_args.cmd_type == 'start':
+@@ -165,6 +272,55 @@ if __name__ == '__main__':
+         }
+     elif client_args.cmd_type == 'reload':
+         req_msg_struct = {"type": "reload", "data": client_args.task_name}
++    elif client_args.cmd_type == 'set':
++        ret_code = 0
++        if client_args.set_task == "sentry_remote_reporter":
++            if client_args.cna != None:
++                if client_args.cna < 0:
++                    print("cna should be a number not less than 0.")
++                    ret_code = -1
++                else:
++                    ret_code += set_remote_reporter_proc("cna", client_args.cna)
++            if client_args.eid != None:
++                num_of_semicolons = client_args.eid.count(";")
++                if num_of_semicolons > 1:
++                    print("invalid value for extraneous semicolon.")
++                    sys.exit(-1)
++                eid_list = client_args.eid.split(";")
++                for eid_i in eid_list:
++                    if len(eid_i) != MAX_URMA_EID_LENGTH:
++                        print("The length of eid must be {}, but the detected input length is {}.".format(MAX_URMA_EID_LENGTH, len(eid_i)))
++                        sys.exit(-1)
++                ret_code += set_remote_reporter_proc("eid", client_args.eid)
++            if client_args.uvb_comm != None or client_args.urma_comm != None:
++                if client_args.urma_comm == "on":
++                    ret_code += set_remote_reporter_proc("urma_comm", client_args.urma_comm)
++                if client_args.uvb_comm == "on":
++                    ret_code += set_remote_reporter_proc("uvb_comm", client_args.uvb_comm)
++                if client_args.urma_comm == "off":
++                    ret_code += set_remote_reporter_proc("urma_comm", client_args.urma_comm)
++                if client_args.uvb_comm == "off":
++                    ret_code += set_remote_reporter_proc("uvb_comm", client_args.uvb_comm)
++            if client_args.panic != None:
++                ret_code += set_remote_reporter_proc("panic", client_args.panic)
++            if client_args.panic_timeout_ms != None:
++                ret_code += set_remote_reporter_proc("panic_timeout", client_args.panic_timeout_ms)
++            if client_args.kernel_reboot != None:
++                ret_code += set_remote_reporter_proc("kernel_reboot", client_args.kernel_reboot)
++            if client_args.kernel_reboot_timeout_ms != None:
++                ret_code += set_remote_reporter_proc("kernel_reboot_timeout", client_args.kernel_reboot_timeout_ms)
++        elif client_args.set_task == "sentry_urma_comm":
++            if client_args.server_eid != None and client_args.client_jetty_id:
++                ret_code += set_urma_proc(client_args.server_eid, client_args.client_jetty_id)
++            elif client_args.server_eid != None or client_args.client_jetty_id:
++                print("Options --server_eid and --client_jetty_id need to be used together")
++                ret_code += -1
++            if client_args.heartbeat != None:
++                ret_code += set_urma_heartbeat(client_args.heartbeat)
++        elif client_args.set_task == "sentry_uvb_comm":
++            ret_code += set_uvb_proc(client_args.server_cna)
++
++        sys.exit(ret_code)
+     else:
+         parser.print_help()
+         sys.exit(-1)
+diff --git a/src/services/syssentry/syssentry.py b/src/services/syssentry/syssentry.py
+index 32707d1..eab8033 100644
+--- a/src/services/syssentry/syssentry.py
++++ b/src/services/syssentry/syssentry.py
+@@ -645,7 +645,7 @@ def main():
+         logging.error("get pid file lock failed, exist")
+         sys.exit(17)
+ 
+-    clientId = -1
++    client_id = -1
+     try:
+         signal.signal(signal.SIGINT, sig_handler)
+         signal.signal(signal.SIGTERM, sig_handler)
+@@ -657,14 +657,14 @@ def main():
+         _ = SentryConfig.init_param()
+         TasksMap.init_task_map()
+         load_tasks()
+-        clientId = alarm_register()
++        client_id = alarm_register()
+         main_loop()
+ 
+     except Exception:
+         pass
+     finally:
+-        if clientId != -1:
+-            xalarm_unregister(clientId)
++        if client_id != -1:
++            xalarm_unregister(client_id)
+         clean_child()
+         release_pidfile()
+         remove_sock_file()
+-- 
+2.27.0
+

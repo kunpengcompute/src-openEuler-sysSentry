@@ -1,0 +1,69 @@
+Source: syssentry
+Section: admin
+Priority: optional
+Maintainer: "guodashun" , "hubin", "sxt1001", "zhuofeng6", "luckky7"
+Rules-Requires-Root: no
+Build-Depends:
+ debhelper-compat (= 13),
+ pkg-config,
+ cmake,
+ g++,
+ python3,
+ chrpath,
+ clang,
+ libbpf-dev,
+ bpftool,
+ python3-numpy,
+ libtraceevent-dev,
+ python3-setuptools,
+ libjson-c-dev,
+Standards-Version: 4.6.2
+Homepage: https://gitee.com/openEuler/sysSentry
+
+Package: syssentry
+Section: cli-mono
+Architecture: arm64
+Multi-Arch: same
+Depends:
+ libbpf1,
+ python3-dbus,
+ dbus-daemon,
+ python3-gi,
+ ${misc:Depends},
+ ${shlibs:Depends},
+Description: sysSentry provides framework tools for system inspection.
+
+Package: libxalarm1
+Section: libs
+Architecture: arm64
+Multi-Arch: same
+Depends:
+ ${shlibs:Depends},
+ ${misc:Depends},
+ libjson-c5,
+Description: The xalarm library for the sysSentry
+
+Package: libxalarm-dev
+Section: libdevel
+Architecture: arm64
+Multi-Arch: same
+Depends:
+ libjson-c-dev,
+ libxalarm1,
+ ${misc:Depends},
+Description: The development package for the libxalarm
+
+Package: sentry-msg-monitor
+Section: utils
+Architecture: arm64
+Multi-Arch: same
+Depends:
+ syssentry,
+ libxalarm1,
+ libjson-c5,
+ lsof,
+ ipmitool,
+ libobmm1,
+ ${shlibs:Depends},
+ ${misc:Depends},
+Description: A plugin for sysSentry to listening specific messages

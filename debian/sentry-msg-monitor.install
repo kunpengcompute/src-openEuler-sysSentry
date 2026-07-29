@@ -1,0 +1,4 @@
+debian/tmp/etc/sysSentry/tasks/sentry_msg_monitor.mod etc/sysSentry/tasks/
+debian/tmp/etc/sysconfig/sentry_msg_monitor.env etc/sysconfig/
+debian/tmp/etc/sysSentry/task_scripts/sentry_msg_monitor.sh etc/sysSentry/task_scripts/
+debian/tmp/usr/bin/sentry_msg_monitor usr/bin/
