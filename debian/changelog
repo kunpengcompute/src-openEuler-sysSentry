@@ -1,3 +1,10 @@
+syssentry (1.0.3-5) UNRELEASED; urgency=medium
+
+  * sync ub related patches
+  * fix build failed
+
+ -- tong_1001 <sxt1001@qq.com>  Tue, 04 Aug 2026 15:15:01 +0800
+
 syssentry (1.0.3-4) UNRELEASED; urgency=medium
 
   * sync ub related patches

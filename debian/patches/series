@@ -57,16 +57,20 @@ debian/fix-the-potential-KeyError-exception-in-task_get_ala.patch
 debian/fix-potential-stack-overflow-issue-in-hbm_online_rep.patch
 debian/fix-potential-crash-issue-in-bmc_recv.patch
 debian/fix-period-type-task-abnormal-status.patch
+# PR-295
 debian/fix-potential-overflow-in-report_result.patch
 debian/fix-potential-memory-leak-issues-in-sentry_msg_monit.patch
 debian/fix-some-codecheck-warning.patch
 debian/set-log-level-in-sentry_msg_monitor.patch
+# PR-300
 debian/fix-the-problem-of-checking-the-return-value-of-the-.patch
+# PR-301
 debian/xalarm-add-sysSentry.service-status-monitoring.patch
 debian/refact-xalarm_unregister_event-and-xalarm_report_eve.patch
 debian/refact-sentryctl-set-cmd.patch
 debian/Implement-systemd-socket-activation-for-xalarm-and-f.patch
 debian/implement-systemd-socket-activation-for-sysSentry.patch
+# PR-296
 debian/fix-potential-resource-leak-in-get_debugfs_dir.patch
 debian/fix-potential-buffer-overflow-in-create_trace_instan.patch
 debian/fix-potential-double-free-in-sentry_msg_monitor.patch
@@ -84,19 +88,62 @@ debian/check-cpu-info-in-parse_patrol_result.patch
 debian/fix-potential-null-pointer-reference-in-catlib.patch
 debian/fix-socket-fd-leaks.patch
 debian/fix-NameError-in-task_get_alarm.patch
+# PR-303
 debian/fix-fd-leaks-in-get_socket_id.patch
 debian/fix-resource-leaks-in-ebpf_collector.patch
 debian/fix-fd-leaks-in-sysSentry-and-xalarmd-service.patch
 debian/fix-potential-overflow-which-cause-the-allocated-mem.patch
 debian/fix-fd-leaks-in-sentry_msg_monitor.patch
+# PR-299
+debian/rename-bmc_block_io-to-bmc_ras_sentry.patch
+debian/BMC-Ras-Sentry-add-config-bmc_events.patch
+debian/Support-report-bmc-block-ras-sentry.patch
+# PR-302
+debian/bmc_ras_sentry-add-new-way-to-get-disk-SN-to-block-n.patch
+debian/bmc_ras_sentry-add-way-to-get-disk-SN.patch
+# PR-305
 debian/delete-cmd-security-check.patch
+# PR-304
 debian/feat-add-OOM-rate-limit-policy-configuration-support.patch
+# PR-306
 debian/check-pid-result-and-add-some-log.patch
+# PR-307
 debian/add-some-error-info.patch
+# PR-311
 debian/fix-integer-overflow-rish-in-QueryEvents.patch
+# PR-312
 debian/fix-potential-fd-leak-issue.patch
 debian/fix-the-infinite-loop-for-cleanup_thread-thread.patch
 debian/fix-error-log-for-task-stop-function.patch
+# PR-316
 debian/feat-xalarm-add-event-registration-and-switch-manage.patch
+debian/compile-cpu_sentry-plugin.patch
+# PR-328
+debian/change-os-name-in-service-desc.patch
+debian/delete-sensitive-information-content.patch
+# PR-332
+debian/fix-build-warning-for-catlib.patch
+# PR-338
+debian/fix-keep-critical-events-enabled-during-service-shut.patch
+# PR-336
+debian/xalarm-auto-load-driver-when-proc-not-found.patch
+# PR-337
+debian/fix-xalarm-fix-service-stop-timeout-and-PID-lock-rel.patch
+debian/fix-xalarm-add-graceful-shutdown-for-GLib-main-loop-.patch 
+debian/update-bmc_ras_sentry-plugin.patch
+debian/fix-sysSentry-service-restart-issues-PID-lock-releas.patch
+debian/feat-add-link-event-alarm-reporting.patch
+debian/fix-event-switch-invalidation-after-sysSentry-servic.patch
+debian/verify-event-switch-state-by-reading-proc-file-befor.patch
+debian/feat-sentry_msg_monitor-add-kernel-driver-version-co.patch
+debian/fix-script-check-if-driver-exists-before-removing-it.patch
+debian/cleanup-uninstall-log_utils.h-file.patch
+debian/fix-PYNAME-define.patch
+debian/fix-security-build-options-bug-for-ebpf_collector.patch
+debian/Fix-the-issue-of-missing-security-compilation-option.patch
+debian/fix-bmc_ras_sentry-compile-failed-on-old-gcc.patch
+debian/fix-potential-overflow-in-xalarm_report_event.patch
+debian/Fix-CTL-message-length-overflow-when-data-exceeds-3-.patch 
 debian/0001-fix-build-failed.patch
 debian/0002-fix-dh_missing-error.patch
+debian/0003-do-not-compile-ebpf-bmc_ras_sentry-soc_ring_sentry-h.patch

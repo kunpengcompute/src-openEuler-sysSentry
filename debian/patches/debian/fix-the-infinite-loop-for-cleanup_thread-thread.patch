@@ -1,7 +1,7 @@
-From 8b3fca92aca43c6270aa3fa8f6a4ef657cd26d1d Mon Sep 17 00:00:00 2001
+From b9a8ecb18a85b551d0c5dccbdd0d78c3c538a731 Mon Sep 17 00:00:00 2001
 From: shixuantong <shixuantong1@huawei.com>
 Date: Sat, 18 Apr 2026 10:21:04 +0800
-Subject: [PATCH 6/8] fix the infinite loop for cleanup_thread thread
+Subject: [PATCH 5/6] fix the infinite loop for cleanup_thread thread
 
 ---
  src/services/xalarm/xalarm_server.py | 2 +-
@@ -21,5 +21,5 @@ index f729366..97aa8a8 100644
  
  
 -- 
-2.41.0
+2.43.0
 

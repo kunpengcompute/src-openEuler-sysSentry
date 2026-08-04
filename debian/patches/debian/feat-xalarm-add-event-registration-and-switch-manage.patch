@@ -1,8 +1,7 @@
-From 3292bb843b7d0daccf5a954f7b45e9a223757121 Mon Sep 17 00:00:00 2001
+From 6145276b91178b0a5bdd004f6d9239495746705f Mon Sep 17 00:00:00 2001
 From: xiaoge1001 <sxt1001@foxmail.com>
 Date: Mon, 20 Apr 2026 19:35:39 +0800
-Subject: [PATCH 8/8] feat(xalarm): add event registration and switch
- management
+Subject: [PATCH] feat(xalarm): add event registration and switch management
 
   - Add event ID transmission from client to server on registration
   - Server opens event switches when clients subscribe
@@ -101,7 +100,7 @@ index 1ea3900..ba96bf4 100644
  }
  
 diff --git a/src/services/xalarm/xalarm_daemon.py b/src/services/xalarm/xalarm_daemon.py
-index 8524a89..1e45706 100644
+index 0581abe..e47243b 100644
 --- a/src/services/xalarm/xalarm_daemon.py
 +++ b/src/services/xalarm/xalarm_daemon.py
 @@ -68,6 +68,7 @@ def release_pidfile():
@@ -350,7 +349,7 @@ index 0000000..f651a0c
 +
 +        logging.info("Client fd %d unregistered events: %s", client_fd, event_ids)
 diff --git a/src/services/xalarm/xalarm_server.py b/src/services/xalarm/xalarm_server.py
-index 97aa8a8..f41a2fc 100644
+index f729366..d5adbce 100644
 --- a/src/services/xalarm/xalarm_server.py
 +++ b/src/services/xalarm/xalarm_server.py
 @@ -38,7 +38,7 @@ from .xalarm_transfer import (
@@ -462,5 +461,5 @@ index aafdd3f..e87b2c0 100644
              del fd_to_socket[fileno]
              logging.info(f"cleaned up connection {fileno} for client lost connection.")
 -- 
-2.41.0
+2.43.0
 

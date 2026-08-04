@@ -1,0 +1,120 @@
+From e11c122c4c4d7890dbe699eebedf1440d1ce3398 Mon Sep 17 00:00:00 2001
+From: default <default>
+Date: Tue, 4 Aug 2026 15:09:13 +0800
+Subject: [PATCH 3/3] do not compile ebpf bmc_ras_sentry soc_ring_sentry
+ hbm_online_repair code
+
+---
+ Makefile | 49 ++-----------------------------------------------
+ 1 file changed, 2 insertions(+), 47 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index cc9c96d..00c6faa 100644
+--- a/Makefile
++++ b/Makefile
+@@ -29,7 +29,7 @@ PKGVEREGG := syssentry-$(VERSION)-py$(PYTHON_VERSION).egg-info
+ 
+ ARCH := $(shell uname -m)
+ 
+-all: lib ebpf hbm_online_repair bmc_ras_sentry soc_ring_sentry sentry_msg_monitor cpu_patrol
++all: lib sentry_msg_monitor 
+ 
+ lib:libxalarm log
+ 
+@@ -41,23 +41,6 @@ log:
+ 	cd $(CURSRCDIR)/libsentry/c/log && cmake . -B build
+ 	cd $(CURSRCDIR)/libsentry/c/log/build && make
+ 
+-ebpf:
+-	@if [ -d "$(CURSRCDIR)/services/sentryCollector/ebpf_collector/" ]; then \
+-		cd $(CURSRCDIR)/services/sentryCollector/ebpf_collector/ && make;	\
+-	fi
+-
+-cpu_patrol: libxalarm
+-	cd $(CURSRCDIR)/sentryPlugins/cpu_sentry/catlib/ && cmake -B ./build/ -S . -DCMAKE_INSTALL_PREFIX=/usr/local
+-	cd $(CURSRCDIR)/sentryPlugins/cpu_sentry/catlib/build && make
+-
+-hbm_online_repair:
+-	cd $(CURSRCDIR)/sentryPlugins/hbm_online_repair/ && make
+-bmc_ras_sentry: lib
+-	cd $(CURSRCDIR)/sentryPlugins/bmc_ras_sentry/ && sh build.sh
+-
+-soc_ring_sentry: lib
+-	cd $(CURSRCDIR)/sentryPlugins/soc_ring_sentry/ && make
+-
+ sentry_msg_monitor: lib
+ 	cd $(CURSRCDIR)/sentryPlugins/sentry_msg_monitor/ && make
+ 
+@@ -137,27 +120,13 @@ endif
+ 	# log utils
+ 	install -m 550 $(CURSRCDIR)/libsentry/c/log/build/libsentry_log.so $(LIBINSTALLDIR)
+ 
+-ebpf_clean:
+-	cd $(CURSRCDIR)/services/sentryCollector/ebpf_collector && make clean
+-
+-hbm_clean:
+-	cd $(CURSRCDIR)/sentryPlugins/hbm_online_repair && make clean
+-
+-bmc_clean:
+-	cd $(CURSRCDIR)/sentryPlugins/bmc_ras_sentry && sh build.sh clean
+-
+-srs_clean:
+-	cd $(CURSRCDIR)/sentryPlugins/soc_ring_sentry && make clean
+-
+ smm_clean:
+ 	cd $(CURSRCDIR)/sentryPlugins/sentry_msg_monitor && make clean
+ 
+-clean: ebpf_clean hbm_clean bmc_clean srs_clean smm_clean
++clean: smm_clean
+ 	rm -rf $(CURLIBDIR)/build
+ 	rm -rf $(CURSRCDIR)/build
+ 	rm -rf $(CURSRCDIR)/libsentry/c/log/build
+-	rm -rf $(CURSRCDIR)/sentryPlugins/bmc_ras_sentry/build/
+-	rm -rf $(CURSRCDIR)/sentryPlugins/cpu_sentry/catlib/build/
+ 	rm -rf $(CURSRCDIR)/syssentry.egg-info
+ 	rm -rf $(CURSRCDIR)/SENTRY_FILES
+ 
+@@ -165,18 +134,11 @@ uninstall:
+ 	rm -rf $(BINDIR)/sentryctl
+ 	rm -rf $(BINDIR)/syssentry
+ 	rm -rf $(BINDIR)/xalarmd
+-	rm -rf $(BINDIR)/sentryCollector
+-	rm -rf $(BINDIR)/hbm_online_repair
+-	rm -rf $(BINDIR)/soc_ring_sentry
+-	rm -rf $(BINDIR)/bmc_ras_sentry
+-	rm -rf $(BINDIR)/ebpf_collector
+ 	rm -rf $(BINDIR)/sentry_msg_monitor
+ 	rm -rf $(LIBINSTALLDIR)/libxalarm.so
+ 	rm -rf $(INCLUDEDIR)/xalarm
+ 	rm -rf $(LIBINSTALLDIR)/libsentry_log.so
+ 	rm -rf $(ETCDIR)/sysSentry
+-	rm -rf $(ETCDIR)/hbm_online_repair.env
+-	rm -rf $(ETCDIR)/soc_ring_sentry.env
+ 	rm -rf $(ETCDIR)/sentry_msg_monitor.env
+ 	rm -rf $(LOGSAVEDIR)/sysSentry
+ 	rm -rf $(PYDIR)/syssentry
+@@ -186,16 +148,10 @@ uninstall:
+ 	rm -rf $(PYDIR)/$(PKGVEREGG)
+ 	rm -rf $(PYDIR)/xalarm
+ 
+-	# clean cpu_sentry
+-	rm -rf $(BINDIR)/cpu_sentry
+-	rm -rf $(BINDIR)/cat-cli
+-	rm -rf $(LIBINSTALLDIR)/libcpu_patrol.so
+-
+ 	rm -rf $(SYSTEMDDIR)/sysSentry.service
+ 	rm -rf $(SYSTEMDDIR)/sysSentry.socket
+ 	rm -rf $(SYSTEMDDIR)/xalarmd.service
+ 	rm -rf $(SYSTEMDDIR)/xalarmd.socket
+-	rm -rf $(SYSTEMDDIR)/sentryCollector.service
+ 	systemctl daemon-reload
+ 
+ test:
+@@ -216,4 +172,3 @@ startup:
+ 	systemctl start sysSentry.socket
+ 	systemctl restart xalarmd
+ 	systemctl restart sysSentry
+-	systemctl restart sentryCollector
+-- 
+2.43.0
+

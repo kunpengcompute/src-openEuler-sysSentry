@@ -1,7 +1,7 @@
-From 0daa4a00c01a048c26061040bd9562ce3fc5f099 Mon Sep 17 00:00:00 2001
+From e733b7e59e7a2edf0ee171a2db006b1caf52e889 Mon Sep 17 00:00:00 2001
 From: shixuantong <shixuantong1@huawei.com>
 Date: Sat, 18 Apr 2026 09:10:01 +0800
-Subject: [PATCH 5/8] fix potential fd leak issue
+Subject: [PATCH 4/6] fix potential fd leak issue
 
 ---
  src/services/syssentry/syssentry.py  | 4 ++--
@@ -53,5 +53,5 @@ index 0581abe..8524a89 100644
          sys.exit(17)
  
 -- 
-2.41.0
+2.43.0
 

@@ -1,0 +1,377 @@
+From f2b90595b2fb29c040d2adb45af270308999965c Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Thu, 30 Apr 2026 16:10:04 +0800
+Subject: [PATCH] compile cpu_sentry plugin
+
+---
+ Makefile                                      | 168 ++++++++++--------
+ .../cpu_sentry/catlib/CMakeLists.txt          |   9 +
+ .../catlib/plugin/cpu_patrol/CMakeLists.txt   |   8 +-
+ .../plugin/cpu_patrol/cpu_patrol_result.c     |  12 +-
+ .../plugin/cpu_patrol/cpu_patrol_result.h     |  13 ++
+ src/sentryPlugins/cpu_sentry/cpu_sentry.py    |   6 +
+ src/setup.py                                  |   3 +-
+ 7 files changed, 141 insertions(+), 78 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index bbdcc02..e769c05 100644
+--- a/Makefile
++++ b/Makefile
+@@ -22,39 +22,43 @@ CURCONFIGDIR    = $(CURDIR)/config
+ PYBIN   = $(shell which python3)
+ PYNAME  = $(shell ls /usr/lib |grep -E '^python'| sort -V | tail -n1)
+ PYDIR   = $(DESTDIR)$(PREFIX)/lib/$(PYNAME)/site-packages
+-
+-PYTHON_VERSION := $(shell $(PYBIN) --version 2>&1 | awk '{print $$2}' | cut -d '.' -f 1,2)
+-PKGVER := syssentry-$(VERSION)-py$(PYTHON_VERSION)
+-PKGVEREGG := syssentry-$(VERSION)-py$(PYTHON_VERSION).egg-info
++
++PYTHON_VERSION := $(shell $(PYBIN) --version 2>&1 | awk '{print $$2}' | cut -d '.' -f 1,2)
++PKGVER := syssentry-$(VERSION)-py$(PYTHON_VERSION)
++PKGVEREGG := syssentry-$(VERSION)-py$(PYTHON_VERSION).egg-info
+ 
+ ARCH := $(shell uname -m)
+-
+-all: lib ebpf hbm_online_repair bmc_ras_sentry soc_ring_sentry sentry_msg_monitor 
+-
+-lib:libxalarm log
+-
+-libxalarm:
+-	cd $(CURLIBDIR) && cmake . -DXD_INSTALL_BINDIR=$(LIBINSTALLDIR) -B build
+-	cd $(CURLIBDIR)/build && make
+-
+-log:
+-	cd $(CURSRCDIR)/libsentry/c/log && cmake . -B build
+-	cd $(CURSRCDIR)/libsentry/c/log/build && make
+-
+-ebpf:
+-	@if [ -d "$(CURSRCDIR)/services/sentryCollector/ebpf_collector/" ]; then \
+-		cd $(CURSRCDIR)/services/sentryCollector/ebpf_collector/ && make;	\
+-	fi
+-
+-hbm_online_repair:
+-	cd $(CURSRCDIR)/sentryPlugins/hbm_online_repair/ && make
+-bmc_ras_sentry: lib
+-	cd $(CURSRCDIR)/sentryPlugins/bmc_ras_sentry/ && sh build.sh
+-
+-soc_ring_sentry: lib
+-	cd $(CURSRCDIR)/sentryPlugins/soc_ring_sentry/ && make
+-
+-sentry_msg_monitor: lib
++
++all: lib ebpf hbm_online_repair bmc_ras_sentry soc_ring_sentry sentry_msg_monitor cpu_patrol
++
++lib:libxalarm log
++
++libxalarm:
++	cd $(CURLIBDIR) && cmake . -DXD_INSTALL_BINDIR=$(LIBINSTALLDIR) -B build
++	cd $(CURLIBDIR)/build && make
++
++log:
++	cd $(CURSRCDIR)/libsentry/c/log && cmake . -B build
++	cd $(CURSRCDIR)/libsentry/c/log/build && make
++
++ebpf:
++	@if [ -d "$(CURSRCDIR)/services/sentryCollector/ebpf_collector/" ]; then \
++		cd $(CURSRCDIR)/services/sentryCollector/ebpf_collector/ && make;	\
++	fi
++
++cpu_patrol: libxalarm
++	cd $(CURSRCDIR)/sentryPlugins/cpu_sentry/catlib/ && cmake -B ./build/ -S . -DCMAKE_INSTALL_PREFIX=/usr/local
++	cd $(CURSRCDIR)/sentryPlugins/cpu_sentry/catlib/build && make
++
++hbm_online_repair:
++	cd $(CURSRCDIR)/sentryPlugins/hbm_online_repair/ && make
++bmc_ras_sentry: lib
++	cd $(CURSRCDIR)/sentryPlugins/bmc_ras_sentry/ && sh build.sh
++
++soc_ring_sentry: lib
++	cd $(CURSRCDIR)/sentryPlugins/soc_ring_sentry/ && make
++
++sentry_msg_monitor: lib
+ 	cd $(CURSRCDIR)/sentryPlugins/sentry_msg_monitor/ && make
+ 
+ install: all dirs isentry
+@@ -140,15 +144,26 @@ isentry:
+ 	install -m 600 $(CURCONFIGDIR)/plugins/ai_block_io.ini $(ETCDIR)/sysSentry/plugins/
+ 	install -m 600 $(CURCONFIGDIR)/tasks/ai_block_io.mod $(ETCDIR)/sysSentry/tasks/
+ 
+-	# hbm_online_repair
+-	install -m 550 $(CURSRCDIR)/sentryPlugins/hbm_online_repair/hbm_online_repair $(BINDIR)
+-	install -m 600 $(CURCONFIGDIR)/env/hbm_online_repair.env $(ETCDIR)/sysconfig/
+-	install -m 600 $(CURCONFIGDIR)/tasks/hbm_online_repair.mod $(ETCDIR)/sysSentry/tasks/
+-
+-	# soc_ring_sentry
+-	install -m 750 $(CURSRCDIR)/sentryPlugins/soc_ring_sentry/soc_ring_sentry $(BINDIR)
+-	install -m 600 $(CURCONFIGDIR)/env/soc_ring_sentry.env $(ETCDIR)/sysconfig/
+-	install -m 600 $(CURCONFIGDIR)/tasks/soc_ring_sentry.mod $(ETCDIR)/sysSentry/tasks/
++	# cpu_patrol
++	install -d -m 755 $(PYDIR)/sentryPlugins/cpu_sentry
++	install -d -m 755 $(PYDIR)/sentryPlugins/cpu_sentry/__pycache__
++	install -m 550 $(CURSRCDIR)/build/usr/bin/cpu_sentry $(BINDIR)
++	install -m 644 src/build/usr/lib/$(PYNAME)/site-packages/sentryPlugins/cpu_sentry/*.py  $(PYDIR)/sentryPlugins/cpu_sentry/
++	install -m 644 src/build/usr/lib/$(PYNAME)/site-packages/sentryPlugins/cpu_sentry/__pycache__/* $(PYDIR)/sentryPlugins/cpu_sentry/__pycache__/
++	install -m 550 $(CURSRCDIR)/sentryPlugins/cpu_sentry/catlib/build/cat-cli $(BINDIR)
++	install -m 550 $(CURSRCDIR)/sentryPlugins/cpu_sentry/catlib/build/plugin/cpu_patrol/libcpu_patrol.so $(LIBINSTALLDIR)
++	install -m 600 $(CURCONFIGDIR)/plugins/cpu_sentry.ini $(ETCDIR)/sysSentry/plugins
++	install -m 600 $(CURCONFIGDIR)/tasks/cpu_sentry.mod $(ETCDIR)/sysSentry/tasks
++
++	# hbm_online_repair
++	install -m 550 $(CURSRCDIR)/sentryPlugins/hbm_online_repair/hbm_online_repair $(BINDIR)
++	install -m 600 $(CURCONFIGDIR)/env/hbm_online_repair.env $(ETCDIR)/sysconfig/
++	install -m 600 $(CURCONFIGDIR)/tasks/hbm_online_repair.mod $(ETCDIR)/sysSentry/tasks/
++
++	# soc_ring_sentry
++	install -m 750 $(CURSRCDIR)/sentryPlugins/soc_ring_sentry/soc_ring_sentry $(BINDIR)
++	install -m 600 $(CURCONFIGDIR)/env/soc_ring_sentry.env $(ETCDIR)/sysconfig/
++	install -m 600 $(CURCONFIGDIR)/tasks/soc_ring_sentry.mod $(ETCDIR)/sysSentry/tasks/
+ 
+ 	# bmc_ras_sentry
+ 	install -m 550 $(CURSRCDIR)/sentryPlugins/bmc_ras_sentry/output/bmc_ras_sentry $(BINDIR)
+@@ -195,24 +210,25 @@ bmc_clean:
+ 
+ srs_clean:
+ 	cd $(CURSRCDIR)/sentryPlugins/soc_ring_sentry && make clean
+-
+-smm_clean:
+-	cd $(CURSRCDIR)/sentryPlugins/sentry_msg_monitor && make clean
+-
+-clean: ebpf_clean hbm_clean bmc_clean srs_clean smm_clean
+-	rm -rf $(CURLIBDIR)/build
+-	rm -rf $(CURSRCDIR)/build
+-	rm -rf $(CURSRCDIR)/libsentry/c/log/build
++
++smm_clean:
++	cd $(CURSRCDIR)/sentryPlugins/sentry_msg_monitor && make clean
++
++clean: ebpf_clean hbm_clean bmc_clean srs_clean smm_clean
++	rm -rf $(CURLIBDIR)/build
++	rm -rf $(CURSRCDIR)/build
++	rm -rf $(CURSRCDIR)/libsentry/c/log/build
+ 	rm -rf $(CURSRCDIR)/sentryPlugins/bmc_ras_sentry/build/
+-	rm -rf $(CURSRCDIR)/syssentry.egg-info
+-	rm -rf $(CURSRCDIR)/SENTRY_FILES
+-
+-uninstall:
+-	rm -rf $(BINDIR)/sentryctl
+-	rm -rf $(BINDIR)/syssentry
+-	rm -rf $(BINDIR)/xalarmd
+-	rm -rf $(BINDIR)/sentryCollector
+-	rm -rf $(BINDIR)/hbm_online_repair
++	rm -rf $(CURSRCDIR)/sentryPlugins/cpu_sentry/catlib/build/
++	rm -rf $(CURSRCDIR)/syssentry.egg-info
++	rm -rf $(CURSRCDIR)/SENTRY_FILES
++
++uninstall:
++	rm -rf $(BINDIR)/sentryctl
++	rm -rf $(BINDIR)/syssentry
++	rm -rf $(BINDIR)/xalarmd
++	rm -rf $(BINDIR)/sentryCollector
++	rm -rf $(BINDIR)/hbm_online_repair
+ 	rm -rf $(BINDIR)/soc_ring_sentry
+ 	rm -rf $(BINDIR)/bmc_ras_sentry
+ 	rm -rf $(BINDIR)/ebpf_collector
+@@ -223,24 +239,30 @@ uninstall:
+ 	rm -rf $(INCLUDEDIR)/libsentry
+ 	rm -rf $(ETCDIR)/sysSentry
+ 	rm -rf $(ETCDIR)/hbm_online_repair.env
+-	rm -rf $(ETCDIR)/soc_ring_sentry.env
+-	rm -rf $(ETCDIR)/sentry_msg_monitor.env
+-	rm -rf $(LOGSAVEDIR)/sysSentry
+-	rm -rf $(PYDIR)/syssentry
+-	rm -rf $(PYDIR)/xalarm
+-	rm -rf $(PYDIR)/sentryPlugins
+-	rm -rf $(PYDIR)/sentryCollector
+-	rm -rf $(PYDIR)/$(PKGVEREGG)
+-	rm -rf $(PYDIR)/xalarm
+-	rm -rf $(SYSTEMDDIR)/sysSentry.service
++	rm -rf $(ETCDIR)/soc_ring_sentry.env
++	rm -rf $(ETCDIR)/sentry_msg_monitor.env
++	rm -rf $(LOGSAVEDIR)/sysSentry
++	rm -rf $(PYDIR)/syssentry
++	rm -rf $(PYDIR)/xalarm
++	rm -rf $(PYDIR)/sentryPlugins
++	rm -rf $(PYDIR)/sentryCollector
++	rm -rf $(PYDIR)/$(PKGVEREGG)
++	rm -rf $(PYDIR)/xalarm
++
++	# clean cpu_sentry
++	rm -rf $(BINDIR)/cpu_sentry
++	rm -rf $(BINDIR)/cat-cli
++	rm -rf $(LIBINSTALLDIR)/libcpu_patrol.so
++
++	rm -rf $(SYSTEMDDIR)/sysSentry.service
+ 	rm -rf $(SYSTEMDDIR)/sysSentry.socket
+-	rm -rf $(SYSTEMDDIR)/xalarmd.service
++	rm -rf $(SYSTEMDDIR)/xalarmd.service
+ 	rm -rf $(SYSTEMDDIR)/xalarmd.socket
+-	rm -rf $(SYSTEMDDIR)/sentryCollector.service
+-	systemctl daemon-reload
+-
+-test:
+-	@if [[ -z "$(log)" ]]; then \
++	rm -rf $(SYSTEMDDIR)/sentryCollector.service
++	systemctl daemon-reload
++
++test:
++	@if [[ -z "$(log)" ]]; then \
+ 		log="console";  \
+ 	fi
+ 	@if [[ -z "$t" ]]; then \
+diff --git a/src/sentryPlugins/cpu_sentry/catlib/CMakeLists.txt b/src/sentryPlugins/cpu_sentry/catlib/CMakeLists.txt
+index a7d906a..ea76518 100644
+--- a/src/sentryPlugins/cpu_sentry/catlib/CMakeLists.txt
++++ b/src/sentryPlugins/cpu_sentry/catlib/CMakeLists.txt
+@@ -3,11 +3,16 @@ project(cat-cli C)
+ set(CMAKE_C_STANDARD 11)
+ set(CMAKE_CXX_STANDARD_REQUIRED OFF)
+ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g")
++set(CMAKE_SKIP_RPATH TRUE)
+ # 父子模块都可以直接<include>如下路径下的头文件
+ include_directories(PUBLIC
+         ${PROJECT_SOURCE_DIR}
+         ${PROJECT_SOURCE_DIR}/plugin/cpu_patrol)
+ 
++link_directories(
++	${CMAKE_CURRENT_SOURCE_DIR}/../../../libs/build/libxalarm
++)
++
+ # 导入子模块
+ add_subdirectory(plugin)
+ 
+@@ -17,6 +22,10 @@ target_sources(cat-cli PUBLIC ${CLI_SRC})
+ # cpu_patrol以独立的so链接
+ TARGET_LINK_LIBRARIES(cat-cli pthread -ldl  cpu_patrol)
+ 
++set_target_properties(cat-cli PROPERTIES LINK_FLAGS "-Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack -Wtrampolines")
++set_target_properties(cat-cli PROPERTIES CMAKE_C_FLAGS "-shared -fPIC -fstack-protector-strong -D_FORTIFY_SOURCE=
++2 -O2 -Wall -Werror -g")
++
+ # 安装相关
+ install(TARGETS cat-cli
+         RUNTIME DESTINATION bin
+diff --git a/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/CMakeLists.txt b/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/CMakeLists.txt
+index e11e5e7..bb9cc33 100644
+--- a/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/CMakeLists.txt
++++ b/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/CMakeLists.txt
+@@ -1,11 +1,13 @@
+ project(cpu_patrol C)
+ 
++set(CMAKE_SKIP_RPATH TRUE)
++
+ file(GLOB CPU_PATROL_SRC *.c)
+ 
+ add_library(cpu_patrol SHARED ${CPU_PATROL_SRC})
+ 
+-include_directories(${CMAKE_SOURCE_DIR}/../../../libso/)
+-link_directories(${CMAKE_SOURCE_DIR}/../../../libso/build/xalarm/)
++include_directories(${CMAKE_SOURCE_DIR}/../../../libs/libxalarm/)
++link_directories(${CMAKE_SOURCE_DIR}/../../../libs/build/libxalarm/)
+ 
+-TARGET_LINK_LIBRARIES(cpu_patrol pthread -ldl ${CMAKE_SOURCE_DIR}/../../../libso/build/xalarm/libxalarm.so)
++TARGET_LINK_LIBRARIES(cpu_patrol pthread xalarm -ldl)
+ 
+diff --git a/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol_result.c b/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol_result.c
+index faecf0e..d8f51f9 100644
+--- a/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol_result.c
++++ b/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol_result.c
+@@ -7,8 +7,8 @@
+ #include <errno.h>
+ #include <stdbool.h>
+ #include <limits.h>
+-#include <xalarm/register_xalarm.h>
+ 
++#include "register_xalarm.h"
+ #include "cat_structs.h"
+ #include "cpu_patrol_result.h"
+ 
+@@ -28,6 +28,11 @@ static cat_return_t insert_core_to_list(core_list_st *core_list, int coreid)
+         return CAT_ERR;
+     }
+ 
++    if (core_list->current_nums >= MAX_CPU_CORES) {
++        CAT_LOG_W("current cpu nums exceeds the maximum capacity (%d)", MAX_CPU_CORES);
++        return CAT_OK;
++    }
++
+     bool if_insert = false;
+     for (unsigned short i = 0; i < core_list->current_nums; i++) {
+         if (core_list->order_list[i] < (unsigned int)coreid) {
+@@ -326,6 +331,11 @@ void handle_patrol_result(void)
+         return;
+     }
+ 
++    int max_cpu_number = get_cpu_count();
++    if (max_cpu_number > MAX_CPU_CORES) {
++        CAT_LOG_W("the cpu num in the current environment exceeds the num supported by the catcli");
++    }
++
+     // 记录巡检过程中发现的故障核
+     CAT_LOG_W("Found fault cores:[%s]", buf);
+ 
+diff --git a/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol_result.h b/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol_result.h
+index 9722ec9..16070d0 100644
+--- a/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol_result.h
++++ b/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol_result.h
+@@ -2,6 +2,7 @@
+ #define CPU_PATROL_RESULT_H
+ 
+ #include <stdio.h>
++#include <unistd.h>
+ #include <sched.h>
+ #include "cat_structs.h"
+ 
+@@ -30,7 +31,19 @@ typedef enum {
+ #define CAT_LOG_W(...) CAT_LOG("WARN", __VA_ARGS__)
+ #define CAT_LOG_E(...) CAT_LOG("ERROR", __VA_ARGS__)
+ 
++static inline int get_cpu_count(void)
++{
++    long n = sysconf(_SC_NPROCESSORS_CONF);
++    if (n <= 0) {
++        CAT_LOG_W("Warning: Failed to get cpu count, using fallback (4096)\n");
++        return 4096;
++    }
++    return (int)n;
++}
++
++
+ #define MAX_CPU_CORES 4096
++
+ typedef struct {
+     unsigned int order_list[MAX_CPU_CORES];
+     unsigned short current_nums;
+diff --git a/src/sentryPlugins/cpu_sentry/cpu_sentry.py b/src/sentryPlugins/cpu_sentry/cpu_sentry.py
+index 0c66fd2..e7a34ad 100644
+--- a/src/sentryPlugins/cpu_sentry/cpu_sentry.py
++++ b/src/sentryPlugins/cpu_sentry/cpu_sentry.py
+@@ -142,6 +142,12 @@ class CpuSentry:
+             self.send_result["details"]["code"] = 1002
+             self.send_result["result"] = ResultLevel.MINOR_ALM
+             self.send_result["details"]["msg"] = "Some CPUs are faulty. The faulty cores are isolated successfully."
++        else:
++            found_fault_cores_set = set(found_fault_cores_list)
++            isolated_cpu_set = set(CpuSentry.cpu_format_convert_to_list(self.send_result["details"]["isolated_cpu_list"]))
++            self.send_result["details"]["code"] = 1002
++            self.send_result["result"] = ResultLevel.MINOR_ALM
++            self.send_result["details"]["msg"] = "Some cores are isolated successfully and some cores ({}) fail to be isolated.".format(list(found_fault_cores_set - isolated_cpu_set))
+ 
+     def cpu_report_result(self):
+         """report result to sysSentry"""
+diff --git a/src/setup.py b/src/setup.py
+index 085e8fb..d9b7ba2 100644
+--- a/src/setup.py
++++ b/src/setup.py
+@@ -35,7 +35,8 @@ setup(
+             'xalarmd=xalarm.xalarm_daemon:alarm_process_create',
+             'sentryCollector=sentryCollector.collectd:main',
+             'avg_block_io=sentryPlugins.avg_block_io.avg_block_io:main',
+-            'ai_block_io=sentryPlugins.ai_block_io.ai_block_io:main'
++            'ai_block_io=sentryPlugins.ai_block_io.ai_block_io:main',
++            'cpu_sentry=sentryPlugins.cpu_sentry.cpu_sentry:main'
+         ]
+     },
+ )
+-- 
+2.43.0
+
