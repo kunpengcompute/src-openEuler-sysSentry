@@ -1,7 +1,7 @@
-From 738745ed8cd25889d187bd6787dfc62029b4c779 Mon Sep 17 00:00:00 2001
+From c4178848f7866dd8f98c4b44c7dfa61919db8f7a Mon Sep 17 00:00:00 2001
 From: shixuantong <shixuantong1@huawei.com>
 Date: Sat, 28 Mar 2026 16:38:55 +0800
-Subject: [PATCH 3/8] add some error info
+Subject: [PATCH] add some error info
 
 ---
  src/libs/libxalarm/register_xalarm.c               | 7 +++++++
@@ -96,5 +96,5 @@ index 810d873..fdf95f9 100644
      }
  
 -- 
-2.41.0
+2.43.0
 

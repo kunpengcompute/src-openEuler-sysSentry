@@ -1,7 +1,7 @@
-From cd2f95ed0f21acb4438cff64858623a356ca8627 Mon Sep 17 00:00:00 2001
+From a3694a78c07722994caa9619d2580136b2c06170 Mon Sep 17 00:00:00 2001
 From: shixuantong <shixuantong1@huawei.com>
 Date: Mon, 20 Apr 2026 11:01:43 +0800
-Subject: [PATCH 7/8] fix error log for task stop() function
+Subject: [PATCH 6/6] fix error log for task stop() function
 
 ---
  src/services/syssentry/global_values.py | 2 +-
@@ -21,5 +21,5 @@ index 21ca5b9..dbd1e91 100644
              self.post()
  
 -- 
-2.41.0
+2.43.0
 

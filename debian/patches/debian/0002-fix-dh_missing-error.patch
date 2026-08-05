@@ -1,17 +1,17 @@
-From bc9b2b9df93480d25a9abd062a2e5cfe0b6454b6 Mon Sep 17 00:00:00 2001
-From: shixuantong <shixuantong1@huawei.com>
-Date: Tue, 28 Apr 2026 20:59:03 +0800
-Subject: [PATCH 2/2] fix dh_missing error
+From 3e970f115bb11a474d45b5bd6e77b098c79a1aa5 Mon Sep 17 00:00:00 2001
+From: default <default>
+Date: Tue, 4 Aug 2026 15:08:58 +0800
+Subject: [PATCH 2/3] fix dh_missing error
 
 ---
- Makefile | 50 --------------------------------------------------
- 1 file changed, 50 deletions(-)
+ Makefile | 60 --------------------------------------------------------
+ 1 file changed, 60 deletions(-)
 
 diff --git a/Makefile b/Makefile
-index db79f4f..ae0d411 100755
+index dc5db37..cc9c96d 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -83,8 +83,6 @@ isentry:
+@@ -87,8 +87,6 @@ isentry:
  	install -d -m 755 $(PYDIR)/syssentry/__pycache__
  	install -d -m 755 $(PYDIR)/xalarm/
  	install -d -m 755 $(PYDIR)/xalarm/__pycache__
@@ -20,7 +20,7 @@ index db79f4f..ae0d411 100755
  	install -d -m 755 $(PYDIR)/$(PKGVEREGG)
  	install -d -m 700 $(ETCDIR)/sysconfig
  
-@@ -92,7 +90,6 @@ isentry:
+@@ -96,7 +94,6 @@ isentry:
  	install -m 600 $(CURCONFIGDIR)/logrotate-sysSentry.conf $(ETCDIR)/sysSentry/
  	install -m 600 $(CURCONFIGDIR)/inspect.conf $(ETCDIR)/sysSentry/
  	install -m 600 $(CURCONFIGDIR)/xalarm.conf $(ETCDIR)/sysSentry/
@@ -28,7 +28,7 @@ index db79f4f..ae0d411 100755
  	
  	## 安装日志文件
  	install -m 0500 src/libsentry/sh/log/logrotate-sysSentry.cron $(ETCDIR)/cron.hourly/logrotate-sysSentry
-@@ -102,58 +99,18 @@ isentry:
+@@ -106,69 +103,18 @@ isentry:
  	install -m 600 $(CURCONFIGDIR)/service/sysSentry.socket $(SYSTEMDDIR)
  	install -m 600 $(CURCONFIGDIR)/service/xalarmd.service $(SYSTEMDDIR)
  	install -m 600 $(CURCONFIGDIR)/service/xalarmd.socket $(SYSTEMDDIR)
@@ -70,6 +70,17 @@ index db79f4f..ae0d411 100755
 -	install -m 600 $(CURCONFIGDIR)/plugins/ai_block_io.ini $(ETCDIR)/sysSentry/plugins/
 -	install -m 600 $(CURCONFIGDIR)/tasks/ai_block_io.mod $(ETCDIR)/sysSentry/tasks/
 -
+-	# cpu_patrol
+-	install -d -m 755 $(PYDIR)/sentryPlugins/cpu_sentry
+-	install -d -m 755 $(PYDIR)/sentryPlugins/cpu_sentry/__pycache__
+-	install -m 550 $(CURSRCDIR)/build/usr/bin/cpu_sentry $(BINDIR)
+-	install -m 644 src/build/usr/lib/$(PYNAME)/site-packages/sentryPlugins/cpu_sentry/*.py  $(PYDIR)/sentryPlugins/cpu_sentry/
+-	install -m 644 src/build/usr/lib/$(PYNAME)/site-packages/sentryPlugins/cpu_sentry/__pycache__/* $(PYDIR)/sentryPlugins/cpu_sentry/__pycache__/
+-	install -m 550 $(CURSRCDIR)/sentryPlugins/cpu_sentry/catlib/build/cat-cli $(BINDIR)
+-	install -m 550 $(CURSRCDIR)/sentryPlugins/cpu_sentry/catlib/build/plugin/cpu_patrol/libcpu_patrol.so $(LIBINSTALLDIR)
+-	install -m 600 $(CURCONFIGDIR)/plugins/cpu_sentry.ini $(ETCDIR)/sysSentry/plugins
+-	install -m 600 $(CURCONFIGDIR)/tasks/cpu_sentry.mod $(ETCDIR)/sysSentry/tasks
+-
 -	# hbm_online_repair
 -	install -m 550 $(CURSRCDIR)/sentryPlugins/hbm_online_repair/hbm_online_repair $(BINDIR)
 -	install -m 600 $(CURCONFIGDIR)/env/hbm_online_repair.env $(ETCDIR)/sysconfig/
@@ -80,14 +91,14 @@ index db79f4f..ae0d411 100755
 -	install -m 600 $(CURCONFIGDIR)/env/soc_ring_sentry.env $(ETCDIR)/sysconfig/
 -	install -m 600 $(CURCONFIGDIR)/tasks/soc_ring_sentry.mod $(ETCDIR)/sysSentry/tasks/
 -
--	# bmc_block_io
--	install -m 550 $(CURSRCDIR)/sentryPlugins/bmc_block_io/output/bmc_block_io $(BINDIR)
--	install -m 600 $(CURCONFIGDIR)/plugins/bmc_block_io.ini  $(ETCDIR)/sysSentry/plugins/
--	install -m 600 $(CURCONFIGDIR)/tasks/bmc_block_io.mod $(ETCDIR)/sysSentry/tasks/
+-	# bmc_ras_sentry
+-	install -m 550 $(CURSRCDIR)/sentryPlugins/bmc_ras_sentry/output/bmc_ras_sentry $(BINDIR)
+-	install -m 600 $(CURCONFIGDIR)/plugins/bmc_ras_sentry.ini  $(ETCDIR)/sysSentry/plugins/
+-	install -m 600 $(CURCONFIGDIR)/tasks/bmc_ras_sentry.mod $(ETCDIR)/sysSentry/tasks/
  
  ifeq ($(ARCH), aarch64)
  	# sentry_msg_monitor
-@@ -163,12 +120,6 @@ ifeq ($(ARCH), aarch64)
+@@ -178,12 +124,6 @@ ifeq ($(ARCH), aarch64)
  	install -m 600 $(CURCONFIGDIR)/task_scripts/sentry_msg_monitor.sh $(ETCDIR)/sysSentry/task_scripts/
  endif
  
@@ -100,14 +111,6 @@ index db79f4f..ae0d411 100755
  	# libxalarm
  	install -m 555 $(CURLIBDIR)/build/libxalarm/libxalarm.so $(LIBINSTALLDIR)
  
-@@ -181,7 +132,6 @@ endif
- 
- 	# log utils
- 	install -d -m 700 $(INCLUDEDIR)/libsentry
--	install -m 644 $(CURSRCDIR)/libsentry/c/log/log_utils.h $(INCLUDEDIR)/libsentry/
- 	install -m 550 $(CURSRCDIR)/libsentry/c/log/build/libsentry_log.so $(LIBINSTALLDIR)
- 
- ebpf_clean:
 -- 
 2.43.0
 

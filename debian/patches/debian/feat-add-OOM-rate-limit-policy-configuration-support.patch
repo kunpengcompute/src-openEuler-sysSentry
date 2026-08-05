@@ -1,7 +1,7 @@
-From 6c5309b05a0457685f895e44f64ccb0b647b8c02 Mon Sep 17 00:00:00 2001
+From dacdbdf634c2e31f13d34bbc8a42bef4151bd379 Mon Sep 17 00:00:00 2001
 From: tong_1001 <shixuantong1@huawei.com>
 Date: Fri, 20 Mar 2026 11:34:48 +0800
-Subject: [PATCH 1/8] feat: add OOM rate limit policy configuration support for
+Subject: [PATCH] feat: add OOM rate limit policy configuration support for
  sentry_reporter
 
 Add support for configuring OOM event rate limiting via sentryctl command.
@@ -105,5 +105,5 @@ index 50f9606..40178b9 100644
      }
      parser_set = subparsers.add_parser('set', help='set plugins params')
 -- 
-2.41.0
+2.43.0
 

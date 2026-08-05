@@ -1,14 +1,14 @@
-From 79c3093995ca701f680331a2ae9d2b6a1526eab3 Mon Sep 17 00:00:00 2001
+From af8b83aa9c869df4f49ab84fb3d3ec68b4366069 Mon Sep 17 00:00:00 2001
 From: shixuantong <shixuantong1@huawei.com>
 Date: Fri, 27 Mar 2026 15:26:01 +0800
-Subject: [PATCH 2/8] check pid result and add some log
+Subject: [PATCH] check pid result and add some log
 
 ---
  .../sentry_msg_monitor/ub_fault_lib.c         | 26 ++++++++++++++-----
  1 file changed, 19 insertions(+), 7 deletions(-)
 
 diff --git a/src/sentryPlugins/sentry_msg_monitor/ub_fault_lib.c b/src/sentryPlugins/sentry_msg_monitor/ub_fault_lib.c
-index 15f8342..864f599 100644
+index 812cdea..c524f35 100644
 --- a/src/sentryPlugins/sentry_msg_monitor/ub_fault_lib.c
 +++ b/src/sentryPlugins/sentry_msg_monitor/ub_fault_lib.c
 @@ -32,7 +32,7 @@
@@ -93,5 +93,5 @@ index 15f8342..864f599 100644
          free(pids);
      }
 -- 
-2.41.0
+2.43.0
 

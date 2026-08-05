@@ -1,0 +1,23 @@
+From aa3038063d829ddfbc8e51a55a3006b77b2cf5df Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Mon, 11 May 2026 15:53:47 +0800
+Subject: [PATCH 1/2] change os name in service desc
+
+---
+ config/service/sysSentry.service | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/config/service/sysSentry.service b/config/service/sysSentry.service
+index 9496e6a..3f0387e 100644
+--- a/config/service/sysSentry.service
++++ b/config/service/sysSentry.service
+@@ -1,5 +1,5 @@
+ [Unit]
+-Description=EulerOS System Inspection Frame
++Description=openEuler System Inspection Frame
+ Requires=xalarmd.service sysSentry.socket
+ After=xalarmd.service sysSentry.socket
+ 
+-- 
+2.43.0
+
