@@ -1,5 +1,4 @@
 debian/tmp/usr/lib/python*/dist-packages/xalarm/__init__.py usr/lib/python3/dist-packages/xalarm/
-debian/tmp/usr/lib/python*/dist-packages/xalarm/__pycache__/ usr/lib/python3/dist-packages/xalarm/
 debian/tmp/usr/lib/python*/dist-packages/xalarm/xalarm_api.py usr/lib/python3/dist-packages/xalarm/
 debian/tmp/usr/lib/python*/dist-packages/xalarm/xalarm_config.py usr/lib/python3/dist-packages/xalarm/
 debian/tmp/usr/lib/python*/dist-packages/xalarm/xalarm_daemon.py usr/lib/python3/dist-packages/xalarm/

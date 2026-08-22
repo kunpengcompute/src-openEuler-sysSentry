@@ -27,5 +27,6 @@ override_dh_auto_install:
 override_dh_auto_test:
 	@echo "Skipping dh_auto_test: test target not needed"
 
-override_dh_fixperms:
-	@echo "Skipping dh_fixperms: Permissions have been set in the Makefile."
+override_dh_install:
+	find debian/tmp -type d -name '__pycache__' -exec rm -rf {} +
+	dh_install
