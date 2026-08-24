@@ -4,6 +4,7 @@
 # Output every command that modifies files on the build system.
 export DH_VERBOSE = 1
 
+STAGING := $(CURDIR)/debian/tmp
 
 # See FEATURE AREAS in dpkg-buildflags(1).
 #export DEB_BUILD_MAINT_OPTIONS = hardening=+all
@@ -27,5 +28,16 @@ override_dh_auto_install:
 override_dh_auto_test:
 	@echo "Skipping dh_auto_test: test target not needed"
 
-override_dh_fixperms:
-	@echo "Skipping dh_fixperms: Permissions have been set in the Makefile."
+override_dh_install:
+	find debian/tmp -type d -name '__pycache__' -exec rm -rf {} +
+	dh_install
+
+execute_after_dh_auto_install:
+	mkdir -p debian/test_build
+	printf '#include <stddef.h>\n#include <xalarm/register_xalarm.h>\nint main(void){\n    xalarm_UnRegister(1);\n    return 0;\n}\n' > debian/test_build/test_link.c
+	gcc -o debian/test_build/test_link debian/test_build/test_link.c \
+		-I$(STAGING)/usr/include \
+		-L$(STAGING)/usr/lib64 \
+		-Wl,-rpath=$(STAGING)/usr/lib64 \
+		-lxalarm
+	rm -rf debian/test_build

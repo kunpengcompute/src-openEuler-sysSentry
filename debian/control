@@ -1,7 +1,7 @@
 Source: syssentry
 Section: admin
 Priority: optional
-Maintainer: "guodashun" , "hubin", "sxt1001", "zhuofeng6", "luckky7"
+Maintainer: shixuantong <shixuantong1@huawei.com>
 Rules-Requires-Root: no
 Build-Depends:
  debhelper-compat (= 13),
@@ -18,7 +18,7 @@ Build-Depends:
  python3-setuptools,
  libjson-c-dev,
 Standards-Version: 4.6.2
-Homepage: https://gitee.com/openEuler/sysSentry
+Homepage: https://atomgit.com/openeuler/sysSentry
 
 Package: syssentry
 Section: cli-mono
@@ -26,14 +26,16 @@ Architecture: arm64
 Multi-Arch: same
 Depends:
  libbpf1,
+ python3,
  python3-dbus,
  dbus-daemon,
  python3-gi,
  ${misc:Depends},
  ${shlibs:Depends},
-Description: sysSentry provides framework tools for system inspection.
+Description: system inspection framework
+ This package provides framework tools for system inspection.
 
-Package: libxalarm1
+Package: libxalarm
 Section: libs
 Architecture: arm64
 Multi-Arch: same
@@ -41,7 +43,8 @@ Depends:
  ${shlibs:Depends},
  ${misc:Depends},
  libjson-c5,
-Description: The xalarm library for the sysSentry
+Description: xalarm library for the sysSentry
+ This package provides xalarm library for the sysSentry.
 
 Package: libxalarm-dev
 Section: libdevel
@@ -49,21 +52,22 @@ Architecture: arm64
 Multi-Arch: same
 Depends:
  libjson-c-dev,
- libxalarm1,
+ libxalarm,
  ${misc:Depends},
-Description: The development package for the libxalarm
+Description: development package for the libxalarm
+ This package provides developer tools for the libxalarm.
 
 Package: sentry-msg-monitor
 Section: utils
 Architecture: arm64
-Multi-Arch: same
 Depends:
  syssentry,
- libxalarm1,
+ libxalarm,
  libjson-c5,
  lsof,
  ipmitool,
- libobmm1,
+ obmm,
  ${shlibs:Depends},
  ${misc:Depends},
-Description: A plugin for sysSentry to listening specific messages
+Description: plugin for sysSentry to listening specific messages
+ This package provides a plugin for sysSentry to listening specific messages.
