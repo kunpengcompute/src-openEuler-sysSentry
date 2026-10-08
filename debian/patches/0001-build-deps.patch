@@ -1,0 +1,18 @@
+diff --git a/debian/control b/debian/control
+index 416fb8f..975108d 100644
+--- a/debian/control
++++ b/debian/control
+@@ -12,11 +12,12 @@ Build-Depends:
+  chrpath,
+  clang,
+  libbpf-dev,
+- bpftool,
++ linux-tools-common,
+  python3-numpy,
+  libtraceevent-dev,
+  python3-setuptools,
+  libjson-c-dev,
++ obmm-dev,
+ Standards-Version: 4.6.2
+ Homepage: https://atomgit.com/openeuler/sysSentry
+ 
