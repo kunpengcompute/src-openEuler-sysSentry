@@ -147,3 +147,4 @@ Fix-CTL-message-length-overflow-when-data-exceeds-3-.patch
 0001-fix-build-failed.patch
 0002-fix-dh_missing-error.patch
 0003-do-not-compile-ebpf-bmc_ras_sentry-soc_ring_sentry-h.patch
+0004-build-deps.patch

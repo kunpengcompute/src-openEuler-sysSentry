@@ -1,3 +1,10 @@
+syssentry (1.0.3-6) UNRELEASED; urgency=medium
+
+  * debian/control: replace bpftool with linux-tools-common
+  * debian/control: add obmm-dev to Build-Depends
+
+ -- tong_1001 <sxt1001@qq.com>  Thu, 08 Oct 2026 08:10:00 +0800
+
 syssentry (1.0.3-5) UNRELEASED; urgency=medium
 
   * sync ub related patches
