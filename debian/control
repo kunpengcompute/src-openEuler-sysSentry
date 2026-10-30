@@ -12,11 +12,12 @@ Build-Depends:
  chrpath,
  clang,
  libbpf-dev,
- bpftool,
+ linux-tools-common,
  python3-numpy,
  libtraceevent-dev,
  python3-setuptools,
  libjson-c-dev,
+ obmm-dev,
 Standards-Version: 4.6.2
 Homepage: https://atomgit.com/openeuler/sysSentry
 
