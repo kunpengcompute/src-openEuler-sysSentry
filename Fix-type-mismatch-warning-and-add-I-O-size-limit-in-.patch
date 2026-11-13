@@ -1,0 +1,97 @@
+From f54173b699c306d1fb5bf37d4cb62bf3f09a9e25 Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Wed, 12 Aug 2026 09:33:28 +0800
+Subject: [PATCH] Fix type mismatch warning and add I/O size limit in io_utils
+
+- Cast ret from ssize_t to size_t in remaining -= (size_t)ret to
+  eliminate implicit signed/unsigned conversion warning (remaining
+  is size_t, ret is ssize_t; ret is guaranteed positive at this point)
+- Add IO_MAX_SIZE (10 MB) limit to WriteAll, SendAll, and RecvAll,
+  aligned with Python layer MAX_MSG_LEN, returning EINVAL on overflow
+---
+ src/libsentry/c/io/io_utils.c | 21 ++++++++++++++++++---
+ src/libsentry/c/io/io_utils.h |  1 +
+ 2 files changed, 19 insertions(+), 3 deletions(-)
+
+diff --git a/src/libsentry/c/io/io_utils.c b/src/libsentry/c/io/io_utils.c
+index 077939018e32..22d2c494887c 100644
+--- a/src/libsentry/c/io/io_utils.c
++++ b/src/libsentry/c/io/io_utils.c
+@@ -14,6 +14,11 @@
+ 
+ ssize_t WriteAll(int fd, const char *buf, size_t count)
+ {
++    if (count > IO_MAX_SIZE) {
++        errno = EINVAL;
++        return -1;
++    }
++
+     const char *ptr = buf;
+     size_t remaining = count;
+ 
+@@ -35,7 +40,7 @@ ssize_t WriteAll(int fd, const char *buf, size_t count)
+             return -1;
+         }
+         ptr += ret;
+-        remaining -= ret;
++        remaining -= (size_t)ret;
+     }
+ 
+     return (ssize_t)count;
+@@ -43,6 +48,11 @@ ssize_t WriteAll(int fd, const char *buf, size_t count)
+ 
+ ssize_t SendAll(int fd, const char *buf, size_t len)
+ {
++    if (len > IO_MAX_SIZE) {
++        errno = EINVAL;
++        return -1;
++    }
++
+     const char *p = buf;
+     size_t remaining = len;
+ 
+@@ -64,7 +74,7 @@ ssize_t SendAll(int fd, const char *buf, size_t len)
+             return -1;
+         }
+         p += ret;
+-        remaining -= ret;
++        remaining -= (size_t)ret;
+     }
+ 
+     return (ssize_t)len;
+@@ -72,6 +82,11 @@ ssize_t SendAll(int fd, const char *buf, size_t len)
+ 
+ ssize_t RecvAll(int fd, char *buf, size_t len)
+ {
++    if (len > IO_MAX_SIZE) {
++        errno = EINVAL;
++        return -1;
++    }
++
+     char *p = buf;
+     size_t remaining = len;
+ 
+@@ -98,7 +113,7 @@ ssize_t RecvAll(int fd, char *buf, size_t len)
+             return -1;
+         }
+         p += ret;
+-        remaining -= ret;
++        remaining -= (size_t)ret;
+     }
+ 
+     return (ssize_t)len;
+diff --git a/src/libsentry/c/io/io_utils.h b/src/libsentry/c/io/io_utils.h
+index 0cd332ad91c9..0a824eea960c 100644
+--- a/src/libsentry/c/io/io_utils.h
++++ b/src/libsentry/c/io/io_utils.h
+@@ -14,6 +14,7 @@
+ 
+ #define RECV_DELAY_MSEC 100
+ #define TIME_UNIT_MILLISECONDS 1000
++#define IO_MAX_SIZE (10 * 1024 * 1024)  /* 10 MB, aligned with Python MAX_MSG_LEN */
+ 
+ /**
+  * @brief Write all data to a file descriptor, handling partial writes.
+-- 
+2.43.0
+

@@ -1,0 +1,146 @@
+From 427f0a2341f99637e82c9304b2ba77af048ee7fc Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Fri, 11 Sep 2026 15:58:35 +0800
+Subject: [PATCH] Remove unregister_events action to protect kernel event
+ switches
+
+Any process with access to the alarm socket (same group or root) could
+send an "unregister_events" message to disable kernel event switches
+(power_off, panic, kernel_reboot, ...) that other clients rely on,
+without owning the subscription.
+
+Since unsubscription already happens automatically when a client
+connection is closed (cleanup_closed_connections / transmit_alarm /
+broadcast_sentry_down all call unregister_client_events), the remote
+unregister interface is unnecessary. No client (libxalarm, pyxalarm)
+sends unregister_events.
+
+Server side (xalarm_events.py):
+- parse_event_message now only accepts "register_events"
+- handle_client_event drops the unregister branch
+- unregister_client_events() is kept for connection-close cleanup
+
+Client side (libxalarm/register_xalarm.c):
+- dropped the send_event_registration one-line wrapper and its forward
+  declaration
+- send_event_message renamed to send_event_registration, with the
+  action parameter removed and the "register_events" string inlined,
+  matching the server-side contract
+
+Co-Authored-By: GLM-5.3
+---
+ src/libs/libxalarm/register_xalarm.c | 16 ++++------------
+ src/services/xalarm/xalarm_events.py | 19 ++++++++++++++-----
+ 2 files changed, 18 insertions(+), 17 deletions(-)
+
+diff --git a/src/libs/libxalarm/register_xalarm.c b/src/libs/libxalarm/register_xalarm.c
+index 5c5272a..c8792bd 100644
+--- a/src/libs/libxalarm/register_xalarm.c
++++ b/src/libs/libxalarm/register_xalarm.c
+@@ -221,8 +221,6 @@ bool xalarm_Upgrade(struct alarm_subscription_info id_filter, int client_id)
+     return true;
+ }
+ 
+-static int send_event_registration(int fd, struct alarm_subscription_info id_filter);
+-
+ int xalarm_Register(alarm_callback_func callback, struct alarm_subscription_info id_filter)
+ {
+     if (g_register_info.is_registered || (g_register_info.register_fd != -1) ||
+@@ -561,7 +559,7 @@ free_json:
+ }
+ 
+ 
+-static int send_event_message(int fd, struct alarm_subscription_info id_filter, const char *action)
++static int send_event_registration(int fd, struct alarm_subscription_info id_filter)
+ {
+     json_object *root = json_object_new_object();
+     json_object *ids_array = json_object_new_array();
+@@ -576,7 +574,7 @@ static int send_event_message(int fd, struct alarm_subscription_info id_filter,
+         return -1;
+     }
+ 
+-    json_object_object_add(root, "action", json_object_new_string(action));
++    json_object_object_add(root, "action", json_object_new_string("register_events"));
+ 
+     for (i = 0; i < id_filter.len; i++) {
+         if (id_filter.id_list[i] == ALARM_REBOOT_EVENT ||
+@@ -593,23 +591,17 @@ static int send_event_message(int fd, struct alarm_subscription_info id_filter,
+     json_str = json_object_to_json_string(root);
+     ret = SendAll(fd, json_str, strlen(json_str));
+     if (ret < 0) {
+-        fprintf(stderr, "%s: send %s msg of client fd %d failed\n", __func__, action, fd);
++        fprintf(stderr, "%s: send register msg of client fd %d failed\n", __func__, fd);
+         json_object_put(root);
+         return -1;
+     }
+ 
+-    fprintf(stdout, "%s: send %s msg of client fd %d success\n", __func__, action, fd);
++    fprintf(stdout, "%s: send register msg of client fd %d success\n", __func__, fd);
+     json_object_put(root);
+     return 0;
+ }
+ 
+ 
+-static int send_event_registration(int fd, struct alarm_subscription_info id_filter)
+-{
+-    return send_event_message(fd, id_filter, "register_events");
+-}
+-
+-
+ int xalarm_register_event(struct alarm_register **register_info, struct alarm_subscription_info id_filter)
+ {
+     int i, ret;
+diff --git a/src/services/xalarm/xalarm_events.py b/src/services/xalarm/xalarm_events.py
+index 6d45905..0e9cecc 100644
+--- a/src/services/xalarm/xalarm_events.py
++++ b/src/services/xalarm/xalarm_events.py
+@@ -216,6 +216,14 @@ def parse_event_message(data: bytes) -> tuple:
+     """
+     Parse client event message to get action and event IDs.
+ 
++    Only "register_events" is accepted. There is intentionally no
++    "unregister_events" action: unsubscription happens automatically when
++    the client connection is closed (see unregister_client_events callers
++    in xalarm_transfer.py). Removing the remote unregister interface
++    prevents any local process with socket access from arbitrarily
++    disabling kernel event switches (power_off, panic, ...) subscribed
++    by other clients.
++
+     Args:
+         data: JSON format event message
+ 
+@@ -231,7 +239,7 @@ def parse_event_message(data: bytes) -> tuple:
+         msg = json.loads(msg_str)
+ 
+         action = msg.get("action")
+-        if action not in ["register_events", "unregister_events"]:
++        if action != "register_events":
+             logging.warning("Invalid action in event message: %s", action)
+             return (None, [])
+ 
+@@ -258,7 +266,11 @@ def parse_event_message(data: bytes) -> tuple:
+ 
+ def handle_client_event(client_fd: int, data: bytes) -> None:
+     """
+-    Handle client event message (registration or unregistration).
++    Handle client event registration message.
++
++    There is no remote unregister action: a client unsubscribes by simply
++    closing its connection, which triggers automatic cleanup
++    (unregister_client_events) in xalarm_transfer.py.
+ 
+     Args:
+         client_fd: Client socket file descriptor
+@@ -272,9 +284,6 @@ def handle_client_event(client_fd: int, data: bytes) -> None:
+     if action == "register_events":
+         logging.info("start register event")
+         register_client_events(client_fd, event_ids)
+-    elif action == "unregister_events":
+-        logging.info("start unregister event")
+-        unregister_client_events(client_fd, event_ids)
+ 
+ 
+ def clear_enabled_events_state() -> None:
+-- 
+2.45.0.windows.1
+

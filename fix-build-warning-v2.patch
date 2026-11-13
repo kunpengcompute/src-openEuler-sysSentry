@@ -1,0 +1,332 @@
+From 0519d462c634f6b05c191e07af9510eddf943419 Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Thu, 23 Jul 2026 15:39:39 +0800
+Subject: [PATCH 2/2] fix build warning
+
+---
+ .../bmc_ras_sentry/src/cbmcrassentry.cpp      |  2 +-
+ .../bmc_ras_sentry/src/common.cpp             |  6 +--
+ .../cpu_sentry/catlib/CMakeLists.txt          |  3 +-
+ src/sentryPlugins/cpu_sentry/catlib/catcli.c  |  4 +-
+ .../cpu_sentry/catlib/cli_common.h            | 12 -----
+ .../catlib/plugin/cpu_patrol/cpu_patrol.c     |  8 ++-
+ .../catlib/plugin/cpu_patrol/cpu_patrol.h     |  2 +-
+ .../plugin/cpu_patrol/cpu_patrol_result.c     | 54 ++-----------------
+ .../soc_ring_sentry/tc_ring_one.c             | 20 +++++--
+ .../sentryCollector/ebpf_collector/Makefile   |  2 +-
+ .../ebpf_collector/ebpf_collector.c           |  6 ---
+ 11 files changed, 32 insertions(+), 87 deletions(-)
+
+diff --git a/src/sentryPlugins/bmc_ras_sentry/src/cbmcrassentry.cpp b/src/sentryPlugins/bmc_ras_sentry/src/cbmcrassentry.cpp
+index 14360abb442d..7f251dc20cec 100644
+--- a/src/sentryPlugins/bmc_ras_sentry/src/cbmcrassentry.cpp
++++ b/src/sentryPlugins/bmc_ras_sentry/src/cbmcrassentry.cpp
+@@ -929,7 +929,7 @@ std::string CBMCRasSentry::GetHardwareSNByIPMI(const IPMIEvent& event)
+             return "";
+         }
+ 
+-        for (int i = 4; i < hexBytes.size(); i++) {
++        for (size_t i = 4; i < hexBytes.size(); i++) {
+             std::string asciiStr;
+             if (HexAsciiToChar(hexBytes[i], asciiStr)) {
+                 hardwareSN += asciiStr;
+diff --git a/src/sentryPlugins/bmc_ras_sentry/src/common.cpp b/src/sentryPlugins/bmc_ras_sentry/src/common.cpp
+index fa989c3ddcc5..5627603237c6 100644
+--- a/src/sentryPlugins/bmc_ras_sentry/src/common.cpp
++++ b/src/sentryPlugins/bmc_ras_sentry/src/common.cpp
+@@ -292,8 +292,8 @@ std::map<std::string, std::vector<std::string> > ParseStorcliCmd(const std::stri
+     }
+ 
+     std::map<std::string, std::vector<std::string> > result;
+-    int startLine = 0, endLine = 0;
+-    for (int i = 0; i < cmdOut.size(); i++) {
++    size_t startLine = 0, endLine = 0;
++    for (size_t i = 0; i < cmdOut.size(); i++) {
+         if ((cmdOut[i].size() == 0 || cmdOut[i] != std::string(cmdOut[i].size(), '=')) && i != cmdOut.size() - 1)
+             continue;
+ 
+@@ -304,7 +304,7 @@ std::map<std::string, std::vector<std::string> > ParseStorcliCmd(const std::stri
+             endLine = i - 2;
+         }
+ 
+-        if (startLine < 0 || endLine > cmdOut.size() || startLine > endLine) {
++        if (endLine > cmdOut.size() || startLine > endLine) {
+             BMC_LOG_ERROR << "parse storcli message failed, cmd:" << cmd;
+             return {};
+         }
+diff --git a/src/sentryPlugins/cpu_sentry/catlib/CMakeLists.txt b/src/sentryPlugins/cpu_sentry/catlib/CMakeLists.txt
+index ea7651846314..9440b471a7d4 100644
+--- a/src/sentryPlugins/cpu_sentry/catlib/CMakeLists.txt
++++ b/src/sentryPlugins/cpu_sentry/catlib/CMakeLists.txt
+@@ -23,8 +23,7 @@ target_sources(cat-cli PUBLIC ${CLI_SRC})
+ TARGET_LINK_LIBRARIES(cat-cli pthread -ldl  cpu_patrol)
+ 
+ set_target_properties(cat-cli PROPERTIES LINK_FLAGS "-Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack -Wtrampolines")
+-set_target_properties(cat-cli PROPERTIES CMAKE_C_FLAGS "-shared -fPIC -fstack-protector-strong -D_FORTIFY_SOURCE=
+-2 -O2 -Wall -Werror -g")
++set_target_properties(cat-cli PROPERTIES COMPILE_FLAGS "-shared -fPIC -fstack-protector-strong -D_FORTIFY_SOURCE=2 -O2 -Wall -Werror -g")
+ 
+ # 安装相关
+ install(TARGETS cat-cli
+diff --git a/src/sentryPlugins/cpu_sentry/catlib/catcli.c b/src/sentryPlugins/cpu_sentry/catlib/catcli.c
+index db175df53c5e..21460398f40b 100644
+--- a/src/sentryPlugins/cpu_sentry/catlib/catcli.c
++++ b/src/sentryPlugins/cpu_sentry/catlib/catcli.c
+@@ -45,7 +45,9 @@ int main(int argc, char * const argv[])
+         }
+     }
+     int ret = checkParamsDependency(&request_body, &option_errs);
+-    RETURN_NOT_TRUE(ret == CAT_OK, NULL, NULL); // 检查到的参数值有异常不再后续检查
++    if (ret != CAT_OK) {
++        return CAT_ERR;
++    }
+     return execute_request(&request_body);
+ }
+ 
+diff --git a/src/sentryPlugins/cpu_sentry/catlib/cli_common.h b/src/sentryPlugins/cpu_sentry/catlib/cli_common.h
+index 3ee70df9ad9c..bdc832ec00eb 100644
+--- a/src/sentryPlugins/cpu_sentry/catlib/cli_common.h
++++ b/src/sentryPlugins/cpu_sentry/catlib/cli_common.h
+@@ -7,18 +7,6 @@
+ 
+ #define DECIMAL 10 /* 十进制 */
+ 
+-// 期望bool_expression为true，否则return CAT_ERR，(bool_expression可能为表达式！！！)
+-#define RETURN_NOT_TRUE(bool_expression, to_release, fail_msg, ...) \
+-    do {                                                            \
+-        if (!(bool_expression)) {                                   \
+-            if (fail_msg != NULL) {                                 \
+-                printf(fail_msg, ##__VA_ARGS__), printf("\n");      \
+-            }                                                       \
+-            free(to_release);                                       \
+-            return CAT_ERR;                                         \
+-        }                                                           \
+-    } while (0)
+-
+ // 红色打印
+ #define PRINT_RED(msg, ...)          \
+     do {                             \
+diff --git a/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol.c b/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol.c
+index 9b63b3435129..467581492777 100644
+--- a/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol.c
++++ b/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol.c
+@@ -302,21 +302,19 @@ cat_return_t lib_cpu_patrol_start(const char *cpumask, int cpu_utility, const in
+     return ret;
+ }
+ 
+-cat_return_t lib_cpu_patrol_stop(void)
++void lib_cpu_patrol_stop(int sig)
+ {
+     puts("system will stop cpu patrol soon");
+     // 正在停止巡检，返回成功
+     if (pthread_mutex_trylock(&g_stop_mutex) != 0) {
+-        return CAT_OK;
++        return;
+     }
+ 
+-    cat_return_t ret = stop();
++    stop();
+ 
+     if (pthread_mutex_unlock(&g_stop_mutex) != 0) {
+         CAT_LOG_E("pthread_mutex_unlock g_stop_mutex failed.");
+     }
+-
+-    return ret;
+ }
+ 
+ 
+diff --git a/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol.h b/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol.h
+index f7acd1e04412..51e1bb9107e4 100644
+--- a/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol.h
++++ b/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol.h
+@@ -33,7 +33,7 @@ cat_return_t lib_cpu_patrol_start(const char *cpumask, int cpu_utility, int patr
+ /*
+  * 停止巡检
+  */
+-cat_return_t lib_cpu_patrol_stop(void);
++void lib_cpu_patrol_stop(int sig);
+ 
+ 
+ #endif
+diff --git a/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol_result.c b/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol_result.c
+index e2672da2486a..0567a12236cb 100644
+--- a/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol_result.c
++++ b/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol_result.c
+@@ -203,7 +203,6 @@ int get_socket_id(int core_id) {
+     FILE *file;
+     char line[MAX_LINE_LEN];
+     int id_pair[PAIR_LEN];
+-    int socket_id;
+ 
+     file = popen("lscpu -p=cpu,socket | grep '[0-9]\\+,[0-9]\\+'", "r");
+     if (file == NULL) {
+@@ -229,15 +228,15 @@ int get_socket_id(int core_id) {
+ 
+ void isolate_cpu_core(core_list_st *isolated_core_list, const core_list_st *fault_list)
+ {
+-    int ret, core_id, socket_id;
+     unsigned int total_core = sysconf(_SC_NPROCESSORS_CONF);
+     if (total_core == -1) {
+         CAT_LOG_E("Get total cpu cores failed.");
+         return;
+     }
++
+     for (unsigned short i = 0; i < fault_list->current_nums; i++) {
+-        core_id = fault_list->order_list[i];
+-        socket_id = get_socket_id(core_id);
++        int core_id = fault_list->order_list[i];
++        int socket_id = get_socket_id(core_id);
+         // 0核不隔离
+         if ((core_id >= total_core) || (core_id == 0)) {
+             CAT_LOG_E("Isolate cpu core failed, invalid core id(%u)", core_id);
+@@ -261,53 +260,6 @@ void isolate_cpu_core(core_list_st *isolated_core_list, const core_list_st *faul
+     }
+ }
+ 
+-/*
+- * 功能说明：把列表1,2,3,10,22,23,24转换成"1-3,10,22,24"形式字符串
+- */
+-static cat_return_t get_core_list_str(const core_list_st *core_list, char *out_str, unsigned short out_str_len)
+-{
+-    if (core_list->current_nums == 0) {
+-        *out_str = '\0';
+-        return CAT_OK;
+-    }
+-
+-    char buf[PATROL_RESULT_LEN] = {0};
+-    char tmp_buf[PATROL_RESULT_LEN] = {0};
+-    unsigned int begin_cpuid = core_list->order_list[0];
+-    unsigned int end_cpuid = begin_cpuid;
+-
+-    for (unsigned short i = 1; i < core_list->current_nums; i++) {
+-        if (core_list->order_list[i] == (end_cpuid + 1)) {
+-            end_cpuid++;
+-            continue;
+-        }
+-
+-        if (begin_cpuid == end_cpuid) {
+-            (void)snprintf(tmp_buf, sizeof(tmp_buf), "%u", begin_cpuid);
+-        } else {
+-            (void)snprintf(tmp_buf, sizeof(tmp_buf), "%u-%u", begin_cpuid, end_cpuid);
+-        }
+-        (void)strncat(buf, tmp_buf, sizeof(buf) - strlen(buf) - 1);
+-        (void)strncat(buf, ",", sizeof(buf) - strlen(buf) - 1);
+-
+-        end_cpuid = core_list->order_list[i];
+-        begin_cpuid = end_cpuid;
+-    }
+-    if (begin_cpuid == end_cpuid) {
+-        (void)snprintf(tmp_buf, sizeof(tmp_buf), "%u", begin_cpuid);
+-    } else {
+-        (void)snprintf(tmp_buf, sizeof(tmp_buf), "%u-%u", begin_cpuid, end_cpuid);
+-    }
+-    (void)strncat(buf, tmp_buf, sizeof(buf) - strlen(buf) - 1);
+-
+-    int ret = snprintf(out_str, out_str_len, "%s", buf);
+-    if (ret < 0 || ret >= out_str_len) {
+-        CAT_LOG_E("snprintf failed");
+-        return CAT_ERR;
+-    }
+-    return CAT_OK;
+-}
+-
+ static cat_return_t get_core_list(const core_list_st *core_list, cpu_set_t *cpu_set)
+ {
+     if (core_list->current_nums == 0) {
+diff --git a/src/sentryPlugins/soc_ring_sentry/tc_ring_one.c b/src/sentryPlugins/soc_ring_sentry/tc_ring_one.c
+index 100bcfb3c528..542d27483a00 100755
+--- a/src/sentryPlugins/soc_ring_sentry/tc_ring_one.c
++++ b/src/sentryPlugins/soc_ring_sentry/tc_ring_one.c
+@@ -98,9 +98,10 @@ static int get_numa_node(void)
+ static int is_cpu_online(int core_id)
+ {
+     char online_file[64];
+-     struct stat buffer;
+-    int online;
++    struct stat buffer;
++    int online = -1;
+     FILE *fp;
++    int ret;
+ 
+     snprintf(online_file, sizeof(online_file), "/sys/devices/system/cpu/cpu%d/online", core_id);
+     if ((core_id == 0) && (lstat(online_file, &buffer) != 0)) {
+@@ -113,9 +114,20 @@ static int is_cpu_online(int core_id)
+         return 0;
+     }
+ 
+-    fscanf(fp, "%d", &online);
++    ret = fscanf(fp, "%d", &online);
+     fclose(fp);
+ 
++    if (ret != 1) {
++        logging_error("Failed to read online status from %s\n", online_file);
++        // Read failure, assumed offline
++        return 0;
++    }
++
++    if (online != 0 && online != 1) {
++        logging_error("Invalid online value %d from %s\n", online, online_file);
++        // Read invalid value, assumed offline
++        return 0;
++    }
+     return online;
+ }
+ 
+@@ -610,7 +622,7 @@ static bool tc_ring_one_scan_test_block(uintptr_t base_addr, int scan_bit, size_
+         rd_data[1] = *((uint64_t *)(base_addr + i + TC_RING_ONE_CACHELINE_SIZE + word_offset)); // base_addr + (n + 1) * 64 + word_offset
+         if((rd_data[0] != tgt_dat_all_one) || (rd_data[1] != tgt_dat_pattern)) {
+             snprintf(err_msg, sizeof(err_msg), "[ERROR][CORE%d] test loop %lu vaddr = %#lx paddr = %#lx read_data = %#lx read_disturb = %#lx "
+-                "target_data = %#lx bit_index = %d offset = %#zu block_size = %#zu",
++                "target_data = %#lx bit_index = %d offset = %#zx block_size = %#zx",
+                 sched_getcpu(), loop_cnt, (base_addr + i + word_offset), vaddr_to_phys(base_addr + i + word_offset), rd_data[1], rd_data[0],
+                 tgt_dat_pattern, scan_bit, word_offset, block_size);
+             soc_ring_sentry_report(RESULT_LEVEL_MAJOR_ALM, err_msg);
+diff --git a/src/services/sentryCollector/ebpf_collector/Makefile b/src/services/sentryCollector/ebpf_collector/Makefile
+index f6c8df998820..9d00dac4d510 100644
+--- a/src/services/sentryCollector/ebpf_collector/Makefile
++++ b/src/services/sentryCollector/ebpf_collector/Makefile
+@@ -7,7 +7,7 @@ ARCH := $(shell uname -m | sed 's/x86_64/x86/' | sed 's/aarch64/arm64/' | sed 's
+ KERNEL_CFLAGS = -O2 -g -target bpf -D__TARGET_ARCH_$(ARCH)
+ 
+ # 定义用户态编译选项
+-USER_CFLAGS = -g -fstack-protector-strong -D_FORTIFY_SOURCE=2 -O2 -Wall -Wtrampolines -fPIE -Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack
++USER_CFLAGS = -g -fstack-protector-strong -D_FORTIFY_SOURCE=2 -O2 -Wall -fPIE -Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack
+ USER_LDFLAGS = -Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack -pie -lbpf
+ 
+ # 定义目标文件
+diff --git a/src/services/sentryCollector/ebpf_collector/ebpf_collector.c b/src/services/sentryCollector/ebpf_collector/ebpf_collector.c
+index 801972aefaf8..3a2f4e1d9c5d 100644
+--- a/src/services/sentryCollector/ebpf_collector/ebpf_collector.c
++++ b/src/services/sentryCollector/ebpf_collector/ebpf_collector.c
+@@ -69,8 +69,6 @@ static const struct argp_option opts[] = {
+ };
+ 
+ static error_t parse_arg(int key, char *arg, struct argp_state *state) {
+-    static int pos_args; 
+-
+     switch (key) { 
+     case 'h': 
+         argp_state_help(state, stderr, ARGP_HELP_STD_HELP); 
+@@ -334,19 +332,15 @@ static int handle_event(void *ctx, void *data, size_t data_sz) {
+ }
+ 
+ int main(int argc, char **argv) {
+-    struct partitions *partitions = NULL; 
+-    const struct partition *partition; 
+     static const struct argp argp = { 
+         .options = opts, 
+         .parser = parse_arg, 
+         .doc = argp_program_doc, 
+     };
+     int err; 
+-    char filename[256];
+     DIR *dir;
+     struct dirent *entry;
+     char path[1024];
+-    int major, minor;
+     DeviceInfo devices[MAP_SIZE];
+     int device_count = 0;
+     struct rlimit r = {RLIM_INFINITY, RLIM_INFINITY}; 
+-- 
+2.43.0
+

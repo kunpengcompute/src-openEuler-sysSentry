@@ -1,0 +1,30 @@
+From 49315b9b0bdf886ac4511225daace72cbd2276f4 Mon Sep 17 00:00:00 2001
+From: liuying03 <liuying03@kylinos.cn>
+Date: Wed, 9 Sep 2026 14:09:34 +0800
+Subject: [PATCH] Fix out-of-bounds read in ebpf_collector when log level is
+ empty string
+
+---
+ .../sentryCollector/ebpf_collector/ebpf_collector.c         | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/services/sentryCollector/ebpf_collector/ebpf_collector.c b/src/services/sentryCollector/ebpf_collector/ebpf_collector.c
+index a54bf82..76bde44 100644
+--- a/src/services/sentryCollector/ebpf_collector/ebpf_collector.c
++++ b/src/services/sentryCollector/ebpf_collector/ebpf_collector.c
+@@ -346,9 +346,9 @@ int main(int argc, char **argv) {
+ 
+     char *level = read_config_value(CONFIG_FILE, "log", "level");
+     if (level != NULL) {
+-        if (level[strlen(level) - 1] == '\r') {
+-            size_t len = strlen(level);
+-            level[len - 1] = '\0'; 
++        size_t len = strlen(level);
++        if (len > 0 && level[len - 1] == '\r') {
++            level[len - 1] = '\0';
+         }
+         setLogLevel(level);
+         free(level);
+-- 
+2.45.0.windows.1
+

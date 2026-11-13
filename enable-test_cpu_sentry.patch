@@ -1,0 +1,36 @@
+From ccc5c1941da4e074d10069799665793accb33cb0 Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Thu, 30 Jul 2026 09:03:43 +0800
+Subject: [PATCH 1/2] enable test_cpu_sentry
+
+---
+ selftest/test/test_cpu_sentry.py | 2 +-
+ selftest/testsuite_skip_list     | 1 -
+ 2 files changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/selftest/test/test_cpu_sentry.py b/selftest/test/test_cpu_sentry.py
+index c9af1842de3e..fa61170c1a45 100644
+--- a/selftest/test/test_cpu_sentry.py
++++ b/selftest/test/test_cpu_sentry.py
+@@ -2,7 +2,7 @@ import pytest
+ 
+ from unittest.mock import mock_open, patch
+ from syssentry.sentry_config import CpuPluginsParamsConfig
+-from syssentry.cpu_sentry import CpuSentry
++from sentryPlugins.cpu_sentry.cpu_sentry import CpuSentry
+ 
+ class TestCaseCpuSentry:
+ 
+diff --git a/selftest/testsuite_skip_list b/selftest/testsuite_skip_list
+index e433d60a95a9..aed833d3bdd5 100644
+--- a/selftest/testsuite_skip_list
++++ b/selftest/testsuite_skip_list
+@@ -5,4 +5,3 @@
+ # if it's skipped on part of the arch:
+ # testsuite:arch1
+ # testsuite:arch2
+-test_cpu_sentry
+\ No newline at end of file
+-- 
+2.43.0
+

@@ -1,0 +1,937 @@
+From 00295ef63fc2c1db9930cdcce10a6d535be89272 Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Thu, 23 Jul 2026 15:33:40 +0800
+Subject: [PATCH 1/2] Fix partial send/recv/write in socket communication
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+On stream sockets (AF_UNIX, SOCK_STREAM), send(), recv() and write() may
+return fewer bytes than requested in a single call. The existing
+code assumed these calls always complete in one invocation, which can
+cause incomplete message transmission and lead to service anomalies.
+
+Add helper functions that loop until all data is fully transferred:
+
+- Python: recv_all() in syssentry/utils.py — loops recv() until exactly
+  the requested number of bytes is received
+- C: SendAll()，RecvAll() and WriteAll() in src/libsentry/c/io/io_utils.c
+  — loops send/write/recv with EINTR/EAGAIN handling until all data
+  is transferred
+
+Update all stream socket communication points to use these helpers:
+
+- sentryctl: send() → sendall(), recv() → recv_all()
+- syssentry.py: server_recv() and server_result_recv() recv() →
+  recv_all(), send() → sendall()
+- heartbeat.py: recv() → recv_all()
+- result.py: recv() → recv_all() (sendall was already used)
+- libxalarm C: alarm_recv(), cpu_alarm_Report(), send_data_to_socket(),
+  send_event_message(), xalarm_get_event() all updated to use the
+  new _all helpers
+
+DGRAM socket operations (sendto in xalarm_Report and
+xalarm_report_event) are not changed since DGRAM sends messages
+atomically — partial sends do not occur.
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+---
+ Makefile                                      |  17 ++-
+ src/libs/libxalarm/CMakeLists.txt             |   7 +-
+ src/libs/libxalarm/register_xalarm.c          | 104 +++++++----------
+ src/libsentry/c/io/CMakeLists.txt             |   7 ++
+ src/libsentry/c/io/io_utils.c                 | 105 ++++++++++++++++++
+ src/libsentry/c/io/io_utils.h                 |  61 ++++++++++
+ .../catlib/plugin/cpu_patrol/CMakeLists.txt   |   4 +-
+ .../catlib/plugin/cpu_patrol/cpu_patrol.c     |   7 +-
+ .../plugin/cpu_patrol/cpu_patrol_result.c     |   3 +-
+ src/sentryPlugins/hbm_online_repair/Makefile  |   5 +-
+ .../hbm_online_repair/hbm-ras-events.c        |   5 +-
+ .../non-standard-hbm-repair.c                 |  18 ++-
+ src/services/syssentry/heartbeat.py           |   6 +-
+ src/services/syssentry/result.py              |   4 +-
+ src/services/syssentry/sentryctl              |  10 +-
+ src/services/syssentry/syssentry.py           |  19 ++--
+ src/services/syssentry/utils.py               |  27 +++++
+ 17 files changed, 302 insertions(+), 107 deletions(-)
+ create mode 100644 src/libsentry/c/io/CMakeLists.txt
+ create mode 100644 src/libsentry/c/io/io_utils.c
+ create mode 100644 src/libsentry/c/io/io_utils.h
+
+diff --git a/Makefile b/Makefile
+index f369228017c5..fd0d600f706e 100644
+--- a/Makefile
++++ b/Makefile
+@@ -31,9 +31,9 @@ ARCH := $(shell uname -m)
+ 
+ all: lib ebpf hbm_online_repair bmc_ras_sentry soc_ring_sentry sentry_msg_monitor cpu_patrol
+ 
+-lib:libxalarm log
++lib:libxalarm log sentry_io
+ 
+-libxalarm:
++libxalarm: sentry_io
+ 	cd $(CURLIBDIR) && cmake . -DXD_INSTALL_BINDIR=$(LIBINSTALLDIR) -B build
+ 	cd $(CURLIBDIR)/build && make
+ 
+@@ -41,16 +41,20 @@ log:
+ 	cd $(CURSRCDIR)/libsentry/c/log && cmake . -B build
+ 	cd $(CURSRCDIR)/libsentry/c/log/build && make
+ 
++sentry_io:
++	cd $(CURSRCDIR)/libsentry/c/io && cmake . -B build
++	cd $(CURSRCDIR)/libsentry/c/io/build && make
++
+ ebpf:
+ 	@if [ -d "$(CURSRCDIR)/services/sentryCollector/ebpf_collector/" ]; then \
+ 		cd $(CURSRCDIR)/services/sentryCollector/ebpf_collector/ && make;	\
+ 	fi
+ 
+-cpu_patrol: libxalarm
++cpu_patrol: lib
+ 	cd $(CURSRCDIR)/sentryPlugins/cpu_sentry/catlib/ && cmake -B ./build/ -S . -DCMAKE_INSTALL_PREFIX=/usr/local
+ 	cd $(CURSRCDIR)/sentryPlugins/cpu_sentry/catlib/build && make
+ 
+-hbm_online_repair:
++hbm_online_repair: lib
+ 	cd $(CURSRCDIR)/sentryPlugins/hbm_online_repair/ && make
+ bmc_ras_sentry: lib
+ 	cd $(CURSRCDIR)/sentryPlugins/bmc_ras_sentry/ && sh build.sh
+@@ -196,6 +200,9 @@ endif
+ 
+ 	# log utils
+ 	install -m 550 $(CURSRCDIR)/libsentry/c/log/build/libsentry_log.so $(LIBINSTALLDIR)
++
++	# io utils
++	install -m 550 $(CURSRCDIR)/libsentry/c/io/build/libsentry_io.so $(LIBINSTALLDIR)
+ 
+ ebpf_clean:
+ 	cd $(CURSRCDIR)/services/sentryCollector/ebpf_collector && make clean
+@@ -216,6 +223,7 @@ clean: ebpf_clean hbm_clean bmc_clean srs_clean smm_clean
+ 	rm -rf $(CURLIBDIR)/build
+ 	rm -rf $(CURSRCDIR)/build
+ 	rm -rf $(CURSRCDIR)/libsentry/c/log/build
++	rm -rf $(CURSRCDIR)/libsentry/c/io/build
+ 	rm -rf $(CURSRCDIR)/sentryPlugins/bmc_ras_sentry/build/
+ 	rm -rf $(CURSRCDIR)/sentryPlugins/cpu_sentry/catlib/build/
+ 	rm -rf $(CURSRCDIR)/syssentry.egg-info
+@@ -234,6 +242,7 @@ uninstall:
+ 	rm -rf $(LIBINSTALLDIR)/libxalarm.so
+ 	rm -rf $(INCLUDEDIR)/xalarm
+ 	rm -rf $(LIBINSTALLDIR)/libsentry_log.so
++	rm -rf $(LIBINSTALLDIR)/libsentry_io.so
+ 	rm -rf $(ETCDIR)/sysSentry
+ 	rm -rf $(ETCDIR)/hbm_online_repair.env
+ 	rm -rf $(ETCDIR)/soc_ring_sentry.env
+diff --git a/src/libs/libxalarm/CMakeLists.txt b/src/libs/libxalarm/CMakeLists.txt
+index 7f3f95158493..028a93df50e2 100644
+--- a/src/libs/libxalarm/CMakeLists.txt
++++ b/src/libs/libxalarm/CMakeLists.txt
+@@ -1,8 +1,9 @@
+ # Copyright (c) Huawei Technologies Co., Ltd. 2023-2024. All rights reserved.
+ # Description: cmake file for libxalarm
+ add_library(xalarm SHARED register_xalarm.c)
+-target_link_libraries(xalarm PRIVATE pthread -ljson-c)
++target_link_libraries(xalarm PRIVATE pthread -ljson-c ${CMAKE_CURRENT_SOURCE_DIR}/../../libsentry/c/io/build/libsentry_io.so)
++target_include_directories(xalarm PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../libsentry/c/io)
+ set_target_properties(xalarm PROPERTIES LINK_FLAGS "-Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack")
+-set_target_properties(xalarm PROPERTIES CMAKE_C_FLAGS "-shared -fPIC -fstack-protector-strong -D_FORTIFY_SOURCE=2 -O2 -Wall -Werror -Wtrampolines -g")
+- 
++set_target_properties(xalarm PROPERTIES COMPILE_FLAGS "-shared -fPIC -fstack-protector-strong -D_FORTIFY_SOURCE=2 -O2 -Wall -Werror -Wtrampolines -g")
++
+ install(TARGETS xalarm LIBRARY DESTINATION ${XD_INSTALL_BINDIR})
+diff --git a/src/libs/libxalarm/register_xalarm.c b/src/libs/libxalarm/register_xalarm.c
+index 55b0ecd0fbb0..320303a27369 100644
+--- a/src/libs/libxalarm/register_xalarm.c
++++ b/src/libs/libxalarm/register_xalarm.c
+@@ -26,19 +26,18 @@
+ 
+ #include <stddef.h>
+ 
++#include "io_utils.h"
+ #include "register_xalarm.h"
+ 
+ #define DIR_XALARM "/var/run/xalarm"
+ #define PATH_REG_ALARM "/var/run/xalarm/alarm"
+ #define PATH_REPORT_ALARM "/var/run/xalarm/report"
+-#define TIME_UNIT_MILLISECONDS 1000
+ 
+ #define MAX_PARAS_LEN 8191
+ #define MIN_ALARM_ID 1001
+ #define MAX_ALARM_ID (MIN_ALARM_ID + MAX_NUM_OF_ALARM_ID - 1)
+ 
+ #define ALARM_ENABLED 1
+-#define RECV_DELAY_MSEC 100
+ #define TASK_NAME_MAX_LEN 256
+ 
+ struct alarm_register_info {
+@@ -61,6 +60,7 @@ const char *g_result_level_string[] = {
+ 
+ struct alarm_register_info g_register_info = {{0}, -1, ULONG_MAX, false, NULL, 1};
+ 
++
+ static bool id_is_registered(unsigned short alarm_id)
+ {
+     if (alarm_id < MIN_ALARM_ID || alarm_id > MAX_ALARM_ID) {
+@@ -134,7 +134,7 @@ static void *alarm_recv(void *arg)
+     int recvlen = 0;
+     struct alarm_info info;
+     int ret = 0;
+-    
++
+     /* prctl does not return false if arg2 is right when arg1 is PR_SET_NAME */
+     ret = prctl(PR_SET_NAME, "register-recv");
+     if (ret != 0) {
+@@ -395,7 +395,7 @@ int xalarm_Report(unsigned short usAlarmId, unsigned char ucAlarmLevel,
+             fprintf(stderr, "%s: sendto failed, ret is 0\n", __func__);
+         } else {
+             if (ret != (int)sizeof(struct alarm_info)) {
+-                fprintf(stderr, "%s sendto failed, ret:%d, len:%u\n", __func__, ret, sizeof(struct alarm_info));
++                fprintf(stderr, "%s sendto failed, ret:%d, len:%zu\n", __func__, ret, sizeof(struct alarm_info));
+             }
+         }
+         break;
+@@ -446,7 +446,8 @@ bool check_params(unsigned short type, unsigned short module, unsigned short tra
+ int cpu_alarm_Report(unsigned short type, unsigned short module, unsigned short trans_to, unsigned short command,
+                      unsigned short event_type, int socket_id, int core_id)
+ {
+-    int ret, fd;
++    int fd;
++    ssize_t ret;
+     bool is_valid;
+     int report_info_len, alarm_msg_len;
+     char report_info[MAX_CHAR_LEN];
+@@ -497,21 +498,10 @@ int cpu_alarm_Report(unsigned short type, unsigned short module, unsigned short
+                 fprintf(stderr, "%s: connect failed errno: %d\n", __func__, errno);
+             }
+         }
+-        
+-        ret = write(fd, alarm_msg, strlen(alarm_msg));
++
++        ret = WriteAll(fd, alarm_msg, strlen(alarm_msg));
+         if (ret < 0) {
+-            if (errno == EINTR) {
+-                /* interrupted by signal, ignore */
+-                continue;
+-            } else {
+-                fprintf(stderr, "%s: write failed errno: %d\n", __func__, errno);
+-            }
+-        } else if (ret == 0) {
+-            fprintf(stderr, "%s: write failed, ret is 0\n", __func__);
+-        } else {
+-            if (ret != strlen(alarm_msg)) {
+-                fprintf(stderr, "%s write failed, ret:%d, len:%d\n", __func__, ret, strlen(alarm_msg));
+-            }
++            fprintf(stderr, "%s: write failed errno: %d\n", __func__, errno);
+         }
+         break;
+     }
+@@ -559,7 +549,7 @@ int send_data_to_socket(const char *socket_path, const char *message)
+     }
+ 
+     // write data
+-    if (write(sockfd, message, strlen(message)) == -1) {
++    if (WriteAll(sockfd, message, strlen(message)) < 0) {
+         fprintf(stderr, "failed to send data to socket %s\n", socket_path);
+         close(sockfd);
+         return RETURN_CODE_FAIL;
+@@ -684,7 +674,7 @@ static int send_event_message(int fd, struct alarm_subscription_info id_filter,
+     json_object *ids_array = json_object_new_array();
+     int i;
+     const char *json_str;
+-    int ret;
++    ssize_t ret;
+ 
+     if (root == NULL || ids_array == NULL) {
+         if (root != NULL)
+@@ -708,7 +698,7 @@ static int send_event_message(int fd, struct alarm_subscription_info id_filter,
+     json_object_object_add(root, "event_ids", ids_array);
+ 
+     json_str = json_object_to_json_string(root);
+-    ret = send(fd, json_str, strlen(json_str), 0);
++    ret = SendAll(fd, json_str, strlen(json_str));
+     if (ret < 0) {
+         fprintf(stderr, "%s: send %s msg of client fd %d failed\n", __func__, action, fd);
+         json_object_put(root);
+@@ -796,25 +786,20 @@ int xalarm_get_event(struct alarm_msg* msg, struct alarm_register *register_info
+     }
+ 
+     while (true) {
+-        int recvlen = recv(register_info->register_fd, &info, sizeof(struct alarm_info), 0);
++        ssize_t recvlen = RecvAll(register_info->register_fd, (char *)&info, sizeof(struct alarm_info));
+ 
+         // recvlen < 0 means that we meet with error when recv.
+         if (recvlen < 0) {
+-            // when recv EINTR or EAGAIN or EWOULDBLOCK signal, we should try again.
+-            // EINTR means recv func interrupted by signal
+-            // EAGIAN and EWOULDBLOCK means recv has been blocked(in nonblock mode)
+-            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+-                usleep(RECV_DELAY_MSEC * TIME_UNIT_MILLISECONDS);
+-                continue;
+-            } else {
+-                // otherwise means we meet up with some unrecoverable error
+-                // ECONNRESET means server closed the connection for some error
+-                // EBADF means this filr descriptor is invalid
+-                // ENOMEM means out of memory
+-                // EFAULT means invalid buffer address
+-                close(register_info->register_fd);
+-                return -errno;
+-            }
++            /* when recv EINTR or EAGAIN or EWOULDBLOCK signal, we should try again.
++             * RecvAll already handles EINTR, EAGIAN and EWOULDBLOCK.
++             * otherwise means we meet up with some unrecoverable error
++             * ECONNRESET means server closed the connection for some error
++             * EBADF means this file descriptor is invalid
++             * ENOMEM means out of memory
++             * EFAULT means invalid buffer address
++             */
++            close(register_info->register_fd);
++            return -errno;
+         }
+         // recvlen == 0 means the connection has been properly closed, 
+         // and the remote end has no more data to send.
+@@ -822,35 +807,32 @@ int xalarm_get_event(struct alarm_msg* msg, struct alarm_register *register_info
+             close(register_info->register_fd);
+             return -ENOTCONN;
+         }
+-        // if recvlen == sizeof(alarm_info), that means we recieved data correctlly
++        // RecvAll guarantees we receive exactly sizeof(struct alarm_info) bytes on success
+         // why use alarm_info rather than alarm_msg? alarm_info is used for old
+         // api, it's a communication protocol between xalarmd service and libxalarm.
+         // to be compatible with old api and reduce modification to xalarmd, use
+         // alarm_info for communication and return alarm_msg(alarm_msg is subset of
+         // alarm_info).
+-        if (recvlen == (int)sizeof(struct alarm_info)) {
+-            // check if this is sysSentry down notification
+-            if (info.usAlarmId == SYSSENTRY_DOWN_ALARM_ID) {
+-                close(register_info->register_fd);
+-                return -EBADF;
+-            }
+-            // filter alarm id, alarm id reciecved which is not registered by this program
+-            // will be ignored and continue to wait for next msg
+-            if (info.usAlarmId < MIN_ALARM_ID || info.usAlarmId > MAX_ALARM_ID || 
+-                    register_info->alarm_enable_bitmap[info.usAlarmId - MIN_ALARM_ID] != ALARM_ENABLED) {
+-                continue;
+-            }
+-            ret = snprintf(msg->pucParas, sizeof(msg->pucParas), "%s", info.pucParas);
+-            if (ret < 0 || ret >= sizeof(msg->pucParas)) {
+-                printf("Warning: snprintf failed, ret is %d\n", ret);
+-                continue;
+-            }
+-            msg->usAlarmId = info.usAlarmId;
+-            msg->AlarmTime = info.AlarmTime;
+-            // no need to close fd because get_event() can be reused after recv one msg
+-            return 0;
++        // check if this is sysSentry down notification
++        if (info.usAlarmId == SYSSENTRY_DOWN_ALARM_ID) {
++            close(register_info->register_fd);
++            return -EBADF;
++        }
++        // filter alarm id, alarm id reciecved which is not registered by this program
++        // will be ignored and continue to wait for next msg
++        if (info.usAlarmId < MIN_ALARM_ID || info.usAlarmId > MAX_ALARM_ID ||
++                register_info->alarm_enable_bitmap[info.usAlarmId - MIN_ALARM_ID] != ALARM_ENABLED) {
++            continue;
++        }
++        ret = snprintf(msg->pucParas, sizeof(msg->pucParas), "%s", info.pucParas);
++        if (ret < 0 || ret >= sizeof(msg->pucParas)) {
++            printf("Warning: snprintf failed, ret is %d\n", ret);
++            continue;
+         }
+-        // if recvlen > 0 but not equal to sizeof alarm_info, loop to wait for msg
++        msg->usAlarmId = info.usAlarmId;
++        msg->AlarmTime = info.AlarmTime;
++        // no need to close fd because get_event() can be reused after recv one msg
++        return 0;
+     }
+ }
+ 
+diff --git a/src/libsentry/c/io/CMakeLists.txt b/src/libsentry/c/io/CMakeLists.txt
+new file mode 100644
+index 000000000000..6a49a8d61d66
+--- /dev/null
++++ b/src/libsentry/c/io/CMakeLists.txt
+@@ -0,0 +1,7 @@
++# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
++# Description: cmake file for io_utils
++cmake_minimum_required(VERSION 3.22)
++project(sentry_io)
++add_library(sentry_io SHARED io_utils.c)
++set_target_properties(sentry_io PROPERTIES LINK_FLAGS "-Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack")
++set_target_properties(sentry_io PROPERTIES COMPILE_FLAGS "-shared -fPIC -fstack-protector-strong -D_FORTIFY_SOURCE=2 -O2 -Wall -Werror -Wtrampolines -g")
+diff --git a/src/libsentry/c/io/io_utils.c b/src/libsentry/c/io/io_utils.c
+new file mode 100644
+index 000000000000..077939018e32
+--- /dev/null
++++ b/src/libsentry/c/io/io_utils.c
+@@ -0,0 +1,105 @@
++/*
++ * Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
++ * Description: I/O utils for sysSentry — handles partial send/recv/write
++ * Author: sxt1001
++ * Create: 2026-07-20
++ */
++
++#include <errno.h>
++#include <stdio.h>
++#include <string.h>
++#include <sys/socket.h>
++
++#include "io_utils.h"
++
++ssize_t WriteAll(int fd, const char *buf, size_t count)
++{
++    const char *ptr = buf;
++    size_t remaining = count;
++
++    while (remaining > 0) {
++        ssize_t ret = write(fd, ptr, remaining);
++        if (ret < 0) {
++            /* EINTR means recv func interrupted by signal
++             * EAGAIN and EWOULDBLOCK means recv has been blocked(in nonblock mode)
++             */
++            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
++                usleep(RECV_DELAY_MSEC * TIME_UNIT_MILLISECONDS);
++                continue;
++            }
++            return -1;
++        }
++        if (ret == 0) {
++            /* zero-write — not recoverable */
++            errno = EIO;
++            return -1;
++        }
++        ptr += ret;
++        remaining -= ret;
++    }
++
++    return (ssize_t)count;
++}
++
++ssize_t SendAll(int fd, const char *buf, size_t len)
++{
++    const char *p = buf;
++    size_t remaining = len;
++
++    while (remaining > 0) {
++        ssize_t ret = send(fd, p, remaining, 0);
++        if (ret < 0) {
++            /* EINTR means recv func interrupted by signal
++             * EAGAIN and EWOULDBLOCK means recv has been blocked(in nonblock mode)
++             */
++            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
++                usleep(RECV_DELAY_MSEC * TIME_UNIT_MILLISECONDS);
++                continue;
++            }
++            return -1;
++        }
++        if (ret == 0) {
++            /* connection closed unexpectedly */
++            errno = EPIPE;
++            return -1;
++        }
++        p += ret;
++        remaining -= ret;
++    }
++
++    return (ssize_t)len;
++}
++
++ssize_t RecvAll(int fd, char *buf, size_t len)
++{
++    char *p = buf;
++    size_t remaining = len;
++
++    while (remaining > 0) {
++        ssize_t ret = recv(fd, p, remaining, 0);
++        if (ret < 0) {
++            /* EINTR means recv func interrupted by signal
++             * EAGAIN and EWOULDBLOCK means recv has been blocked(in nonblock mode)
++             */
++            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
++                usleep(RECV_DELAY_MSEC * TIME_UNIT_MILLISECONDS);
++                continue;
++            }
++            return -1;
++        }
++        if (ret == 0) {
++            /* connection closed by peer */
++            if (remaining == len) {
++                /* no data received at all — peer closed cleanly */
++                return 0;
++            }
++            /* partial data received then peer closed — treat as error */
++            errno = ECONNRESET;
++            return -1;
++        }
++        p += ret;
++        remaining -= ret;
++    }
++
++    return (ssize_t)len;
++}
+diff --git a/src/libsentry/c/io/io_utils.h b/src/libsentry/c/io/io_utils.h
+new file mode 100644
+index 000000000000..0cd332ad91c9
+--- /dev/null
++++ b/src/libsentry/c/io/io_utils.h
+@@ -0,0 +1,61 @@
++/*
++ * Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
++ * Description: I/O utils for sysSentry — handles partial send/recv/write
++ * Author: sxt1001
++ * Create: 2026-07-20
++ */
++
++#ifndef SYSSENTRY_IO_UTILS_H
++#define SYSSENTRY_IO_UTILS_H
++
++#include <unistd.h>
++#include <stddef.h>
++#include <sys/types.h>
++
++#define RECV_DELAY_MSEC 100
++#define TIME_UNIT_MILLISECONDS 1000
++
++/**
++ * @brief Write all data to a file descriptor, handling partial writes.
++ *
++ * On stream file descriptors, write() may return fewer bytes than
++ * requested. This function loops until all data is written or an
++ * unrecoverable error occurs.
++ *
++ * @param fd    file descriptor
++ * @param buf   data to write
++ * @param count total number of bytes to write
++ * @return      total bytes written on success, or -1 on error (errno set)
++ */
++ssize_t WriteAll(int fd, const char *buf, size_t count);
++
++/**
++ * @brief Send all data through a stream socket, handling partial sends.
++ *
++ * On stream sockets (SOCK_STREAM), send() may return fewer bytes than
++ * requested. This function loops until all data is sent or an
++ * unrecoverable error occurs.
++ *
++ * @param fd    socket file descriptor
++ * @param buf   data to send
++ * @param len   total number of bytes to send
++ * @return      total bytes sent on success, or -1 on error (errno set)
++ */
++ssize_t SendAll(int fd, const char *buf, size_t len);
++
++/**
++ * @brief Receive exactly `len` bytes from a stream socket.
++ *
++ * On stream sockets, recv() may return fewer bytes than requested.
++ * This function loops until exactly `len` bytes are received, the
++ * connection is closed, or an unrecoverable error occurs.
++ *
++ * @param fd    socket file descriptor
++ * @param buf   buffer to receive data into
++ * @param len   exact number of bytes to receive
++ * @return      total bytes received on success, 0 if connection closed
++ *              by peer before any data, or -1 on error (errno set)
++ */
++ssize_t RecvAll(int fd, char *buf, size_t len);
++
++#endif
+diff --git a/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/CMakeLists.txt b/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/CMakeLists.txt
+index 3c21dd27c04d..af5cfd3a3a53 100644
+--- a/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/CMakeLists.txt
++++ b/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/CMakeLists.txt
+@@ -7,12 +7,12 @@ file(GLOB CPU_PATROL_SRC *.c)
+ add_library(cpu_patrol SHARED ${CPU_PATROL_SRC})
+ 
+ include_directories(${CMAKE_SOURCE_DIR}/../../../libs/libxalarm/)
++include_directories(${CMAKE_SOURCE_DIR}/../../../libsentry/c/io/)
+ link_directories(${CMAKE_SOURCE_DIR}/../../../libs/build/libxalarm/)
+ 
+-TARGET_LINK_LIBRARIES(cpu_patrol pthread xalarm -ldl)
++TARGET_LINK_LIBRARIES(cpu_patrol pthread xalarm ${CMAKE_SOURCE_DIR}/../../../libsentry/c/io/build/libsentry_io.so -ldl)
+ 
+ set_target_properties(cpu_patrol PROPERTIES
+     COMPILE_FLAGS "-fPIC -fstack-protector-strong -D_FORTIFY_SOURCE=2 -O2 -Wall -Wtrampolines -g"
+     LINK_FLAGS "-Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack"
+ )
+-
+diff --git a/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol.c b/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol.c
+index 22d22bfa5021..9b63b3435129 100644
+--- a/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol.c
++++ b/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol.c
+@@ -9,6 +9,7 @@
+ #include <signal.h>
+ #include "cpu_patrol_result.h"
+ #include "cpu_patrol.h"
++#include "io_utils.h"
+ 
+ pthread_mutex_t g_start_mutex = PTHREAD_MUTEX_INITIALIZER;
+ pthread_mutex_t g_stop_mutex = PTHREAD_MUTEX_INITIALIZER;
+@@ -36,8 +37,8 @@ static cat_return_t write_patrol_config(const char *path, const char *config)
+         return CAT_GENERIC_ERROR;
+     }
+ 
+-    ssize_t ret = write(fd, config, strlen(config));
+-    if (ret == -1) {
++    ssize_t ret = WriteAll(fd, config, strlen(config));
++    if (ret < 0) {
+         CAT_LOG_E("Write [%s] file fail, config[%s], errno[%d]", path, config, errno);
+         close(fd);
+         if (errno == EINVAL) {
+@@ -113,7 +114,7 @@ static cat_return_t start_patrol(bool is_start)
+     }
+ 
+     char start_switch = (char)((is_start != 0) ? '1' : '0');
+-    int ret = write(fd, &start_switch, sizeof(start_switch));
++    ssize_t ret = WriteAll(fd, &start_switch, sizeof(start_switch));
+     if (ret < 0) {
+         CAT_LOG_E("Write cpu_utility file fail, %s", strerror(errno));
+         close(fd);
+diff --git a/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol_result.c b/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol_result.c
+index d8f51f9f51a7..e2672da2486a 100644
+--- a/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol_result.c
++++ b/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol_result.c
+@@ -11,6 +11,7 @@
+ #include "register_xalarm.h"
+ #include "cat_structs.h"
+ #include "cpu_patrol_result.h"
++#include "io_utils.h"
+ 
+ core_list_st g_isolated_core_list = { 0 };
+ 
+@@ -166,7 +167,7 @@ static cat_return_t do_cpu_core_offline(unsigned int cpu)
+     buf[0] = CPU_STATE_OFFLINE;
+     buf[1] = '\0';
+ 
+-    ssize_t rc = write(fd, buf, strlen(buf));
++    ssize_t rc = WriteAll(fd, buf, strlen(buf));
+     close(fd);
+     if (rc < 0) {
+         CAT_LOG_E("CPU%d offline failed, errno:%d", cpu, errno);
+diff --git a/src/sentryPlugins/hbm_online_repair/Makefile b/src/sentryPlugins/hbm_online_repair/Makefile
+index 7fffbc679c9f..4dceb2123c6f 100644
+--- a/src/sentryPlugins/hbm_online_repair/Makefile
++++ b/src/sentryPlugins/hbm_online_repair/Makefile
+@@ -1,8 +1,7 @@
+ CC = gcc
+ 
+-CFLAGS += -Wall -Wtrampolines -O2 -g -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE
+-
+-LDFLAGS += -Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack -pie -ltraceevent
++CFLAGS += -Wall -Wtrampolines -O2 -g -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -I../../libsentry/c/io
++LDFLAGS += -Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack -pie -ltraceevent -L../../libsentry/c/io/build -lsentry_io
+ 
+ SRC = $(wildcard *.c)
+ HDR = $(wildcard *.h)
+diff --git a/src/sentryPlugins/hbm_online_repair/hbm-ras-events.c b/src/sentryPlugins/hbm_online_repair/hbm-ras-events.c
+index ff62e228d191..03395d2524dd 100644
+--- a/src/sentryPlugins/hbm_online_repair/hbm-ras-events.c
++++ b/src/sentryPlugins/hbm_online_repair/hbm-ras-events.c
+@@ -24,6 +24,7 @@
+ #include <traceevent/event-parse.h>
+ #include "hbm-ras-handler.h"
+ #include "logger.h"
++#include "io_utils.h"
+ 
+ #define SIG_LIST_LEN 4
+ #define DEBUGFS_DIR_MAX_LEN 512
+@@ -139,7 +140,7 @@ int toggle_ras_event(char *trace_dir, char *group, char *event, int enable)
+         goto err;
+     }
+ 
+-    rc = write(fd, fname, strlen(fname));
++    rc = (int)WriteAll(fd, fname, strlen(fname));
+     close(fd);
+     if (rc <= 0) {
+         log(LOG_WARNING, "Can't write to set_event\n");
+@@ -218,7 +219,7 @@ static int set_buffer_percent(struct ras_events *ras, int percent)
+         char buf[16];
+         ssize_t size;
+         snprintf(buf, sizeof(buf), "%d", percent);
+-        size = write(fd, buf, strlen(buf));
++        size = WriteAll(fd, buf, strlen(buf));
+         if (size <= 0) {
+             log(LOG_WARNING, "can't write to buffer_percent\n");
+             ret = -1;
+diff --git a/src/sentryPlugins/hbm_online_repair/non-standard-hbm-repair.c b/src/sentryPlugins/hbm_online_repair/non-standard-hbm-repair.c
+index ccd8da28e016..abdef57654dc 100644
+--- a/src/sentryPlugins/hbm_online_repair/non-standard-hbm-repair.c
++++ b/src/sentryPlugins/hbm_online_repair/non-standard-hbm-repair.c
+@@ -20,6 +20,7 @@
+ #include <sys/ioctl.h>
+ 
+ #include "logger.h"
++#include "io_utils.h"
+ #include "non-standard-hbm-repair.h"
+ 
+ extern int page_isolation_threshold;
+@@ -278,7 +279,7 @@ static int write_variable(char *name, char *guid, void *value, unsigned long siz
+     }
+ 
+     // write to var file
+-    writesize = write(fd, buffer, total);
++    writesize = WriteAll(fd, buffer, total);
+     if (writesize != total) {
+         log(LOG_ERROR, "write %s failed\n", filename);
+         goto err;
+@@ -358,7 +359,7 @@ static int write_file(char *path, const char *name, unsigned long long value)
+ {
+     char fname[MAX_PATH];
+     char buf[20];
+-    int ret;
++    ssize_t ret;
+     int fd;
+ 
+     snprintf(fname, MAX_PATH, "%s/%s", path, name);
+@@ -371,17 +372,14 @@ static int write_file(char *path, const char *name, unsigned long long value)
+     }
+ 
+     snprintf(buf, sizeof(buf), "0x%llx\n", value);
+-    ret = write(fd, buf, strlen(buf));
+-    if (ret <= 0)
++    ret = WriteAll(fd, buf, strlen(buf));
++    if (ret < 0) {
+         log(LOG_WARNING, "HBM: Failed to set %s (0x%llx): %s\n",
+                     fname, value, strerror(errno));
+-
+-    close(fd);
+-    if (ret == 0) {
+-        ret = -EINVAL;
+-    } else if (ret < 0) {
+         ret = -errno;
+     }
++
++    close(fd);
+     return ret;
+ }
+ 
+@@ -499,7 +497,7 @@ static int notice_BMC(const struct hisi_common_error_section *err, uint8_t repai
+ 
+     log(LOG_DEBUG, "Send msg to sysSentry, bmc msg is %s\n", bmc_msg);
+ 
+-    if (write(sockfd, bmc_msg, strlen(bmc_msg)) <= 0) {
++    if (WriteAll(sockfd, bmc_msg, strlen(bmc_msg)) <= 0) {
+         log(LOG_ERROR, "Failed to send data to BMC notice socket\n");
+         close(sockfd);
+         return -1;
+diff --git a/src/services/syssentry/heartbeat.py b/src/services/syssentry/heartbeat.py
+index dcbbb224b38c..40215172f7ba 100644
+--- a/src/services/syssentry/heartbeat.py
++++ b/src/services/syssentry/heartbeat.py
+@@ -21,7 +21,7 @@ import socket
+ from .mod_status import set_runtime_status, RUNNING_STATUS, FAILED_STATUS
+ from .global_values import SENTRY_RUN_DIR
+ from .task_map import TasksMap
+-from .utils import MAX_MSG_LEN
++from .utils import MAX_MSG_LEN, recv_all
+ 
+ THB_SOCKET_PATH = "/var/run/sysSentry/heartbeat.sock"
+ THB_MAGIC = 'THB'
+@@ -86,7 +86,7 @@ def heartbeat_recv(heartbeat_socket: socket.socket):
+         return
+ 
+     try:
+-        msg_head = client_socket.recv(THB_MSG_HEAD_LEN)
++        msg_head = recv_all(client_socket, THB_MSG_HEAD_LEN)
+     except OSError:
+         logging.error("heartbeat recv head failed")
+         client_socket.close()
+@@ -111,7 +111,7 @@ def heartbeat_recv(heartbeat_socket: socket.socket):
+     logging.debug("hb msg data length: %d", data_len)
+ 
+     try:
+-        task_name = client_socket.recv(data_len).decode()
++        task_name = recv_all(client_socket, data_len).decode()
+     except (OSError, UnicodeError):
+         logging.error("heartbeat recv msg failed")
+         client_socket.close()
+diff --git a/src/services/syssentry/result.py b/src/services/syssentry/result.py
+index 62ea22e95a77..81f9c04b38ca 100644
+--- a/src/services/syssentry/result.py
++++ b/src/services/syssentry/result.py
+@@ -19,6 +19,7 @@ import re
+ import logging
+ 
+ from enum import Enum
++from syssentry.utils import recv_all
+ 
+ 
+ class ResultLevel(Enum):
+@@ -37,6 +38,7 @@ RESULT_MSG_HEAD_LEN = 10
+ RESULT_MSG_MAGIC_LEN = 6 # len(RESULT_MAGIC)
+ RESULT_MAGIC = "RESULT"
+ RESULT_INFO_MAX_LEN = 4096
++RESULT_RESPONSE_MSG_LEN = max(len("SUCCESS"), len("FAILED"))
+ 
+ RESULT_LEVEL_ERR_MSG_DICT = {
+         ResultLevel.PASS.name : "",
+@@ -101,7 +103,7 @@ def report_result(task_name: str, result_level : ResultLevel, report_data : str)
+ 
+     try:
+         client_socket.sendall(request_msg)
+-        server_reponse_info = client_socket.recv(len("SUCCESS"))
++        server_reponse_info = recv_all(client_socket, RESULT_RESPONSE_MSG_LEN)
+         server_reponse_info = server_reponse_info.decode().strip()
+         if server_reponse_info != "SUCCESS":
+             logging.error("report result to sysSentry, get incorrect response information : %s", server_reponse_info)
+diff --git a/src/services/syssentry/sentryctl b/src/services/syssentry/sentryctl
+index 78f911c03381..6774524386f0 100644
+--- a/src/services/syssentry/sentryctl
++++ b/src/services/syssentry/sentryctl
+@@ -20,7 +20,7 @@ import sys
+ import logging
+ import json
+ 
+-from syssentry.utils import MAX_MSG_LEN
++from syssentry.utils import MAX_MSG_LEN, recv_all
+ 
+ CTL_SOCKET_PATH = "/var/run/sysSentry/control.sock"
+ MAX_PARAM_LENGTH = 256
+@@ -112,12 +112,12 @@ def client_send_and_recv(request_data, data_str_len):
+     request_msg = req_head_msg + request_data
+ 
+     try:
+-        client_socket.send(request_msg.encode())
++        client_socket.sendall(request_msg.encode())
+         if len("CTL") + data_str_len > MAX_MSG_LEN:
+             client_socket.close()
+             print("socket recv data is illegal: %d" % (len("CTL") + data_str_len))
+             return None
+-        res_data = client_socket.recv(len("RES") + data_str_len)
++        res_data = recv_all(client_socket, len("RES") + data_str_len)
+         res_data = res_data.decode()
+     except (OSError, UnicodeError):
+         client_socket.close()
+@@ -136,8 +136,8 @@ def client_send_and_recv(request_data, data_str_len):
+         if res_data_len > MAX_MSG_LEN:
+             client_socket.close()
+             print("socket recv data is illegal:%d" % res_data_len)
+-            return
+-        res_msg_data = client_socket.recv(res_data_len)
++            return None
++        res_msg_data = recv_all(client_socket, res_data_len)
+         res_msg_data = res_msg_data.decode()
+         return res_msg_data
+     except (OSError, ValueError, UnicodeError):
+diff --git a/src/services/syssentry/syssentry.py b/src/services/syssentry/syssentry.py
+index 2e3d7c30152e..d9df84e9ea67 100644
+--- a/src/services/syssentry/syssentry.py
++++ b/src/services/syssentry/syssentry.py
+@@ -41,8 +41,8 @@ from .mod_status import RUNNING_STATUS, EXITED_STATUS, NONZERO_EXITED_STATUS, FA
+ from .load_mods import load_tasks, reload_single_mod
+ from .heartbeat import (heartbeat_timeout_chk, heartbeat_recv)
+ from .result import RESULT_MSG_HEAD_LEN, RESULT_MSG_MAGIC_LEN, RESULT_MAGIC
+-from .result import RESULT_LEVEL_ERR_MSG_DICT, ResultLevel
+-from .utils import get_current_time_string, MAX_MSG_LEN
++from .result import RESULT_LEVEL_ERR_MSG_DICT, RESULT_RESPONSE_MSG_LEN, ResultLevel
++from .utils import get_current_time_string, MAX_MSG_LEN, recv_all
+ from .alarm import alarm_register
+ 
+ from xalarm.register_xalarm import xalarm_unregister
+@@ -298,7 +298,7 @@ def server_recv(server_socket: socket.socket):
+         return
+ 
+     try:
+-        msg_head = client_socket.recv(CTL_MSG_HEAD_LEN)
++        msg_head = recv_all(client_socket, CTL_MSG_HEAD_LEN)
+         logging.debug("recv msg head: %s", msg_head.decode())
+         data_len = msg_head_process(msg_head.decode())
+     except (OSError, UnicodeError):
+@@ -316,7 +316,7 @@ def server_recv(server_socket: socket.socket):
+         logging.error("socket recv data is illegal:%d", data_len)
+         return
+     try:
+-        msg_data = client_socket.recv(data_len)
++        msg_data = recv_all(client_socket, data_len)
+         msg_data_decode = msg_data.decode()
+         logging.debug("msg data %s", msg_data_decode)
+     except (OSError, UnicodeError):
+@@ -351,9 +351,9 @@ def server_recv(server_socket: socket.socket):
+     logging.debug("res msg %s", res_msg)
+ 
+     try:
+-        client_socket.send(res_msg.encode())
++        client_socket.sendall(res_msg.encode())
+     except OSError:
+-        logging.error("server recv failed")
++        logging.error("server send failed")
+     finally:
+         client_socket.close()
+     return
+@@ -369,7 +369,7 @@ def server_result_recv(server_socket: socket.socket):
+         return
+ 
+     try:
+-        msg_head = client_socket.recv(RESULT_MSG_HEAD_LEN)
++        msg_head = recv_all(client_socket, RESULT_MSG_HEAD_LEN)
+         logging.debug("recv msg head: %s", msg_head.decode())
+         data_len = result_msg_head_process(msg_head.decode())
+     except (OSError, UnicodeError):
+@@ -388,7 +388,7 @@ def server_result_recv(server_socket: socket.socket):
+         return
+ 
+     try:
+-        msg_data = client_socket.recv(data_len)
++        msg_data = recv_all(client_socket, data_len)
+         msg_data_decode = msg_data.decode()
+         logging.info("server recv result data :\n%s\n", msg_data_decode)
+     except (OSError, UnicodeError):
+@@ -405,7 +405,8 @@ def server_result_recv(server_socket: socket.socket):
+     # response to client
+     logging.info("result recv msg head : %s , response ...", process_plugins_result)
+     try:
+-        client_socket.send(process_plugins_result.encode())
++        process_plugins_result = process_plugins_result.ljust(RESULT_RESPONSE_MSG_LEN)
++        client_socket.sendall(process_plugins_result.encode())
+     except OSError:
+         logging.warning("server send response to plugins failed")
+     finally:
+diff --git a/src/services/syssentry/utils.py b/src/services/syssentry/utils.py
+index 6a0defe83651..3c6f0feb25aa 100644
+--- a/src/services/syssentry/utils.py
++++ b/src/services/syssentry/utils.py
+@@ -13,6 +13,7 @@
+ some common function
+ """
+ import logging
++import socket
+ import subprocess
+ import shlex
+ from datetime import datetime, timezone, timedelta
+@@ -21,6 +22,32 @@ from datetime import datetime, timezone, timedelta
+ MAX_MSG_LEN = 10 * 1024 * 1024  # 10MB
+ 
+ 
++def recv_all(sock: socket.socket, length: int) -> bytes:
++    """Receive exactly `length` bytes from the socket.
++
++    socket.recv() may return fewer bytes than requested, especially on
++    stream sockets. This function loops until all requested bytes are
++    received or the connection is closed / an error occurs.
++
++    Returns the received data as bytes.
++    Raises OSError on socket errors.
++    Raises ConnectionError if the peer closes the connection before all
++    bytes are received.
++    """
++    if length <= 0:
++        return b""
++    data = b""
++    while len(data) < length:
++        chunk = sock.recv(length - len(data))
++        if not chunk:
++            # Connection closed by peer before all data received
++            raise ConnectionError(
++                f"Connection closed: received {len(data)} of {length} bytes"
++            )
++        data += chunk
++    return data
++
++
+ def run_cmd(cmd):
+     """run cmd use subprocess.run"""
+     result = subprocess.run(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+-- 
+2.43.0
+

@@ -1,0 +1,40 @@
+From 8cc5118e9586746f616ebdc56fac102927820c92 Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Wed, 5 Aug 2026 09:34:08 +0800
+Subject: [PATCH 1/2] Add exception handling for sentryctl exec func to prevent
+ sysSentry service crashes
+
+---
+ src/services/syssentry/syssentry.py | 16 ++++++++++++----
+ 1 file changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/src/services/syssentry/syssentry.py b/src/services/syssentry/syssentry.py
+index d0821ff43534..a3cd5d69dabc 100644
+--- a/src/services/syssentry/syssentry.py
++++ b/src/services/syssentry/syssentry.py
+@@ -192,10 +192,18 @@ def msg_data_process(msg_data):
+ 
+     cmd_param = data_struct['data']
+     logging.debug("msg_data_process cmd_type:%s cmd_param:%s", cmd_type, str(cmd_param))
+-    if cmd_type in type_func:
+-        ret, res_data = type_func[cmd_type](cmd_param)
+-    else:
+-        ret, res_data = type_func_void[cmd_type]()
++
++    try:
++        if cmd_type in type_func:
++            ret, res_data = type_func[cmd_type](cmd_param)
++        else:
++            ret, res_data = type_func_void[cmd_type]()
++    except Exception as e:
++        logging.error("%s function failed: %s", cmd_type, str(e))
++        res_msg_struct = {"ret": "failed", "data": "cmd failed, config of the %s.mod may be incorrect" % cmd_param}
++        res_msg = json.dumps(res_msg_struct)
++        return res_msg
++
+     logging.debug("msg_data_process res_data:%s",str(res_data))
+     res_msg_struct = {"ret": ret, "data": res_data}
+     res_msg = json.dumps(res_msg_struct)
+-- 
+2.43.0
+

@@ -1,0 +1,1034 @@
+From ef9ba65c2198e17243a19af7d0860354dfc3785b Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Mon, 21 Sep 2026 11:07:18 +0800
+Subject: [PATCH] add check for alarm_id/alarm_clear_time/env_file/conflict
+ config
+
+---
+ selftest/libs/expect.sh                       |  27 ++-
+ selftest/test/test_load_mods.py               | 180 ++++++++++++++++++
+ ...test_load_mods_alarm_clear_time_invalid.sh | 149 +++++++++++++++
+ .../test/test_load_mods_alarm_id_invalid.sh   | 116 +++++++++++
+ .../test/test_load_mods_conflict_invalid.sh   |  85 +++++++++
+ .../test/test_load_mods_env_file_invalid.sh   |  68 +++++++
+ selftest/test/test_load_mods_valid_config.sh  |  87 +++++++++
+ selftest/test/test_sentryctl_type_period.sh   |   2 +
+ src/services/syssentry/global_values.py       |  11 +-
+ src/services/syssentry/load_mods.py           | 134 ++++++++++++-
+ 10 files changed, 842 insertions(+), 17 deletions(-)
+ create mode 100644 selftest/test/test_load_mods.py
+ create mode 100644 selftest/test/test_load_mods_alarm_clear_time_invalid.sh
+ create mode 100644 selftest/test/test_load_mods_alarm_id_invalid.sh
+ create mode 100644 selftest/test/test_load_mods_conflict_invalid.sh
+ create mode 100644 selftest/test/test_load_mods_env_file_invalid.sh
+ create mode 100644 selftest/test/test_load_mods_valid_config.sh
+
+diff --git a/selftest/libs/expect.sh b/selftest/libs/expect.sh
+index a0845419f525..dcb5441a54a1 100644
+--- a/selftest/libs/expect.sh
++++ b/selftest/libs/expect.sh
+@@ -67,6 +67,20 @@ function expect_gt() {
+     fi
+ }
+ 
++
++function expect_ge() {
++    local actual=${1:-0}
++    local expect=${2:-1}
++    local msg=${3:-}
++    if [ "${actual}" -ge "${expect}" ]; then
++        return 0
++    else
++        ((++syssentry_expects_failed))
++        log_error "expect_ge(${actual}, ${expect}, msg=${msg}) - $(get_file_line)"
++        return 1
++    fi
++}
++
+ function expect_true() {
+     local cmd=$1
+     local msg=$2
+@@ -126,10 +140,21 @@ function expect_task_status_eq() {
+     local expect_status="$2"
+     local status
+     for i in $(seq 3); do
+-        status=$(sentryctl status ${task_name} | awk '{print $2}')
++        status=$(sentryctl status "${task_name}" | awk '{print $2}')
+         [[ "${status}" == "${expect_status}" ]] && break
+         sleep 1
+     done
+     expect_str_eq "${status}" "${expect_status}" "current status is ${status}, expect ${expect_status}"
+ }
+ 
++function expect_service_status_eq() {
++    local service_name="$1"
++    local expect_status="$2"
++    local status
++    for i in $(seq 3); do
++        status=$(systemctl is-active "${service_name}")
++        [[ "${status}" == "${expect_status}" ]] && break
++        sleep 1
++    done
++    expect_str_eq "${status}" "${expect_status}" "current status is ${status}, expect ${expect_status}"
++}
+\ No newline at end of file
+diff --git a/selftest/test/test_load_mods.py b/selftest/test/test_load_mods.py
+new file mode 100644
+index 000000000000..eb1822c532f8
+--- /dev/null
++++ b/selftest/test/test_load_mods.py
+@@ -0,0 +1,180 @@
++# coding: utf-8
++# Copyright (c) 2024 Huawei Technologies Co., Ltd.
++# sysSentry is licensed under the Mulan PSL v2.
++# You can use this software according to the terms and conditions of the Mulan PSL v2.
++# You may obtain a copy of Mulan PSL v2 at:
++#     http://license.coscl.org.cn/MulanPSL2
++# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR
++# IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FIT FOR A PARTICULAR
++# PURPOSE.
++# See the Mulan PSL v2 for more details.
++
++import unittest
++import tempfile
++import os
++
++from syssentry.load_mods import (
++    validate_alarm_id,
++    validate_alarm_clear_time,
++    validate_env_file,
++    validate_conflict,
++)
++from syssentry.global_values import DEFAULT_ALARM_CLEAR_TIME, DEFAULT_CONFLICT
++
++
++class TestValidateAlarmId(unittest.TestCase):
++    """Test cases for alarm_id validation"""
++
++    def test_valid_alarm_id(self):
++        """Test with valid alarm_id values within allowed range"""
++        self.assertEqual(validate_alarm_id("test_mod", "1001"), 1001)
++        self.assertEqual(validate_alarm_id("test_mod", "1128"), 1128)
++        self.assertEqual(validate_alarm_id("test_mod", "1001 "), 1001)
++        self.assertEqual(validate_alarm_id("test_mod", " 1001 "), 1001)
++        self.assertEqual(validate_alarm_id("test_mod", "   1001"), 1001)
++        self.assertEqual(validate_alarm_id("test_mod", "  1128   "), 1128)
++        self.assertEqual(validate_alarm_id("test_mod", " 1128 "), 1128)
++
++    def test_invalid_alarm_id(self):
++        """Test with invalid alarm_id values outside allowed range or non-integer"""
++        self.assertIsNone(validate_alarm_id("test_mod", "0"))
++        self.assertIsNone(validate_alarm_id("test_mod", "1"))
++        self.assertIsNone(validate_alarm_id("test_mod", "100"))
++        self.assertIsNone(validate_alarm_id("test_mod", "12345"))
++        self.assertIsNone(validate_alarm_id("test_mod", "abc"))
++        self.assertIsNone(validate_alarm_id("test_mod", "12.5"))
++        self.assertIsNone(validate_alarm_id("test_mod", "1.0"))
++        self.assertIsNone(validate_alarm_id("test_mod", ""))
++        self.assertIsNone(validate_alarm_id("test_mod", None))
++        self.assertIsNone(validate_alarm_id("test_mod", "  "))
++        self.assertIsNone(validate_alarm_id("test_mod", "1abc"))
++        self.assertIsNone(validate_alarm_id("test_mod", "abc123"))
++        self.assertIsNone(validate_alarm_id("test_mod", "-1"))
++        self.assertIsNone(validate_alarm_id("test_mod", "-100"))
++        # Python int() accepts spaces around number, this is valid behavior
++        self.assertIsNone(validate_alarm_id("test_mod", "  100  "))
++        self.assertIsNone(validate_alarm_id("test_mod", "0x10"))  # hex format
++
++
++class TestValidateAlarmClearTime(unittest.TestCase):
++    """Test cases for alarm_clear_time validation"""
++
++    def test_valid_integer_positive(self):
++        """Test with valid positive integer values"""
++        self.assertEqual(validate_alarm_clear_time("test_mod", "1"), 1)
++        self.assertEqual(validate_alarm_clear_time("test_mod", "15"), 15)
++        self.assertEqual(validate_alarm_clear_time("test_mod", "30"), 30)
++        self.assertEqual(validate_alarm_clear_time("test_mod", "100"), 100)
++        self.assertEqual(validate_alarm_clear_time("test_mod", "3600"), 3600)
++
++    def test_invalid_non_integer(self):
++        """Test with non-integer values, should return default"""
++        self.assertEqual(validate_alarm_clear_time("test_mod", "abc"), DEFAULT_ALARM_CLEAR_TIME)
++        self.assertEqual(validate_alarm_clear_time("test_mod", "12.5"), DEFAULT_ALARM_CLEAR_TIME)
++        self.assertEqual(validate_alarm_clear_time("test_mod", ""), DEFAULT_ALARM_CLEAR_TIME)
++        self.assertEqual(validate_alarm_clear_time("test_mod", None), DEFAULT_ALARM_CLEAR_TIME)
++        self.assertEqual(validate_alarm_clear_time("test_mod", "  "), DEFAULT_ALARM_CLEAR_TIME)
++
++    def test_valid_zero(self):
++        """Test with zero value, should be accepted"""
++        self.assertEqual(validate_alarm_clear_time("test_mod", "0"), 0)
++
++    def test_invalid_negative(self):
++        """Test with negative values, should return default"""
++        self.assertEqual(validate_alarm_clear_time("test_mod", "-1"), DEFAULT_ALARM_CLEAR_TIME)
++        self.assertEqual(validate_alarm_clear_time("test_mod", "-100"), DEFAULT_ALARM_CLEAR_TIME)
++
++    def test_edge_cases_spaces_accepted(self):
++        """Test that spaces around the number are accepted"""
++        # Python int() accepts spaces around number, this is valid behavior
++        self.assertEqual(validate_alarm_clear_time("test_mod", "  30  "), 30)
++
++    def test_invalid_hex_format(self):
++        """Test with hex format string, should return default"""
++        self.assertEqual(validate_alarm_clear_time("test_mod", "0x10"), DEFAULT_ALARM_CLEAR_TIME)
++
++
++class TestValidateEnvFile(unittest.TestCase):
++    """Test cases for env_file validation"""
++
++    def test_valid_env_file(self):
++        """Test with a valid existing file"""
++        with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp_file:
++            tmp_file.write("TEST_VAR=test_value\n")
++            tmp_path = tmp_file.name
++
++        try:
++            result = validate_env_file("test_mod", tmp_path)
++            self.assertEqual(result, os.path.normpath(tmp_path))
++        finally:
++            os.unlink(tmp_path)
++
++    def test_nonexistent_file(self):
++        """Test with a non-existent file path"""
++        result = validate_env_file("test_mod", "/nonexistent/path/to/file.env")
++        self.assertEqual(result, "")
++
++    def test_empty_path(self):
++        """Test with empty path"""
++        self.assertEqual(validate_env_file("test_mod", ""), "")
++        self.assertEqual(validate_env_file("test_mod", None), "")
++
++    def test_directory_instead_of_file(self):
++        """Test when path points to a directory instead of file"""
++        result = validate_env_file("test_mod", "/tmp")
++        self.assertEqual(result, "")
++
++
++class TestValidateConflict(unittest.TestCase):
++    """Test cases for conflict validation"""
++
++    def test_valid_values_lowercase(self):
++        """Test with valid conflict values in lowercase"""
++        self.assertEqual(validate_conflict("test_mod", "up"), "up")
++        self.assertEqual(validate_conflict("test_mod", "down"), "down")
++        self.assertEqual(validate_conflict("test_mod", "kill"), "kill")
++
++    def test_values_with_whitespace(self):
++        """Test that whitespace around values is trimmed"""
++        self.assertEqual(validate_conflict("test_mod", " up "), "up")
++        self.assertEqual(validate_conflict("test_mod", "  down  "), "down")
++        self.assertEqual(validate_conflict("test_mod", "\tkill\t"), "kill")
++
++    def test_invalid_values_uppercase(self):
++        """Test with uppercase values, should return default"""
++        self.assertEqual(validate_conflict("test_mod", "UP"), DEFAULT_CONFLICT)
++        self.assertEqual(validate_conflict("test_mod", "DOWN"), DEFAULT_CONFLICT)
++        self.assertEqual(validate_conflict("test_mod", "KILL"), DEFAULT_CONFLICT)
++
++    def test_invalid_values_mixed_case(self):
++        """Test with mixed case values, should return default"""
++        self.assertEqual(validate_conflict("test_mod", "Up"), DEFAULT_CONFLICT)
++        self.assertEqual(validate_conflict("test_mod", "Down"), DEFAULT_CONFLICT)
++        self.assertEqual(validate_conflict("test_mod", "Kill"), DEFAULT_CONFLICT)
++
++    def test_invalid_values(self):
++        """Test with invalid conflict values, should return default"""
++        self.assertEqual(validate_conflict("test_mod", "invalid"), DEFAULT_CONFLICT)
++        self.assertEqual(validate_conflict("test_mod", "pause"), DEFAULT_CONFLICT)
++        self.assertEqual(validate_conflict("test_mod", "stop"), DEFAULT_CONFLICT)
++        self.assertEqual(validate_conflict("test_mod", ""), DEFAULT_CONFLICT)
++        self.assertEqual(validate_conflict("test_mod", None), DEFAULT_CONFLICT)
++        self.assertEqual(validate_conflict("test_mod", "  "), DEFAULT_CONFLICT)
++        self.assertEqual(validate_conflict("test_mod", "updown"), DEFAULT_CONFLICT)
++        self.assertEqual(validate_conflict("test_mod", "up kill"), DEFAULT_CONFLICT)
++
++
++class TestDefaultValues(unittest.TestCase):
++    """Test that default values are correctly used"""
++
++    def test_default_alarm_clear_time(self):
++        """Test that default alarm_clear_time value is 15"""
++        self.assertEqual(DEFAULT_ALARM_CLEAR_TIME, 15)
++
++    def test_default_conflict(self):
++        """Test that default conflict value is 'up'"""
++        self.assertEqual(DEFAULT_CONFLICT, "up")
++
++
++if __name__ == '__main__':
++    unittest.main()
+\ No newline at end of file
+diff --git a/selftest/test/test_load_mods_alarm_clear_time_invalid.sh b/selftest/test/test_load_mods_alarm_clear_time_invalid.sh
+new file mode 100644
+index 000000000000..6331b89efdde
+--- /dev/null
++++ b/selftest/test/test_load_mods_alarm_clear_time_invalid.sh
+@@ -0,0 +1,149 @@
++#!/bin/bash
++# Copyright (c), 2023-2024, Huawei Tech. Co., Ltd.
++
++source "libs/expect.sh"
++source "libs/lib.sh"
++source "libs/common.sh"
++set +e
++
++tmp_log="tmp_log"
++start_line=0
++mod_name="test_clear_time_invalid"
++
++# 测试 alarm_clear_time 配置非法时的校验行为
++
++function pre_test() {
++    kill -9 `ps aux|grep syssentry|grep -v grep|awk '{print $2}'`
++    kill -9 `ps aux|grep test_task|grep -v grep|awk '{print $2}'`
++
++    config_file="/etc/sysSentry/tasks/$mod_name.mod"
++    if [ -f $config_file ]; then
++        rm -rf $config_file
++    fi
++
++    touch "$config_file"
++    echo "[common]" > "$config_file"
++    echo "enabled=yes" >> "$config_file"
++    echo "task_start=test_task" >> "$config_file"
++    echo "task_stop=pkill test_task" >> "$config_file"
++    echo "type=oneshot" >> "$config_file"
++    echo "alarm_id=1016" >> "$config_file"
++    echo "alarm_clear_time=-5" >> "$config_file"
++
++    gcc test/sysSentry/test_task.c -o test/sysSentry/test_task
++    cp test/sysSentry/test_task /usr/bin
++
++    systemctl start xalarmd.socket xalarmd.service
++    systemctl start sysSentry.socket sysSentry.service
++    sleep 2
++}
++
++function do_test() {
++    expect_service_status_eq sysSentry active
++    expect_service_status_eq xalarmd active
++
++    # 检查任务是否加载成功
++    expect_task_status_eq $mod_name "EXITED"
++
++    invalid_list=("-1" "-1000")
++    for arg in "${invalid_list[@]}"; do
++        start_line=$(expr $(wc -l < /var/log/sysSentry/sysSentry.log) + 1)
++
++        sed -i "s/^alarm_clear_time.*/alarm_clear_time=${arg}/g" "/etc/sysSentry/tasks/$mod_name.mod"
++
++        sentryctl reload $mod_name
++        expect_eq $? 0
++
++        sentryctl start $mod_name
++        expect_eq $? 0
++
++        expect_task_status_eq $mod_name "RUNNING"
++        expect_service_status_eq sysSentry active
++        expect_service_status_eq xalarmd active
++
++        sentryctl stop $mod_name
++        expect_eq $? 0
++
++        expect_task_status_eq $mod_name "FAILED"
++
++        sleep 10
++
++        end_line=$(wc -l < /var/log/sysSentry/sysSentry.log)
++        expect_ne $start_line $end_line
++
++        sed -n "${start_line}, ${end_line}p" /var/log/sysSentry/sysSentry.log > ${tmp_log}
++        # 检查日志中是否有 alarm_clear_time 校验失败的错误信息
++        expect_true "grep -E 'mod $mod_name: alarm_clear_time must be a positive integer' ${tmp_log}" || cat ${tmp_log}
++    done
++
++    invalid_list=("abcd" "0x10" "-1a")
++    for arg in "${invalid_list[@]}"; do
++        start_line=$(expr $(wc -l < /var/log/sysSentry/sysSentry.log) + 1)
++
++        sed -i "s/^alarm_clear_time.*/alarm_clear_time=${arg}/g" "/etc/sysSentry/tasks/$mod_name.mod"
++
++        sentryctl reload $mod_name
++        expect_eq $? 0
++
++        sentryctl start $mod_name
++        expect_eq $? 0
++
++        expect_task_status_eq $mod_name "RUNNING"
++        expect_service_status_eq sysSentry active
++        expect_service_status_eq xalarmd active
++
++        sentryctl stop $mod_name
++        expect_eq $? 0
++
++        expect_task_status_eq $mod_name "FAILED"
++
++        sleep 10
++
++        end_line=$(wc -l < /var/log/sysSentry/sysSentry.log)
++        expect_ne $start_line $end_line
++
++        sed -n "${start_line}, ${end_line}p" /var/log/sysSentry/sysSentry.log > ${tmp_log}
++        # 检查日志中是否有 alarm_clear_time 校验失败的错误信息
++        expect_true "grep -E 'mod $mod_name: alarm_clear_time must be an integer' ${tmp_log}" || cat ${tmp_log}
++    done
++
++    invalid_list=("  " "\t" "")
++    for arg in "${invalid_list[@]}"; do
++        start_line=$(expr $(wc -l < /var/log/sysSentry/sysSentry.log) + 1)
++
++        sed -i "s/^alarm_clear_time.*/alarm_clear_time=${arg}/g" "/etc/sysSentry/tasks/$mod_name.mod"
++
++        sentryctl reload $mod_name
++        expect_eq $? 0
++
++        sentryctl start $mod_name
++        expect_eq $? 0
++
++        expect_task_status_eq $mod_name "RUNNING"
++        expect_service_status_eq sysSentry active
++        expect_service_status_eq xalarmd active
++
++        sentryctl stop $mod_name
++        expect_eq $? 0
++
++        expect_task_status_eq $mod_name "FAILED"
++
++        sleep 10
++
++        end_line=$(wc -l < /var/log/sysSentry/sysSentry.log)
++        expect_ne $start_line $end_line
++
++        sed -n "${start_line}, ${end_line}p" /var/log/sysSentry/sysSentry.log > ${tmp_log}
++        # 检查日志中是否有 alarm_clear_time 校验失败的错误信息
++        expect_true "grep -E 'mod $mod_name: alarm_clear_time not set' ${tmp_log}" || cat ${tmp_log}
++    done
++}
++
++function post_test() {
++    systemctl stop sysSentry.socket sysSentry.service
++    systemctl stop xalarmd.socket xalarmd.service
++    kill -9 `pgrep -w test_task`
++    rm -rf ${tmp_log} test/sysSentry/test_task /usr/bin/test_task /etc/sysSentry/tasks/$mod_name.mod
++}
++
++run_testcase
+\ No newline at end of file
+diff --git a/selftest/test/test_load_mods_alarm_id_invalid.sh b/selftest/test/test_load_mods_alarm_id_invalid.sh
+new file mode 100644
+index 000000000000..363642f23ee3
+--- /dev/null
++++ b/selftest/test/test_load_mods_alarm_id_invalid.sh
+@@ -0,0 +1,116 @@
++#!/bin/bash
++# Copyright (c), 2023-2024, Huawei Tech. Co., Ltd.
++
++source "libs/expect.sh"
++source "libs/lib.sh"
++source "libs/common.sh"
++set +e
++
++tmp_log="tmp_log"
++start_line=0
++mod_name="test_alarm_id_invalid"
++
++# 测试 alarm_clear_time 配置非法时的校验行为
++
++function pre_test() {
++    kill -9 `ps aux|grep syssentry|grep -v grep|awk '{print $2}'`
++    kill -9 `ps aux|grep test_task|grep -v grep|awk '{print $2}'`
++
++    config_file="/etc/sysSentry/tasks/$mod_name.mod"
++    if [ -f $config_file ]; then
++        rm -rf $config_file
++    fi
++
++    touch "$config_file"
++    echo "[common]" > "$config_file"
++    echo "enabled=yes" >> "$config_file"
++    echo "task_start=test_task" >> "$config_file"
++    echo "task_stop=pkill test_task" >> "$config_file"
++    echo "type=oneshot" >> "$config_file"
++    echo "alarm_id=100" >> "$config_file"
++    echo "alarm_clear_time=5" >> "$config_file"
++
++    gcc test/sysSentry/test_task.c -o test/sysSentry/test_task
++    cp test/sysSentry/test_task /usr/bin
++
++    systemctl start xalarmd.socket xalarmd.service
++    systemctl start sysSentry.socket sysSentry.service
++    sleep 2
++}
++
++function do_test() {
++    expect_service_status_eq sysSentry active
++    expect_service_status_eq xalarmd active
++
++    # 检查任务是否加载成功
++    expect_task_status_eq $mod_name "EXITED"
++
++    invalid_list=("abcd" " " "0x10")
++    for arg in "${invalid_list[@]}"; do
++        start_line=$(expr $(wc -l < /var/log/sysSentry/sysSentry.log) + 1)
++
++        sed -i "s/^alarm_id.*/alarm_id=${arg}/g" "/etc/sysSentry/tasks/$mod_name.mod"
++
++        sentryctl reload $mod_name
++        expect_eq $? 0
++
++        sentryctl start $mod_name
++        expect_eq $? 0
++
++        expect_task_status_eq $mod_name "RUNNING"
++        expect_service_status_eq sysSentry active
++        expect_service_status_eq xalarmd active
++
++        sentryctl stop $mod_name
++        expect_eq $? 0
++
++        expect_task_status_eq $mod_name "FAILED"
++
++        sleep 10
++
++        end_line=$(wc -l < /var/log/sysSentry/sysSentry.log)
++        expect_ne $start_line $end_line
++
++        sed -n "${start_line}, ${end_line}p" /var/log/sysSentry/sysSentry.log > ${tmp_log}
++        expect_true "grep -E 'mod $mod_name: alarm_id must be an integer' ${tmp_log}" || cat ${tmp_log}
++    done
++
++    invalid_list=("-1" "0" "1" "1000" "1129" "10000")
++    for arg in "${invalid_list[@]}"; do
++        start_line=$(expr $(wc -l < /var/log/sysSentry/sysSentry.log) + 1)
++
++        sed -i "s/^alarm_id.*/alarm_id=${arg}/g" "/etc/sysSentry/tasks/$mod_name.mod"
++
++        sentryctl reload $mod_name
++        expect_eq $? 0
++
++        sentryctl start $mod_name
++        expect_eq $? 0
++
++        expect_task_status_eq $mod_name "RUNNING"
++        expect_service_status_eq sysSentry active
++        expect_service_status_eq xalarmd active
++
++        sentryctl stop $mod_name
++        expect_eq $? 0
++
++        expect_task_status_eq $mod_name "FAILED"
++
++        sleep 10
++
++        end_line=$(wc -l < /var/log/sysSentry/sysSentry.log)
++        expect_ne $start_line $end_line
++
++        sed -n "${start_line}, ${end_line}p" /var/log/sysSentry/sysSentry.log > ${tmp_log}
++        expect_true "grep -E 'mod $mod_name: alarm_id must be in' ${tmp_log}" || cat ${tmp_log}
++    done
++}
++
++function post_test() {
++    systemctl stop sysSentry.socket sysSentry.service
++    systemctl stop xalarmd.socket xalarmd.service
++    kill -9 `pgrep -w test_task`
++    rm -rf ${tmp_log} test/sysSentry/test_task /usr/bin/test_task /etc/sysSentry/tasks/$mod_name.mod
++}
++
++run_testcase
+\ No newline at end of file
+diff --git a/selftest/test/test_load_mods_conflict_invalid.sh b/selftest/test/test_load_mods_conflict_invalid.sh
+new file mode 100644
+index 000000000000..ea9f3a1bdbc2
+--- /dev/null
++++ b/selftest/test/test_load_mods_conflict_invalid.sh
+@@ -0,0 +1,85 @@
++#!/bin/bash
++# Copyright (c), 2023-2024, Huawei Tech. Co., Ltd.
++
++source "libs/expect.sh"
++source "libs/lib.sh"
++source "libs/common.sh"
++set +e
++
++tmp_log="tmp_log"
++start_line=0
++mod_name="test_conflict_invalid"
++
++# 测试 alarm_clear_time 配置非法时的校验行为
++
++function pre_test() {
++    kill -9 `ps aux|grep syssentry|grep -v grep|awk '{print $2}'`
++    kill -9 `ps aux|grep test_task|grep -v grep|awk '{print $2}'`
++
++    config_file="/etc/sysSentry/tasks/$mod_name.mod"
++    if [ -f $config_file ]; then
++        rm -rf $config_file
++    fi
++
++    touch "$config_file"
++    echo "[common]" > "$config_file"
++    echo "enabled=yes" >> "$config_file"
++    echo "task_start=test_task" >> "$config_file"
++    echo "task_stop=pkill test_task" >> "$config_file"
++    echo "type=oneshot" >> "$config_file"
++    echo "conflict=up" >> "$config_file"
++
++    gcc test/sysSentry/test_task.c -o test/sysSentry/test_task
++    cp test/sysSentry/test_task /usr/bin
++
++    systemctl start xalarmd.socket xalarmd.service
++    systemctl start sysSentry.socket sysSentry.service
++    sleep 2
++}
++
++function do_test() {
++    expect_service_status_eq sysSentry active
++    expect_service_status_eq xalarmd active
++
++    # 检查任务是否加载成功
++    expect_task_status_eq $mod_name "EXITED"
++
++    invalid_list=("abcd" " " "0x10" "UP" "Up" "uP")
++    for arg in "${invalid_list[@]}"; do
++        start_line=$(expr $(wc -l < /var/log/sysSentry/sysSentry.log) + 1)
++
++        sed -i "s/^conflict.*/conflict=${arg}/g" "/etc/sysSentry/tasks/$mod_name.mod"
++
++        sentryctl reload $mod_name
++        expect_eq $? 0
++
++        sentryctl start $mod_name
++        expect_eq $? 0
++
++        expect_task_status_eq $mod_name "RUNNING"
++        expect_service_status_eq sysSentry active
++        expect_service_status_eq xalarmd active
++
++        sentryctl stop $mod_name
++        expect_eq $? 0
++
++        expect_task_status_eq $mod_name "FAILED"
++
++        sleep 10
++
++        end_line=$(wc -l < /var/log/sysSentry/sysSentry.log)
++        expect_ne $start_line $end_line
++
++        sed -n "${start_line}, ${end_line}p" /var/log/sysSentry/sysSentry.log > ${tmp_log}
++        expect_true "grep -E 'mod $mod_name: conflict must be one of ' ${tmp_log}" || cat ${tmp_log}
++    done
++}
++
++function post_test() {
++    systemctl stop sysSentry.socket sysSentry.service
++    systemctl stop xalarmd.socket xalarmd.service
++    kill -9 `pgrep -w test_task`
++    rm -rf ${tmp_log} test/sysSentry/test_task /usr/bin/test_task /etc/sysSentry/tasks/test_conflict_invalid.mod
++}
++
++run_testcase
+\ No newline at end of file
+diff --git a/selftest/test/test_load_mods_env_file_invalid.sh b/selftest/test/test_load_mods_env_file_invalid.sh
+new file mode 100644
+index 000000000000..5b6b03ef41f9
+--- /dev/null
++++ b/selftest/test/test_load_mods_env_file_invalid.sh
+@@ -0,0 +1,68 @@
++#!/bin/bash
++# Copyright (c), 2023-2024, Huawei Tech. Co., Ltd.
++
++source "libs/expect.sh"
++source "libs/lib.sh"
++source "libs/common.sh"
++set +e
++
++tmp_log="tmp_log"
++start_line=0
++mod_name="test_env_file_invalid"
++
++# 测试 env_file 配置非法时的校验行为（文件不存在）
++
++function pre_test() {
++    start_line=$(expr $(wc -l < /var/log/sysSentry/sysSentry.log) + 1)
++
++    kill -9 `ps aux|grep syssentry|grep -v grep|awk '{print $2}'`
++    kill -9 `ps aux|grep test_task|grep -v grep|awk '{print $2}'`
++
++    config_file="/etc/sysSentry/tasks/$mod_name.mod"
++    if [ -f $config_file ]; then
++        rm -rf $config_file
++    fi
++
++    touch "$config_file"
++    echo "[common]" > "$config_file"
++    echo "enabled=yes" >> "$config_file"
++    echo "task_start=test_task" >> "$config_file"
++    echo "task_stop=pkill test_task" >> "$config_file"
++    echo "type=oneshot" >> "$config_file"
++    echo "env_file=/nonexistent/path/to/env_file" >> "$config_file"
++
++    gcc test/sysSentry/test_task.c -o test/sysSentry/test_task
++    cp test/sysSentry/test_task /usr/bin
++
++    systemctl start xalarmd.socket xalarmd.service
++    systemctl start sysSentry.socket sysSentry.service
++    sleep 2
++}
++
++function do_test() {
++    # 检查任务是否加载成功
++    expect_task_status_eq $mod_name "EXITED"
++
++    sentryctl start $mod_name
++    expect_eq $? 0
++
++    expect_task_status_eq $mod_name "RUNNING"
++    expect_service_status_eq sysSentry active
++    expect_service_status_eq xalarmd active
++
++    end_line=$(wc -l < /var/log/sysSentry/sysSentry.log)
++    sed -n "${start_line}, ${end_line}p" /var/log/sysSentry/sysSentry.log > ${tmp_log}
++
++    # 检查日志中是否有 env_file 校验失败的错误信息
++    expect_true "grep -E 'mod $mod_name: env_file.*does not exist' ${tmp_log}" || cat ${tmp_log}
++
++}
++
++function post_test() {
++    systemctl stop sysSentry.socket sysSentry.service
++    systemctl stop xalarmd.socket xalarmd.service
++    kill -9 `pgrep -w test_task`
++    rm -rf ${tmp_log} test/sysSentry/test_task /usr/bin/test_task /etc/sysSentry/tasks/test_env_file_invalid.mod
++}
++
++run_testcase
+\ No newline at end of file
+diff --git a/selftest/test/test_load_mods_valid_config.sh b/selftest/test/test_load_mods_valid_config.sh
+new file mode 100644
+index 000000000000..a4eaf2a1c2cc
+--- /dev/null
++++ b/selftest/test/test_load_mods_valid_config.sh
+@@ -0,0 +1,87 @@
++#!/bin/bash
++# Copyright (c), 2023-2024, Huawei Tech. Co., Ltd.
++
++source "libs/expect.sh"
++source "libs/lib.sh"
++source "libs/common.sh"
++set +e
++
++tmp_log="tmp_log"
++start_line=0
++mod_name="test_valid_config"
++
++# 测试所有配置合法时的正常加载行为
++
++function pre_test() {
++    start_line=$(expr $(wc -l < /var/log/sysSentry/sysSentry.log) + 1)
++
++    kill -9 `ps aux|grep syssentry|grep -v grep|awk '{print $2}'`
++    kill -9 `ps aux|grep test_task|grep -v grep|awk '{print $2}'`
++
++    # 创建合法的 env_file
++    env_file="/etc/sysSentry/plugins/$mod_name.env"
++    echo "TEST_VAR=valid_value" > "$env_file"
++
++    config_file="/etc/sysSentry/tasks/$mod_name.mod"
++    if [ -f $config_file ]; then
++        rm -rf $config_file
++    fi
++
++    touch "$config_file"
++    echo "[common]" > "$config_file"
++    echo "enabled=yes" >> "$config_file"
++    echo "task_start=test_task" >> "$config_file"
++    echo "task_stop=pkill test_task" >> "$config_file"
++    echo "type=oneshot" >> "$config_file"
++    echo "alarm_id=1016" >> "$config_file"
++    echo "alarm_clear_time=30" >> "$config_file"
++    echo "env_file=$env_file" >> "$config_file"
++    echo "conflict=down" >> "$config_file"
++
++    gcc test/sysSentry/test_task.c -o test/sysSentry/test_task
++    cp test/sysSentry/test_task /usr/bin
++
++    systemctl start xalarmd.socket xalarmd.service
++    systemctl start sysSentry.socket sysSentry.service
++    sleep 2
++}
++
++function do_test() {
++    expect_service_status_eq sysSentry active
++    expect_service_status_eq xalarmd active
++
++    end_line=$(wc -l < /var/log/sysSentry/sysSentry.log)
++    sed -n "${start_line}, ${end_line}p" /var/log/sysSentry/sysSentry.log > ${tmp_log}
++
++    # 检查日志中不应该有校验失败的错误信息
++    expect_false "grep -E 'mod $mod_name: alarm_id must be' ${tmp_log}"
++    expect_false "grep -E 'mod $mod_name: alarm_clear_time must be' ${tmp_log}"
++    expect_false "grep -E 'mod $mod_name: env_file.*does not exist' ${tmp_log}"
++    expect_false "grep -E 'mod $mod_name: conflict must be one of' ${tmp_log}"
++
++    # 检查任务是否加载成功
++    expect_task_status_eq "$mod_name" "EXITED"
++
++    # 检查任务能够正常启动
++    sentryctl start "$mod_name"
++    expect_eq $? 0
++
++    sleep 1
++
++    expect_task_status_eq "$mod_name" "RUNNING"
++
++    sentryctl stop "$mod_name"
++    expect_eq $? 0
++
++    expect_task_status_eq "$mod_name" "FAILED"
++}
++
++function post_test() {
++    systemctl stop sysSentry.socket sysSentry.service
++    systemctl stop xalarmd.socket xalarmd.service
++    kill -9 `pgrep -w test_task`
++    rm -rf ${tmp_log} test/sysSentry/test_task /usr/bin/test_task
++    rm -rf /etc/sysSentry/tasks/$mod_name.mod /etc/sysSentry/plugins/$mod_name.env
++}
++
++run_testcase
+\ No newline at end of file
+diff --git a/selftest/test/test_sentryctl_type_period.sh b/selftest/test/test_sentryctl_type_period.sh
+index 64794d8a3526..7dedd2111eb5 100644
+--- a/selftest/test/test_sentryctl_type_period.sh
++++ b/selftest/test/test_sentryctl_type_period.sh
+@@ -59,6 +59,8 @@ function do_test() {
+         sentryctl stop test_type_period
+         expect_eq $? 0
+ 
++        sleep 1
++
+         sentryctl status test_type_period | grep -w "status: FAILED"
+         expect_eq $? 0
+     fi
+diff --git a/src/services/syssentry/global_values.py b/src/services/syssentry/global_values.py
+index 77be0993dfcb..3130f69a1ded 100644
+--- a/src/services/syssentry/global_values.py
++++ b/src/services/syssentry/global_values.py
+@@ -36,6 +36,7 @@ SYSSENTRY_CONF_PATH = "/etc/sysSentry"
+ INSPECT_CONF_PATH = "/etc/sysSentry/inspect.conf"
+ TASK_LOG_DIR = "/var/log/sysSentry"
+ DEFAULT_ALARM_CLEAR_TIME = 15
++DEFAULT_CONFLICT = "up"
+ 
+ 
+ TYPES_SET = ('oneshot', 'period')
+@@ -87,7 +88,7 @@ class InspectTask:
+         # env conf to popen arg
+         self.environ_conf = None
+         # start mode
+-        self.conflict = "up"
++        self.conflict = DEFAULT_CONFLICT
+         # alarm id
+         self.alarm_id = -1
+         self.alarm_clear_time = DEFAULT_ALARM_CLEAR_TIME
+@@ -305,14 +306,6 @@ class InspectTask:
+         return True
+ 
+     def load_env_file(self):
+-        if not os.path.exists(self.env_file):
+-            logging.warning("env_file: %s is not exist, use default environ", self.env_file)
+-            return
+-
+-        if not os.access(self.env_file, os.R_OK):
+-            logging.warning("env_file: %s is not be read, use default environ", self.env_file)
+-            return
+-
+         # read config
+         self.environ_conf = dict(os.environ)
+         with open(self.env_file, 'r') as file:
+diff --git a/src/services/syssentry/load_mods.py b/src/services/syssentry/load_mods.py
+index db78ac4a596d..2cbb3f8f3c3e 100644
+--- a/src/services/syssentry/load_mods.py
++++ b/src/services/syssentry/load_mods.py
+@@ -19,7 +19,18 @@ import re
+ 
+ from .sentry_config import SentryConfig
+ 
+-from .global_values import TYPES_SET, InspectTask, TASKS_STORAGE_PATH, SYSSENTRY_CONF_PATH
++from .global_values import (
++    TYPES_SET,
++    InspectTask,
++    TASKS_STORAGE_PATH,
++    SYSSENTRY_CONF_PATH,
++    DEFAULT_ALARM_CLEAR_TIME,
++    DEFAULT_CONFLICT,
++)
++from .alarm import (
++    MIN_ALARM_ID,
++    MAX_ALARM_ID,
++)
+ from .task_map import TasksMap, ONESHOT_TYPE, PERIOD_TYPE
+ from .cron_process import PeriodTask
+ from .mod_status import set_task_status
+@@ -51,6 +62,7 @@ MOD_SUFFIX_LEN = 4
+ 
+ ENABLED_FLAGS_SET = ("yes", "no")
+ ONSTART_FLAGS_SET = ("yes", "no")
++CONFLICT_VALUES_SET = ("up", "down", "kill")
+ 
+ 
+ def mod_name_verify(mod_name):
+@@ -160,6 +172,116 @@ def parse_period_delay(mod_conf):
+     return cron_delay
+ 
+ 
++def validate_alarm_id(mod_name, alarm_id_str):
++    """
++    Validate alarm_id configuration - must be a positive integer and in [MIN_ALARM_ID, MAX_ALARM_ID].
++    :param mod_name: module name for logging
++    :param alarm_id_str: alarm_id value from config
++    :return: valid alarm_id (int) or None if invalid
++    """
++    if alarm_id_str is None or alarm_id_str == "":
++        logging.error("mod %s: alarm_id must be an integer, got '%s'", mod_name, alarm_id_str)
++        return None
++
++    try:
++        alarm_id = int(alarm_id_str)
++        if alarm_id < MIN_ALARM_ID or alarm_id > MAX_ALARM_ID:
++            logging.error(
++                "mod %s: alarm_id must be in [%d, %d], got '%s'",
++                mod_name,
++                MIN_ALARM_ID,
++                MAX_ALARM_ID,
++                alarm_id_str
++            )
++            return None
++        return alarm_id
++    except ValueError:
++        logging.error("mod %s: alarm_id must be an integer, got '%s'", mod_name, alarm_id_str)
++        return None
++
++
++def validate_alarm_clear_time(mod_name, clear_time_str):
++    """
++    Validate alarm_clear_time configuration - must be a positive integer.
++    :param mod_name: module name for logging
++    :param clear_time_str: alarm_clear_time value from config
++    :return: valid alarm_clear_time (int) or DEFAULT_ALARM_CLEAR_TIME if invalid
++    """
++    if clear_time_str is None or clear_time_str == "":
++        logging.warning("mod %s: alarm_clear_time not set, use %d as default", mod_name, DEFAULT_ALARM_CLEAR_TIME)
++        return DEFAULT_ALARM_CLEAR_TIME
++
++    try:
++        clear_time = int(clear_time_str)
++        if clear_time < 0:
++            logging.error("mod %s: alarm_clear_time must be a positive integer, got '%s'", mod_name, clear_time_str)
++            return DEFAULT_ALARM_CLEAR_TIME
++        return clear_time
++    except ValueError:
++        logging.error("mod %s: alarm_clear_time must be an integer, got '%s'", mod_name, clear_time_str)
++        return DEFAULT_ALARM_CLEAR_TIME
++
++
++def validate_env_file(mod_name, env_file_path):
++    """
++    Validate env_file configuration - must be a valid file path that exists and is readable.
++    :param mod_name: module name for logging
++    :param env_file_path: env_file value from config
++    :return: valid env_file path or "" if invalid
++    """
++    if env_file_path is None:
++        logging.error("mod %s: env_file is None", mod_name)
++        return ""
++
++    # Check if path contains valid characters (no injection attempts)
++    if not isinstance(env_file_path, str):
++        logging.error("mod %s: env_file must be a string path, got '%s'", mod_name, type(env_file_path))
++        return ""
++
++    if env_file_path == "":
++        logging.error("mod %s: env_file is empty", mod_name)
++        return ""
++
++    # Normalize path and check for path traversal
++    normalized_path = os.path.normpath(env_file_path)
++
++    # Check if file exists
++    if not os.path.exists(normalized_path):
++        logging.error("mod %s: env_file '%s' does not exist", mod_name, env_file_path)
++        return ""
++
++    # Check if it's a regular file
++    if not os.path.isfile(normalized_path):
++        logging.error("mod %s: env_file '%s' is not a regular file", mod_name, env_file_path)
++        return ""
++
++    # Check if file is readable
++    if not os.access(normalized_path, os.R_OK):
++        logging.error("mod %s: env_file '%s' is not readable", mod_name, env_file_path)
++        return ""
++
++    return normalized_path
++
++
++def validate_conflict(mod_name, conflict_value):
++    """
++    Validate conflict configuration - must be one of 'up', 'down', 'kill'.
++    :param mod_name: module name for logging
++    :param conflict_value: conflict value from config
++    :return: valid conflict value or 'up' (default) if invalid
++    """
++    if conflict_value is None or conflict_value == "":
++        logging.error("mod %s: conflict must be one of 'up', 'down', 'kill', got '%s'", mod_name, conflict_value)
++        return DEFAULT_CONFLICT
++
++    conflict_value_strip = conflict_value.strip()
++    if conflict_value_strip not in CONFLICT_VALUES_SET:
++        logging.error("mod %s: conflict must be one of 'up', 'down', 'kill', got '%s'", mod_name, conflict_value_strip)
++        return DEFAULT_CONFLICT
++
++    return conflict_value_strip
++
++
+ def parse_mod_conf(mod_name, mod_conf):
+     """
+     :param mod_name:
+@@ -206,14 +328,14 @@ def parse_mod_conf(mod_name, mod_conf):
+     task.load_enabled = is_enabled
+ 
+     try:
+-        task.alarm_id = mod_conf.get(CONF_TASK, CONF_ALARM_ID)
++        task.alarm_id = validate_alarm_id(mod_name, mod_conf.get(CONF_TASK, CONF_ALARM_ID))
+     except configparser.NoOptionError:
+         task.alarm_id = None
+         logging.warning(f"{mod_name} alarm_id not set, alarm_id is None")
+ 
+     if task.alarm_id is not None:
+         try:
+-            task.alarm_clear_time = mod_conf.get(CONF_TASK, CONF_ALARM_CLEAR_TIME)
++            task.alarm_clear_time = validate_alarm_clear_time(mod_name, mod_conf.get(CONF_TASK, CONF_ALARM_CLEAR_TIME))
+         except configparser.NoOptionError:
+             logging.warning(f"{mod_name} not set alarm_clear_time, use 15s as default")
+ 
+@@ -225,12 +347,10 @@ def parse_mod_conf(mod_name, mod_conf):
+         task.onstart = is_onstart
+ 
+     if CONF_ENV_FILE in mod_conf.options(CONF_TASK):
+-        env_file_dir = mod_conf.get(CONF_TASK, CONF_ENV_FILE)
+-        task.env_file = env_file_dir
++        task.env_file = validate_env_file(mod_name, mod_conf.get(CONF_TASK, CONF_ENV_FILE))
+ 
+     if CONF_CONFLICT in mod_conf.options(CONF_TASK):
+-        conflict = mod_conf.get(CONF_TASK, CONF_CONFLICT)
+-        task.conflict = conflict
++        task.conflict = validate_conflict(mod_name, mod_conf.get(CONF_TASK, CONF_CONFLICT))
+ 
+     return task
+ 
+-- 
+2.43.0
+

@@ -1,0 +1,33 @@
+From d6e7f4c9fa80ca842d4ae35d4d645868abaf6131 Mon Sep 17 00:00:00 2001
+From: tong_1001 <sxt1001@qq.com>
+Date: Mon, 3 Aug 2026 10:31:19 +0800
+Subject: [PATCH 6/8] fix: set restrictive umask(0o077) instead of umask(0) in
+ xalarm_daemon.py
+
+umask(0) causes all subsequently created files (logs, sockets, etc.)
+to be world-readable/writable (0666 for files, 0777 for dirs) unless
+explicit permissions are set. Use umask(0o077) so files default to
+0600 and directories to 0700, preventing unauthorized access by
+other users.
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+---
+ src/services/xalarm/xalarm_daemon.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/services/xalarm/xalarm_daemon.py b/src/services/xalarm/xalarm_daemon.py
+index a588397cd06b..16683a0900a4 100644
+--- a/src/services/xalarm/xalarm_daemon.py
++++ b/src/services/xalarm/xalarm_daemon.py
+@@ -84,7 +84,7 @@ def daemon_init():
+         sys.exit(0)
+ 
+     os.chdir('/')
+-    os.umask(0)
++    os.umask(0o077)
+     os.setsid()
+ 
+     with open('/dev/null') as read_null, open('/dev/null', 'a+') as write_null:
+-- 
+2.43.0
+

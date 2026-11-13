@@ -1,0 +1,58 @@
+From 2bf7bd3e5be77a80e294cbbe9054a08f120d0683 Mon Sep 17 00:00:00 2001
+From: tong_1001 <sxt1001@qq.com>
+Date: Mon, 3 Aug 2026 14:44:52 +0800
+Subject: [PATCH 8/8] fix: verify D-Bus signal sender in xalarm_server.py
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+monitor_sentry_service()监听PropertiesChanged信号时未验证发送者，
+恶意进程可在系统总线上伪造信号触发broadcast_sentry_down误报。
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+---
+ src/services/xalarm/xalarm_server.py | 20 ++++++++++++++++----
+ 1 file changed, 16 insertions(+), 4 deletions(-)
+
+diff --git a/src/services/xalarm/xalarm_server.py b/src/services/xalarm/xalarm_server.py
+index eb3001d83308..fee9977285da 100644
+--- a/src/services/xalarm/xalarm_server.py
++++ b/src/services/xalarm/xalarm_server.py
+@@ -154,8 +154,15 @@ def monitor_sentry_service():
+     bus = dbus.SystemBus()
+     systemd = bus.get_object('org.freedesktop.systemd1',
+                             '/org/freedesktop/systemd1/unit/sysSentry_2eservice')
++    # 获取 systemd 的唯一总线名称
++    systemd_name = bus.get_name_owner('org.freedesktop.systemd1')
++
++    def on_properties_changed(interface, changed, invalidated, sender=None):
++        # 验证信号发送者是否是真正的 systemd
++        if sender != systemd_name:
++            logging.warning(f"Ignoring PropertiesChanged signal from unauthorized sender: {sender}")
++            return
+ 
+-    def on_properties_changed(interface, changed, invalidated):
+         if 'ActiveState' in changed:
+             state = changed['ActiveState']
+             logging.info("sysSentry service state changed to: %s", state)
+@@ -167,9 +174,14 @@ def monitor_sentry_service():
+                     clear_enabled_events_state()
+                 broadcast_sentry_down(alarm_sock, fd_to_socket, fd_to_socket_lock)
+ 
+-    systemd.connect_to_signal(dbus_interface='org.freedesktop.DBus.Properties',
+-                              signal_name='PropertiesChanged',
+-                              handler_function=on_properties_changed)
++    bus.add_signal_receiver(
++        handler_function=on_properties_changed,
++        signal_name='PropertiesChanged',
++        dbus_interface='org.freedesktop.DBus.Properties',
++        bus_name='org.freedesktop.systemd1',
++        path='/org/freedesktop/systemd1/unit/sysSentry_2eservice',
++        sender_keyword='sender'
++    )
+ 
+     logging.info("sysSentry service monitoring started")
+     loop = GLib.MainLoop()
+-- 
+2.43.0
+

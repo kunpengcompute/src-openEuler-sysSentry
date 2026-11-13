@@ -1,0 +1,79 @@
+From 5faf610e3c6d228f40121485c981a14a46bd39ca Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Sat, 5 Sep 2026 11:24:02 +0800
+Subject: [PATCH] Reject unaligned size in tc_ring_one_space_init instead of
+ partial init
+
+- change the return type to int and fail with TC_RING_ONE_PRAMA_ERR
+  when size is not a multiple of TC_RING_ONE_DATA_UNIT; previously a
+  non-aligned tail unit was either written out of bounds (original code)
+  or silently skipped (leaving an uninitialized region that the scan
+  later misreports as a memory fault, possibly triggering the configured
+  panic/shutdown/reboot)
+- use size_t for the loop counter to avoid int overflow when size
+  exceeds INT_MAX
+- the caller tc_ring_one_init frees the node memory and bails out via
+  the existing failure path on init failure
+- add a _Static_assert that the pattern size equals the data unit, so
+  the step/write-width coupling can no longer be broken silently
+
+Co-Authored-By: GLM-5.3
+---
+ .../soc_ring_sentry/tc_ring_one.c             | 22 ++++++++++++++++---
+ 1 file changed, 19 insertions(+), 3 deletions(-)
+
+diff --git a/src/sentryPlugins/soc_ring_sentry/tc_ring_one.c b/src/sentryPlugins/soc_ring_sentry/tc_ring_one.c
+index 5045190..4dab305 100755
+--- a/src/sentryPlugins/soc_ring_sentry/tc_ring_one.c
++++ b/src/sentryPlugins/soc_ring_sentry/tc_ring_one.c
+@@ -86,6 +86,10 @@ static const uint32_t tc_ring_one_pattern[32] = {
+     0x00000000, 0x00000000, 0x00000000, 0x00000000,
+ };
+ 
++// 约束: pattern 必须恰好铺满一个数据单元，否则 space_init 的按单元写入会越界或留空隙
++_Static_assert(sizeof(tc_ring_one_pattern) == TC_RING_ONE_DATA_UNIT,
++               "tc_ring_one_pattern size must equal TC_RING_ONE_DATA_UNIT");
++
+ static const uint32_t g_tc_ring_one_special_bits[] = {394, 397, 405, 343, 394, 393, 392, 377};
+ 
+ static void* tc_ring_one_thread_entry(void* arg);
+@@ -224,13 +228,21 @@ static void *numa_alloc_fallback(int numa_node, int preferred_node, size_t size)
+     return ptr;
+ }
+ 
+-static void tc_ring_one_space_init(void *base, size_t size)
++static int tc_ring_one_space_init(void *base, size_t size)
+ {
+-    int i;
++    size_t i;
++
++    // 非对齐的尾部单元若跳过会留下未初始化区域，导致后续扫描误报内存故障，这里直接拒绝
++    if (size % TC_RING_ONE_DATA_UNIT != 0) {
++        logging_error("size %#lx is not aligned to %#x\n", size, TC_RING_ONE_DATA_UNIT);
++        return TC_RING_ONE_PRAMA_ERR;
++    }
+ 
+     for (i = 0; i < size; i += TC_RING_ONE_DATA_UNIT) {
+         memcpy((char*)base + i, tc_ring_one_pattern, sizeof(tc_ring_one_pattern));
+     }
++
++    return TC_RING_ONE_SUCCESS;
+ }
+ 
+ static bool is_core_invalid(struct tc_ring_one_config *config, int core_id)
+@@ -316,7 +328,11 @@ static int tc_ring_one_init(struct tc_ring_one_config *config)
+             goto numa_alloc_fail;
+         }
+ 
+-        tc_ring_one_space_init(ptr, config->mem_size);
++        if (tc_ring_one_space_init(ptr, config->mem_size) != TC_RING_ONE_SUCCESS) {
++            numa_free(ptr, config->mem_size);
++            ret = TC_RING_ONE_PRAMA_ERR;
++            goto numa_alloc_fail;
++        }
+         config->test_space_base[i] = ptr;
+     }
+ 
+-- 
+2.45.0.windows.1
+

@@ -1,0 +1,69 @@
+From 6c1c17798be8e7561b9d219cde83d615366a6881 Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Sat, 25 Jul 2026 08:32:20 +0800
+Subject: [PATCH] Remove unnecessary operations for creating /var/run/sysSentry
+ directory and modifying its permissions
+
+---
+ src/services/syssentry/global_values.py | 2 --
+ src/services/syssentry/heartbeat.py     | 1 -
+ src/services/syssentry/syssentry.py     | 5 -----
+ 3 files changed, 8 deletions(-)
+
+diff --git a/src/services/syssentry/global_values.py b/src/services/syssentry/global_values.py
+index dbd1e916932a..6c01087fa9b7 100644
+--- a/src/services/syssentry/global_values.py
++++ b/src/services/syssentry/global_values.py
+@@ -24,14 +24,12 @@ from .utils import get_current_time_string, run_cmd
+ from .mod_status import set_runtime_status
+ from .mod_status import RUNNING_STATUS, EXITED_STATUS, NONZERO_EXITED_STATUS, FAILED_STATUS, WAITING_STATUS
+ 
+-SENTRY_RUN_DIR = "/var/run/sysSentry"
+ CTL_SOCKET_PATH = "/var/run/sysSentry/control.sock"
+ SYSSENTRY_CONF_PATH = "/etc/sysSentry"
+ INSPECT_CONF_PATH = "/etc/sysSentry/inspect.conf"
+ TASK_LOG_DIR = "/var/log/sysSentry"
+ DEFAULT_ALARM_CLEAR_TIME = 15
+ 
+-SENTRY_RUN_DIR_PERM = 0o750
+ 
+ TYPES_SET = ('oneshot', 'period')
+ 
+diff --git a/src/services/syssentry/heartbeat.py b/src/services/syssentry/heartbeat.py
+index 40215172f7ba..3f4b1080d7e1 100644
+--- a/src/services/syssentry/heartbeat.py
++++ b/src/services/syssentry/heartbeat.py
+@@ -19,7 +19,6 @@ import logging
+ import socket
+ 
+ from .mod_status import set_runtime_status, RUNNING_STATUS, FAILED_STATUS
+-from .global_values import SENTRY_RUN_DIR
+ from .task_map import TasksMap
+ from .utils import MAX_MSG_LEN, recv_all
+ 
+diff --git a/src/services/syssentry/syssentry.py b/src/services/syssentry/syssentry.py
+index d9df84e9ea67..0b2df4a1677c 100644
+--- a/src/services/syssentry/syssentry.py
++++ b/src/services/syssentry/syssentry.py
+@@ -25,7 +25,6 @@ import select
+ 
+ from .sentry_config import SentryConfig, get_log_level
+ from .task_map import TasksMap
+-from .global_values import SENTRY_RUN_DIR, SENTRY_RUN_DIR_PERM
+ from .cron_process import period_tasks_handle
+ from .callbacks import (
+     mod_list_show,
+@@ -590,10 +589,6 @@ def clean_child():
+ def main():
+     """main
+     """
+-    if not os.path.exists(SENTRY_RUN_DIR):
+-        os.mkdir(SENTRY_RUN_DIR)
+-        os.chmod(SENTRY_RUN_DIR, mode=SENTRY_RUN_DIR_PERM)
+-
+     log_level = get_log_level()
+     log_format = "%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s"
+ 
+-- 
+2.43.0
+

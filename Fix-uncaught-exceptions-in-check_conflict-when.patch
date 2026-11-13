@@ -1,0 +1,29 @@
+From 80d82d325d49544609bce6ff05ded051d33d1517 Mon Sep 17 00:00:00 2001
+From: liuying03 <liuying03@kylinos.cn>
+Date: Wed, 9 Sep 2026 14:14:46 +0800
+Subject: [PATCH] Fix uncaught exceptions in check_conflict when parsing ps
+ output
+
+---
+ src/services/syssentry/global_values.py | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/services/syssentry/global_values.py b/src/services/syssentry/global_values.py
+index c609fad..919bcea 100644
+--- a/src/services/syssentry/global_values.py
++++ b/src/services/syssentry/global_values.py
+@@ -272,7 +272,10 @@ class InspectTask:
+         for line in output_lines:
+             if self.task_start not in line:
+                 continue
+-            pid = int(line.split()[1])
++            try:
++                pid = int(line.split()[1])
++            except (IndexError, ValueError):
++                continue
+             pid_list.append(pid)
+         logging.debug("current pid_list = %s", pid_list)
+ 
+-- 
+2.45.0.windows.1
+

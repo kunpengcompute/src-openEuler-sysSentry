@@ -1,0 +1,269 @@
+From 8372306dcda2ef9eb919f2572eab6ee054796b1d Mon Sep 17 00:00:00 2001
+From: tong_1001 <sxt1001@qq.com>
+Date: Thu, 10 Sep 2026 16:26:03 +0800
+Subject: [PATCH] Reduce xalarmd registration timeout from 500ms to 50ms
+
+wait_for_connection accepts a client connection then synchronously
+waits for an event-registration message with a 0.5s recv timeout.
+Clients using xalarm_register_event (register_xalarm.c) send this
+JSON synchronously right after connect(), so it normally arrives
+within milliseconds (measured p99 ~1ms, ~63ms under 4-core CPU +
+fork + memory pressure).
+
+The 500ms wait was not needed for the fast path but created a real
+problem for legacy-API clients (xalarm_Register, pyxalarm) that never
+send the message: they were stuck outside fd_to_socket for the full
+500ms, and any alarm broadcast in that window was silently dropped.
+This is exactly the race that made test_xalarm_send_message fail
+~67% of the time.
+
+Reduce the timeout to 50ms (REG_MSG_TIMEOUT constant). 50ms is ~45x
+the observed p99, tolerates heavy scheduler jitter, and keeps the
+loss window small. The trade-off favors a short value: a timeout
+that is too short misclassifies a new-API client as a receiver-only
+client (harmless superset), while a timeout that is too long
+increases alarm loss for legacy clients.
+
+Also fix test_xalarm_send_message flakiness (67% -> 0% failure):
+- Add a readiness probe after systemctl start (xalarmd is Type=forking)
+- Add a 1s wait after register success to cover the 50ms timeout
+  window before sending the first alarm
+- Run send_demo synchronously (remove &) to eliminate the tmp_log
+  race on invalid-param checks
+- Bump wait_cmd_ok retry count 3 -> 5 for jitter tolerance
+
+Add test_xalarm_register_timeout.sh to guard the timeout behavior:
+source constant (REG_MSG_TIMEOUT = 0.05), legacy-API receiver-only
+path with 50ms log, and new-API registration within the 50ms window.
+
+Co-Authored-By: GLM-5.2
+---
+ selftest/test/test_xalarm_register_timeout.sh | 86 +++++++++++++++++++
+ selftest/test/test_xalarm_send_message.sh     | 46 ++++++----
+ src/services/xalarm/xalarm_transfer.py        |  9 +-
+ 3 files changed, 123 insertions(+), 18 deletions(-)
+ create mode 100644 selftest/test/test_xalarm_register_timeout.sh
+
+diff --git a/selftest/test/test_xalarm_register_timeout.sh b/selftest/test/test_xalarm_register_timeout.sh
+new file mode 100644
+index 0000000..d5d3c6a
+--- /dev/null
++++ b/selftest/test/test_xalarm_register_timeout.sh
+@@ -0,0 +1,86 @@
++#!/bin/bash
++# Copyright (c), 2023-2024, Huawei Tech. Co., Ltd.
++
++source "libs/expect.sh"
++source "libs/lib.sh"
++source "libs/wait.sh"
++source "libs/shopt.sh"
++set +e
++
++# 看护 xalarmd 在 wait_for_connection 中等待客户端注册消息的超时行为：
++#   1. 源码常量 REG_MSG_TIMEOUT 保持为 0.05（50ms），防止回归到历史上导致告警丢失的 0.5（500ms）。
++#   2. 老 API 客户端（xalarm_Register，不发注册消息）经过超时后被作为纯告警接收方加入转发表，
++#      且能正常收到告警 —— 回归 500ms 窗口内告警被静默丢弃的问题。
++#   3. 新 API 客户端（xalarm_register_event，connect 后同步发送注册 JSON）在 50ms 内完成注册，
++#      服务端日志出现 "registered event"，证明 50ms 对同步发送的注册消息足够。
++
++XALARM_LOG="/var/log/sysSentry/xalarm.log"
++TRANSFER_SRC="../src/services/xalarm/xalarm_transfer.py"
++
++function pre_test() {
++    rm -rf ./checklog ./tmp_log test/xalarm/reg_demo test/xalarm/send_demo test/RA_mock/RA_mock
++    gcc test/xalarm/reg_demo.c -o test/xalarm/reg_demo -lxalarm
++    gcc test/xalarm/send_demo.c -o test/xalarm/send_demo -lxalarm
++    gcc test/RA_mock/RA_mock_delay.c -Wall -O2 -lxalarm -o test/RA_mock/RA_mock
++    systemctl stop xalarmd.socket xalarmd.service
++    sleep 1
++    systemctl start xalarmd.socket xalarmd.service
++    for i in $(seq 1 10); do
++        if [ "$(systemctl is-active xalarmd.service)" = "active" ]; then
++            break
++        fi
++        sleep 1
++    done
++    sleep 1
++    echo > "$XALARM_LOG"
++}
++
++function do_test() {
++    # 场景一：源码常量看护 —— REG_MSG_TIMEOUT 必须为 0.05，防止回归到 500ms
++    expect_true "grep -q '^REG_MSG_TIMEOUT = 0.05$' $TRANSFER_SRC" \
++        "REG_MSG_TIMEOUT is 0.05 (50ms) in source"
++
++    # 场景二：老 API 客户端不发注册消息，超时后被保留为告警接收方，且能收到告警
++    ./test/xalarm/reg_demo >> checklog 2>&1 &
++    wait_cmd_ok "grep \"register success\" ./checklog" 1 5
++    expect_eq $? 0 "legacy api register success"
++    # 等待服务端走完超时分支（50ms）并把连接加入 fd_to_socket 转发表
++    sleep 1
++
++    ./test/xalarm/send_demo 1001 1 2 "register timeout legacy alarm" >> checklog 2>&1
++    wait_cmd_ok "grep \"register timeout legacy alarm\" ./checklog" 1 5
++    expect_eq $? 0 "legacy api client received alarm after timeout window"
++
++    # 服务端日志应记录超时分支命中，且超时值日志显示 50ms（非 500ms）
++    expect_true "grep -q 'does not send registration message in 50 ms' $XALARM_LOG" \
++        "server logged legacy client 50ms timeout (not 500ms)"
++
++    # 等待 reg_demo 内部 sleep(10) 结束后打印解注册成功（reg_demo.c SLEEP_TIME=10）
++    sleep 10
++    wait_cmd_ok "grep \"unregister xalarm success\" ./checklog" 1 5
++    expect_eq $? 0 "legacy api unregister success"
++
++    # 场景三：新 API 客户端 connect 后同步发送注册 JSON，在 50ms 内完成注册
++    echo > "$XALARM_LOG"
++    ./test/RA_mock/RA_mock > tmp_log 2>&1 &
++    # RA_mock_delay.c 用 printf 但无 fflush，重定向到文件时 stdout 为全缓冲，
++    # "Waiting for plugin msg" 会滞留缓冲区；改为看护服务端日志的 "registered event"
++    wait_cmd_ok "grep -q 'registered event' $XALARM_LOG" 1 5
++    expect_eq $? 0 "new api client registered event within 50ms timeout"
++
++    kill -9 $(pgrep -f RA_mock) 2>/dev/null
++}
++
++function post_test() {
++    kill -9 $(pgrep -f RA_mock) 2>/dev/null
++    kill -9 $(pgrep -f reg_demo) 2>/dev/null
++    systemctl stop xalarmd.socket xalarmd.service
++    sleep 1
++    cat ./checklog 2>/dev/null
++    cat ./tmp_log 2>/dev/null
++    rm -rf ./checklog ./tmp_log test/xalarm/reg_demo test/xalarm/send_demo test/RA_mock/RA_mock
++    systemctl stop xalarmd.socket xalarmd.service
++    sleep 1
++}
++
++run_testcase
+diff --git a/selftest/test/test_xalarm_send_message.sh b/selftest/test/test_xalarm_send_message.sh
+index 3b9e820..9545e5c 100644
+--- a/selftest/test/test_xalarm_send_message.sh
++++ b/selftest/test/test_xalarm_send_message.sh
+@@ -16,67 +16,79 @@ function pre_test() {
+     systemctl stop xalarmd.socket xalarmd.service
+     sleep 1
+     systemctl start xalarmd.socket xalarmd.service
++    # 等待 xalarmd 服务真正就绪：服务状态变为 active 后，再等待 wait_for_connection 线程启动
++    for i in $(seq 1 10); do
++        if [ "$(systemctl is-active xalarmd.service)" = "active" ]; then
++            break
++        fi
++        sleep 1
++    done
++    sleep 1
++    echo > /var/log/sysSentry/xalarm.log
+ }
+ 
+ function do_test() {
+     ./test/xalarm/reg_demo >> checklog 2>&1 &
+-    wait_cmd_ok "grep \"register success\" ./checklog" 1 3
++    wait_cmd_ok "grep \"register success\" ./checklog" 1 5
+     expect_eq $? 0 "xalarm register success"
++    # reg_demo 用老 API 不发注册消息，xalarmd 走 50ms 注册超时后才把连接加入 fd_to_socket 转发表；
++    # 等待 1s 覆盖该窗口，避免告警落入空转发表被静默丢弃
++    sleep 1
+ 
+     # 发送用户注册的alarm id消息
+-    ./test/xalarm/send_demo 1001 1 2 "cpu usage high warning - 1" >> checklog 2>&1 &
+-    wait_cmd_ok "grep \"id:1001\" ./checklog" 1 3
++    ./test/xalarm/send_demo 1001 1 2 "cpu usage high warning - 1" >> checklog 2>&1
++    wait_cmd_ok "grep \"id:1001\" ./checklog" 1 5
+     expect_eq $? 0 "alarm id check"
+ 
+-    wait_cmd_ok "grep \"level:1\" ./checklog" 1 3
++    wait_cmd_ok "grep \"level:1\" ./checklog" 1 5
+     expect_eq $? 0 "alarm level check"
+ 
+-    wait_cmd_ok "grep \"type:2\" ./checklog" 1 3
++    wait_cmd_ok "grep \"type:2\" ./checklog" 1 5
+     expect_eq $? 0 "alarm type check"
+ 
+-    wait_cmd_ok "grep \"cpu usage high warning - 1\" ./checklog" 1 3
++    wait_cmd_ok "grep \"cpu usage high warning - 1\" ./checklog" 1 5
+     expect_eq $? 0 "alarm message check"
+ 	
+     # 发送用户未注册的alarm id消息
+     start_line=$(wc -l < ./checklog)
+-    ./test/xalarm/send_demo 1007 1 2 "cpu usage high warning - 2" >> checklog 2>&1 &
++    ./test/xalarm/send_demo 1007 1 2 "cpu usage high warning - 2" >> checklog 2>&1
+     end_line=$(wc -l < ./checklog)
+     expect_eq $end_line $start_line "send unregistered alarm id to xalarm"
+ 
+     # 验证不合法参数
+     start_line=$(expr $(wc -l < ./checklog) + 1)
+-    ./test/xalarm/send_demo 9000 2 1 "cpu usage high - 3" >> checklog 2>&1 &
++    ./test/xalarm/send_demo 9000 2 1 "cpu usage high - 3" >> checklog 2>&1
+     end_line=$(wc -l < ./checklog)
+     sed -n "${start_line}, ${end_line}p" ./checklog > ./tmp_log
+-    wait_cmd_ok "grep \"xalarm_Report: alarm info invalid\" ./tmp_log" 1 3
++    wait_cmd_ok "grep \"xalarm_Report: alarm info invalid\" ./tmp_log" 1 5
+     expect_eq $? 0 "alarm id check"
+  
+     start_line=$(expr $(wc -l < ./checklog) + 1)
+-    ./test/xalarm/send_demo 1002 7 -1 "cpu usage high - 4" >> checklog 2>&1 &
++    ./test/xalarm/send_demo 1002 7 -1 "cpu usage high - 4" >> checklog 2>&1
+     end_line=$(wc -l < ./checklog)
+     sed -n "${start_line}, ${end_line}p" ./checklog > ./tmp_log
+-    wait_cmd_ok "grep \"xalarm_Report: alarm info invalid\" ./tmp_log" 1 3
++    wait_cmd_ok "grep \"xalarm_Report: alarm info invalid\" ./tmp_log" 1 5
+     expect_eq $? 0 "alarm type check"
+  
+     start_line=$(expr $(wc -l < ./checklog) + 1)
+-    ./test/xalarm/send_demo 1002 2 -1 "cpu usage high - 5" >> checklog 2>&1 &
++    ./test/xalarm/send_demo 1002 2 -1 "cpu usage high - 5" >> checklog 2>&1
+     end_line=$(wc -l < ./checklog)
+     sed -n "${start_line}, ${end_line}p" ./checklog > ./tmp_log
+-    wait_cmd_ok "grep \"xalarm_Report: alarm info invalid\" ./tmp_log" 1 3
++    wait_cmd_ok "grep \"xalarm_Report: alarm info invalid\" ./tmp_log" 1 5
+     expect_eq $? 0 "alarm level check"
+ 
+     # 验证解注册
+     sleep 10
+-    ./test/xalarm/send_demo 1001 1 2 "cpu usage high warning - 6" >> checklog 2>&1 &
+-    wait_cmd_ok "grep \"unregister xalarm success\" ./checklog" 1 3
++    ./test/xalarm/send_demo 1001 1 2 "cpu usage high warning - 6" >> checklog 2>&1
++    wait_cmd_ok "grep \"unregister xalarm success\" ./checklog" 1 5
+     expect_eq $? 0 "check unregister xalarm"
+ 
+     # 停止xalarmd服务后发消息
+     systemctl stop xalarmd.socket xalarmd.service
+     sleep 3
+ 
+-    ./test/xalarm/send_demo 1001 1 2 "cpu usage high warning - 7" >> checklog 2>&1 &
+-    wait_cmd_ok "grep \"xalarm_Report: sendto failed errno\" ./checklog" 1 3
++    ./test/xalarm/send_demo 1001 1 2 "cpu usage high warning - 7" >> checklog 2>&1
++    wait_cmd_ok "grep \"xalarm_Report: sendto failed errno\" ./checklog" 1 5
+     expect_eq $? 0 "xalarm send message while stop xalarmd service"
+ }
+ 
+diff --git a/src/services/xalarm/xalarm_transfer.py b/src/services/xalarm/xalarm_transfer.py
+index 8f51e71..3589a42 100644
+--- a/src/services/xalarm/xalarm_transfer.py
++++ b/src/services/xalarm/xalarm_transfer.py
+@@ -33,6 +33,13 @@ TEST_CONNECT_BUFFER_SIZE = 32
+ MAX_RETRY_TIMES = 3
+ SYSSENTRY_DOWN_ALARM_ID = 1128
+ REG_MSG_BUFFER_SIZE = 1024
++# Clients using xalarm_register_event send the registration JSON synchronously right
++# after connect() (see register_xalarm.c), so the message normally arrives within
++# milliseconds. 50ms is ~45x the observed p99 (~1ms) and tolerates heavy scheduler
++# jitter while keeping the window in which a legacy-API client (no registration msg)
++# cannot receive alarms small. The previous 500ms value caused real alarm loss for
++# such clients on every connect.
++REG_MSG_TIMEOUT = 0.05
+ 
+ 
+ def check_filter(alarm_info, alarm_filter):
+@@ -105,7 +112,7 @@ def wait_for_connection(server_sock, epoll, fd_to_socket, conn_thread_should_sto
+                     # receive event registration message
+                     try:
+                         connection.setblocking(True)
+-                        connection.settimeout(0.5)
++                        connection.settimeout(REG_MSG_TIMEOUT)
+                         reg_data = connection.recv(REG_MSG_BUFFER_SIZE)
+                         if reg_data:
+                             handle_client_event(connection.fileno(), reg_data)
+-- 
+2.45.0.windows.1
+

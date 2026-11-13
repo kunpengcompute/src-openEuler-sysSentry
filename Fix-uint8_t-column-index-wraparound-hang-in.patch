@@ -1,0 +1,43 @@
+From 4cadba4f790a8e644bdaa5b9835bad0eea059414 Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Sat, 5 Sep 2026 17:49:48 +0800
+Subject: [PATCH] Fix uint8_t column index wraparound hang in ParseCmdMap
+
+ParseCmdMap builds the column-name-to-index table from raid tool
+(storcli64/hiraidadm) output, which is untrusted. The header loop
+used a uint8_t loop counter:
+
+      for (uint8_t j = 0; j < head.size(); j++)
+
+Once j reaches 256 it wraps back to 0, so a header line with 256 or
+more space-separated tokens (fits exactly in one 511-byte fgets chunk
+as "a a a ... a") makes the loop condition always true - an infinite
+loop. ParseCmdMap runs inside the CBMCRasSentry constructor on the
+startup path of the root daemon, so crafted tool output hangs the
+entire daemon before the patrol thread even starts.
+
+Co-Authored-By: GLM-5.3
+---
+ src/sentryPlugins/bmc_ras_sentry/src/common.cpp | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/sentryPlugins/bmc_ras_sentry/src/common.cpp b/src/sentryPlugins/bmc_ras_sentry/src/common.cpp
+index d16e4a1..0b398cd 100644
+--- a/src/sentryPlugins/bmc_ras_sentry/src/common.cpp
++++ b/src/sentryPlugins/bmc_ras_sentry/src/common.cpp
+@@ -400,6 +400,12 @@ std::pair<std::map<std::string, uint8_t>, std::vector<std::vector<std::string> >
+ 
+         if (i == 1) {
+             auto head = SplitBySpace(line);
++            // 列数远超真实表头(几十列以内)说明输出异常(不可信工具输出被构造),
++            // 列索引以uint8_t存储, 上限需与之匹配; 拒绝而非继续解析, 防止越界/截断
++            if (head.size() > UINT8_MAX) {
++                BMC_LOG_ERROR << "cmd map head columns exceeded, column count: " << head.size();
++                return {};
++            }
+             for (uint8_t j = 0; j < head.size(); j++) {
+                 mapHead.emplace(head[j], j);
+             }
+-- 
+2.45.0.windows.1
+

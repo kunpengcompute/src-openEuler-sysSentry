@@ -1,0 +1,33 @@
+From 2e1b85d7fedbece0f414c5e4d5b5fa0858297a0e Mon Sep 17 00:00:00 2001
+From: tong_1001 <sxt1001@qq.com>
+Date: Thu, 9 Jul 2026 14:34:19 +0800
+Subject: [PATCH] cleanup: uninstall log_utils.h file
+
+---
+ Makefile | 3 ---
+ 1 file changed, 3 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index e769c051ff56..27ab709ab2a0 100644
+--- a/Makefile
++++ b/Makefile
+@@ -195,8 +195,6 @@ endif
+ 	install -m 644 src/libs/pyxalarm/register_xalarm.py $(PYDIR)/xalarm
+ 
+ 	# log utils
+-	install -d -m 700 $(INCLUDEDIR)/libsentry
+-	install -m 644 $(CURSRCDIR)/libsentry/c/log/log_utils.h $(INCLUDEDIR)/libsentry/
+ 	install -m 550 $(CURSRCDIR)/libsentry/c/log/build/libsentry_log.so $(LIBINSTALLDIR)
+ 
+ ebpf_clean:
+@@ -236,7 +234,6 @@ uninstall:
+ 	rm -rf $(LIBINSTALLDIR)/libxalarm.so
+ 	rm -rf $(INCLUDEDIR)/xalarm
+ 	rm -rf $(LIBINSTALLDIR)/libsentry_log.so
+-	rm -rf $(INCLUDEDIR)/libsentry
+ 	rm -rf $(ETCDIR)/sysSentry
+ 	rm -rf $(ETCDIR)/hbm_online_repair.env
+ 	rm -rf $(ETCDIR)/soc_ring_sentry.env
+-- 
+2.43.0
+

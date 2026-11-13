@@ -1,0 +1,28 @@
+From ad50a6cf4cbc8ee77cc66355d8b0ae61b4b932e0 Mon Sep 17 00:00:00 2001
+From: liuying03 <liuying03@kylinos.cn>
+Date: Thu, 10 Sep 2026 13:55:39 +0800
+Subject: [PATCH] Fix uncaught exceptions in check_conflict when parsing ps
+ output
+
+---
+ src/services/syssentry/global_values.py | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/services/syssentry/global_values.py b/src/services/syssentry/global_values.py
+index 919bcea..fc9847b 100644
+--- a/src/services/syssentry/global_values.py
++++ b/src/services/syssentry/global_values.py
+@@ -274,7 +274,9 @@ class InspectTask:
+                 continue
+             try:
+                 pid = int(line.split()[1])
+-            except (IndexError, ValueError):
++            except (IndexError, ValueError) as e:
++                logging.error("task %s failed to parse pid from ps line: %s; error: %s",
++                              self.name, line, str(e))
+                 continue
+             pid_list.append(pid)
+         logging.debug("current pid_list = %s", pid_list)
+-- 
+2.45.0.windows.1
+

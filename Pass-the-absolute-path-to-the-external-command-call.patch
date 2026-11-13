@@ -1,0 +1,62 @@
+From 63956a95e31cbe8d54bcf1c39550a8caa0fb0092 Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Sat, 5 Sep 2026 08:45:24 +0800
+Subject: [PATCH] Pass the absolute path to the external command call
+
+---
+ src/sentryPlugins/cpu_sentry/cpu_sentry.py | 2 +-
+ src/services/syssentry/global_values.py    | 2 +-
+ src/services/syssentry/utils.py            | 4 ++--
+ 3 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/src/sentryPlugins/cpu_sentry/cpu_sentry.py b/src/sentryPlugins/cpu_sentry/cpu_sentry.py
+index 488488a..d9fab5d 100644
+--- a/src/sentryPlugins/cpu_sentry/cpu_sentry.py
++++ b/src/sentryPlugins/cpu_sentry/cpu_sentry.py
+@@ -177,7 +177,7 @@ class CpuSentryKilledError(Exception):
+ 
+ def kill_process(signum, _f, cpu_sentry_obj):
+     """kill process by 'pkill -9'"""
+-    run_cmd(f"pkill -9 {LOW_LEVEL_INSPECT_CMD}")
++    run_cmd(f"/usr/bin/pkill -9 {LOW_LEVEL_INSPECT_CMD}")
+     cpu_sentry_obj.send_result["result"] = ResultLevel.FAIL
+     cpu_sentry_obj.send_result["details"]["code"] = 1005
+     cpu_sentry_obj.send_result["details"]["msg"] = "cpu_sentry task is killed!"
+diff --git a/src/services/syssentry/global_values.py b/src/services/syssentry/global_values.py
+index 9499871..c609fad 100644
+--- a/src/services/syssentry/global_values.py
++++ b/src/services/syssentry/global_values.py
+@@ -278,7 +278,7 @@ class InspectTask:
+ 
+         if self.conflict == "kill" and pid_list:
+             for pid in pid_list:
+-                subprocess.run(["kill", str(pid)], shell=False)
++                subprocess.run(["/usr/bin/kill", str(pid)], shell=False)
+                 logging.debug("the program is killed, pid=%d", pid)
+         elif self.conflict == "down" and pid_list:
+             logging.warning("the conflict field is set to down, so program = [%s] is exited!", self.name)
+diff --git a/src/services/syssentry/utils.py b/src/services/syssentry/utils.py
+index 25752df..06ac8e3 100644
+--- a/src/services/syssentry/utils.py
++++ b/src/services/syssentry/utils.py
+@@ -142,7 +142,7 @@ def run_popen(cmd):
+ 
+ def is_exists_cmd(cmd: str) -> bool:
+     """Checking Whether a Command Exists in the Environment"""
+-    res = run_cmd(f"which {cmd}")
++    res = run_cmd(f"/usr/bin/which {cmd}")
+     if not res:
+         return False
+     if res.returncode:
+@@ -155,7 +155,7 @@ def get_process_pid(process_name):
+     process_pid = -1
+     if "/" in process_name:
+         process_name = process_name.split("/")[-1]
+-    res = run_cmd('pgrep -x {}'.format(process_name))
++    res = run_cmd('/usr/bin/pgrep -x {}'.format(process_name))
+     if not res:
+         return process_pid
+     if res.returncode == 0:
+-- 
+2.45.0.windows.1
+

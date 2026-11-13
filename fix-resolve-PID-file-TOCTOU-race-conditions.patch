@@ -1,0 +1,200 @@
+From e8872502190a178f45d808d6a0270a8ab16bb906 Mon Sep 17 00:00:00 2001
+From: tong_1001 <sxt1001@qq.com>
+Date: Mon, 3 Aug 2026 14:09:04 +0800
+Subject: [PATCH 7/8] fix: resolve PID file TOCTOU race conditions
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+修复以下下面几处Time-of-Check-Time-of-Use竞争条件:
+- sentry_msg_monitor.c: open()添加O_EXCL标志，防止非原子PID文件创建
+- syssentry.py: chk_and_set_pidfile()使用os.open(O_CREAT|O_WRONLY|O_EXCL)
+  原子创建PID文件；release_pidfile()直接os.unlink()捕获FileNotFoundError
+- xalarm_daemon.py: 同上，原子创建PID文件和安全删除
+- collect_server.py: 直接os.remove()清理socket文件，捕获FileNotFoundError
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+---
+ .../sentry_msg_monitor/sentry_msg_monitor.c   |  7 +++-
+ .../sentryCollector/collect_server.py         |  4 ++-
+ src/services/syssentry/syssentry.py           | 32 +++++++++++++++----
+ src/services/xalarm/xalarm_daemon.py          | 32 +++++++++++++++----
+ 4 files changed, 59 insertions(+), 16 deletions(-)
+
+diff --git a/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c b/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
+index ac39bb2e58af..0dc17e0ade76 100644
+--- a/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
++++ b/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
+@@ -119,7 +119,12 @@ static int handle_file_lock(int fd, bool lock)
+ static int check_and_set_pid_file(void)
+ {
+     int ret, fd;
+-    fd = open(PID_FILE_PATH, O_CREAT | O_RDWR, 0600);
++    /* Try exclusive create first to prevent TOCTOU race */
++    fd = open(PID_FILE_PATH, O_CREAT | O_RDWR | O_EXCL | O_NOFOLLOW, 0600);
++    if (fd < 0 && errno == EEXIST) {
++        /* File already exists — open without O_EXCL to compete for the lock */
++        fd = open(PID_FILE_PATH, O_RDWR | O_NOFOLLOW, 0600);
++    }
+     if (fd < 0) {
+         logging_error("open file %s failed!\n", PID_FILE_PATH);
+         return -1;
+diff --git a/src/services/sentryCollector/collect_server.py b/src/services/sentryCollector/collect_server.py
+index 460fcebdb5e2..d9854b888c27 100644
+--- a/src/services/sentryCollector/collect_server.py
++++ b/src/services/sentryCollector/collect_server.py
+@@ -262,8 +262,10 @@ class CollectServer():
+         try:
+             server_fd = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+             server_fd.setblocking(False)
+-            if os.path.exists(COLLECT_SOCKET_PATH):
++            try:
+                 os.remove(COLLECT_SOCKET_PATH)
++            except FileNotFoundError:
++                pass
+ 
+             server_fd.bind(COLLECT_SOCKET_PATH)
+             os.chmod(COLLECT_SOCKET_PATH, 0o600)
+diff --git a/src/services/syssentry/syssentry.py b/src/services/syssentry/syssentry.py
+index 99acc1cb2408..d0821ff43534 100644
+--- a/src/services/syssentry/syssentry.py
++++ b/src/services/syssentry/syssentry.py
+@@ -494,14 +494,15 @@ def release_pidfile():
+     if PID_FILE_FLOCK is not None:
+         try:
+             fcntl.flock(PID_FILE_FLOCK, fcntl.LOCK_UN)
+-            PID_FILE_FLOCK.close()
++            os.close(PID_FILE_FLOCK)
+         except (IOError, OSError) as e:
+             logging.error("Failed to release PID file lock: %s", str(e))
+         finally:
+             PID_FILE_FLOCK = None
+     try:
+-        if os.path.exists(SYSSENTRY_PID_FILE):
+-            os.unlink(SYSSENTRY_PID_FILE)
++        os.unlink(SYSSENTRY_PID_FILE)
++    except FileNotFoundError:
++        pass
+     except OSError as e:
+         logging.error("Failed to remove PID file: %s", str(e))
+ 
+@@ -558,17 +559,34 @@ def sig_handler(signum, _f):
+ 
+ def chk_and_set_pidfile():
+     """
++    Create PID file atomically (O_EXCL) to prevent TOCTOU race.
++    If file already exists, open without O_EXCL and compete for the lock.
++    Truncate only after the lock is acquired to avoid destroying another
++    instance's PID content.
+     :return:
+     """
+     try:
+-        pid_file_fd = open(SYSSENTRY_PID_FILE, 'w')
+-        os.chmod(SYSSENTRY_PID_FILE, 0o600)
++        pid_file_fd = os.open(SYSSENTRY_PID_FILE, os.O_CREAT | os.O_WRONLY | os.O_EXCL | os.O_NOFOLLOW, 0o600)
++    except FileExistsError:
++        # File already exists — open without O_EXCL or O_TRUNC and compete for the lock
++        try:
++            pid_file_fd = os.open(SYSSENTRY_PID_FILE, os.O_WRONLY | os.O_NOFOLLOW, 0o600)
++        except OSError as e:
++            logging.error("Failed to open pidfile: %s", str(e))
++            return False
++    except OSError as e:
++        logging.error("Failed to create pidfile: %s", str(e))
++        return False
++
++    try:
+         fcntl.flock(pid_file_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+-        pid_file_fd.write(str(os.getpid()))
++        os.ftruncate(pid_file_fd, 0)
++        os.write(pid_file_fd, str(os.getpid()).encode())
+         global PID_FILE_FLOCK
+         PID_FILE_FLOCK = pid_file_fd
+         return True
+     except IOError:
++        os.close(pid_file_fd)
+         logging.error("Failed to get lock on pidfile")
+ 
+     return False
+@@ -599,7 +617,7 @@ def main():
+     if not chk_and_set_pidfile():
+         logging.error("get pid file lock failed, exist")
+         if PID_FILE_FLOCK:
+-            PID_FILE_FLOCK.close()
++            os.close(PID_FILE_FLOCK)
+         sys.exit(17)
+ 
+     client_id = -1
+diff --git a/src/services/xalarm/xalarm_daemon.py b/src/services/xalarm/xalarm_daemon.py
+index 16683a0900a4..6b95738d230f 100644
+--- a/src/services/xalarm/xalarm_daemon.py
++++ b/src/services/xalarm/xalarm_daemon.py
+@@ -31,17 +31,34 @@ PID_FILE_FLOCK = None
+ 
+ def chk_and_set_pidfile():
+     """
++    Create PID file atomically (O_EXCL) to prevent TOCTOU race.
++    If file already exists, open without O_EXCL and compete for the lock.
++    Truncate only after the lock is acquired to avoid destroying another
++    instance's PID content.
+     :return:
+     """
+     try:
+-        pid_file_fd = open(XALARMD_PID_FILE, 'w')
+-        os.chmod(XALARMD_PID_FILE, 0o600)
++        pid_file_fd = os.open(XALARMD_PID_FILE, os.O_CREAT | os.O_WRONLY | os.O_EXCL | os.O_NOFOLLOW, 0o600)
++    except FileExistsError:
++        # File already exists — open without O_EXCL or O_TRUNC and compete for the lock
++        try:
++            pid_file_fd = os.open(XALARMD_PID_FILE, os.O_WRONLY | os.O_NOFOLLOW, 0o600)
++        except OSError as e:
++            logging.error("Failed to open pidfile: %s", str(e))
++            return False
++    except OSError as e:
++        logging.error("Failed to create pidfile: %s", str(e))
++        return False
++
++    try:
+         fcntl.flock(pid_file_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+-        pid_file_fd.write(str(os.getpid()))
++        os.ftruncate(pid_file_fd, 0)
++        os.write(pid_file_fd, str(os.getpid()).encode())
+         global PID_FILE_FLOCK
+         PID_FILE_FLOCK = pid_file_fd
+         return True
+     except IOError:
++        os.close(pid_file_fd)
+         logging.error("Failed to get lock on pidfile")
+ 
+     return False
+@@ -56,14 +73,15 @@ def release_pidfile():
+     if PID_FILE_FLOCK is not None:
+         try:
+             fcntl.flock(PID_FILE_FLOCK, fcntl.LOCK_UN)
+-            PID_FILE_FLOCK.close()
++            os.close(PID_FILE_FLOCK)
+         except (IOError, OSError) as e:
+             logging.error("Failed to release PID file lock: %s", str(e))
+         finally:
+             PID_FILE_FLOCK = None
+     try:
+-        if os.path.exists(XALARMD_PID_FILE):
+-            os.unlink(XALARMD_PID_FILE)
++        os.unlink(XALARMD_PID_FILE)
++    except FileNotFoundError:
++        pass
+     except OSError as e:
+         logging.error("Failed to remove PID file: %s", str(e))
+ 
+@@ -95,7 +113,7 @@ def daemon_init():
+     if not chk_and_set_pidfile():
+         logging.error("get pid file lock failed, exist")
+         if PID_FILE_FLOCK:
+-            PID_FILE_FLOCK.close()
++            os.close(PID_FILE_FLOCK)
+         sys.exit(17)
+ 
+     logging.info("xalarm daemon init success")
+-- 
+2.43.0
+

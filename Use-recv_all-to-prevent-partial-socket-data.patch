@@ -1,0 +1,183 @@
+From 184f83d2c343b12f75f0ee5c7886b9d0af9a81f8 Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Fri, 4 Sep 2026 17:36:24 +0800
+Subject: [PATCH] Use recv_all to prevent partial socket data reception
+
+Replace raw recv() calls with recv_all() in cpu_alarm, collect_plugin
+and collect_server, since a single recv() on a stream socket may
+return fewer bytes than requested (e.g. when TCP fragmentation splits
+fixed-length alarm messages). Handle the ConnectionError raised by
+recv_all when the peer closes the connection prematurely.
+
+Also:
+- Split socket accept() into its own try block in cpu_alarm and
+  bmc_alarm to avoid NameError when accept fails
+- Clarify recv_all docstring: OSError is propagated from sock.recv()
+
+Co-Authored-By: GLM-5.3
+---
+ .../pySentryCollector/collect_plugin.py       |  6 ++---
+ src/sentryPlugins/cpu_sentry/cpu_alarm.py     | 24 ++++++++++++-------
+ .../sentryCollector/collect_server.py         |  6 ++---
+ src/services/syssentry/bmc_alarm.py           |  6 ++++-
+ src/services/syssentry/utils.py               |  3 ++-
+ 5 files changed, 29 insertions(+), 16 deletions(-)
+
+diff --git a/src/libsentry/python/pySentryCollector/collect_plugin.py b/src/libsentry/python/pySentryCollector/collect_plugin.py
+index b119bf5..47d4d58 100644
+--- a/src/libsentry/python/pySentryCollector/collect_plugin.py
++++ b/src/libsentry/python/pySentryCollector/collect_plugin.py
+@@ -18,7 +18,7 @@ import logging
+ import re
+ import os
+ 
+-from syssentry.utils import MAX_MSG_LEN
++from syssentry.utils import MAX_MSG_LEN, recv_all
+ 
+ COLLECT_SOCKET_PATH = "/var/run/sysSentry/collector.sock"
+ 
+@@ -112,7 +112,7 @@ def client_send_and_recv(request_data, data_str_len, protocol):
+ 
+     try:
+         client_socket.send(request_msg.encode())
+-        res_data = client_socket.recv(len(RES_MAGIC) + CLT_MSG_PRO_LEN + data_str_len)
++        res_data = recv_all(client_socket, len(RES_MAGIC) + CLT_MSG_PRO_LEN + data_str_len)
+         res_data = res_data.decode()
+     except (OSError, UnicodeError):
+         client_socket.close()
+@@ -144,7 +144,7 @@ def client_send_and_recv(request_data, data_str_len, protocol):
+             client_socket.close()
+             logging.error("socket recv data is illegal:%d", res_data_len)
+             return None
+-        res_msg_data = client_socket.recv(res_data_len)
++        res_msg_data = recv_all(client_socket, res_data_len)
+         res_msg_data = res_msg_data.decode()
+         return res_msg_data
+     except (OSError, ValueError, UnicodeError):
+diff --git a/src/sentryPlugins/cpu_sentry/cpu_alarm.py b/src/sentryPlugins/cpu_sentry/cpu_alarm.py
+index 9d87119..7d7dced 100644
+--- a/src/sentryPlugins/cpu_sentry/cpu_alarm.py
++++ b/src/sentryPlugins/cpu_sentry/cpu_alarm.py
+@@ -15,7 +15,7 @@ import logging
+ import socket
+ from enum import Enum
+ 
+-from syssentry.utils import execute_command, MAX_MSG_LEN
++from syssentry.utils import execute_command, MAX_MSG_LEN, recv_all
+ 
+ MAX_CORE_ID = 1024
+ MAX_SOCKET_ID = 255
+@@ -244,30 +244,38 @@ def check_fixed_param(data, expect):
+ def cpu_alarm_recv(server_socket: socket.socket):
+     try:
+         client_socket, _ = server_socket.accept()
+-        logging.debug("cpu alarm fd listen ok")
++    except OSError:
++        logging.error("cpu alarm accept failed")
++        return
+ 
+-        data = client_socket.recv(PARAM_REP_LEN)
++    logging.debug("cpu alarm fd listen ok")
++    try:
++        data = recv_all(client_socket, PARAM_REP_LEN)
+         check_fixed_param(data, "REP")
+ 
+-        data = client_socket.recv(PARAM_TYPE_LEN)
++        data = recv_all(client_socket, PARAM_TYPE_LEN)
+         _type = check_fixed_param(data, Type)
+ 
+-        data = client_socket.recv(PARAM_MODULE_LEN)
++        data = recv_all(client_socket, PARAM_MODULE_LEN)
+         module = check_fixed_param(data, Module)
+ 
+-        data = client_socket.recv(PARAM_TRANS_TO_LEN)
++        data = recv_all(client_socket, PARAM_TRANS_TO_LEN)
+         trans_to = check_fixed_param(data, TransTo)
+ 
+-        data = client_socket.recv(PARAM_DATA_LEN)
++        data = recv_all(client_socket, PARAM_DATA_LEN)
+         data_len = check_fixed_param(data, (MIN_DATA_LEN, MAX_DATA_LEN))
+ 
+         if data_len < 0 or data_len > MAX_MSG_LEN:
+             client_socket.close()
+             logging.error("socket recv data is illegal:%d", data_len)
+             return
+-        data = client_socket.recv(data_len)
++        data = recv_all(client_socket, data_len)
+ 
+         command, event_type, socket_id, core_id = parser_cpu_alarm_info(data)
++    except ConnectionError:
++        logging.error("connection closed before recv all cpu alarm msg")
++        client_socket.close()
++        return
+     except socket.error:
+         logging.error("socket error")
+         return
+diff --git a/src/services/sentryCollector/collect_server.py b/src/services/sentryCollector/collect_server.py
+index d9854b8..483402d 100644
+--- a/src/services/sentryCollector/collect_server.py
++++ b/src/services/sentryCollector/collect_server.py
+@@ -24,7 +24,7 @@ import select
+ import threading
+ import time
+ 
+-from syssentry.utils import MAX_MSG_LEN
++from syssentry.utils import MAX_MSG_LEN, recv_all
+ 
+ from .collect_io import IO_GLOBAL_DATA, IO_CONFIG_DATA, IO_DUMP_DATA, DISK_DATA
+ from .collect_config import CollectConfig
+@@ -198,7 +198,7 @@ class CollectServer():
+             return
+ 
+         try:
+-            msg_head = client_socket.recv(CLT_MSG_HEAD_LEN)
++            msg_head = recv_all(client_socket, CLT_MSG_HEAD_LEN)
+             logging.debug("recv msg head: %s", msg_head.decode())
+             head_info = self.msg_head_process(msg_head.decode())
+         except (OSError, UnicodeError):
+@@ -224,7 +224,7 @@ class CollectServer():
+                 client_socket.close()
+                 logging.error("socket recv data is illegal:%d", data_len)
+                 return
+-            msg_data = client_socket.recv(data_len)
++            msg_data = recv_all(client_socket, data_len)
+             msg_data_decode = msg_data.decode()
+             logging.debug("msg data %s", msg_data_decode)
+         except (OSError, UnicodeError):
+diff --git a/src/services/syssentry/bmc_alarm.py b/src/services/syssentry/bmc_alarm.py
+index 7675792..6a53387 100644
+--- a/src/services/syssentry/bmc_alarm.py
++++ b/src/services/syssentry/bmc_alarm.py
+@@ -129,8 +129,12 @@ def bmc_recv(server_socket: socket.socket):
+     logging.debug("Get hbm socket connection request")
+     try:
+         client_socket, _ = server_socket.accept()
+-        logging.debug("cpu alarm fd listen ok")
++    except OSError:
++        logging.error("bmc alarm accept failed")
++        return
+ 
++    logging.debug("cpu alarm fd listen ok")
++    try:
+         data = client_socket.recv(SOCKET_RECEIVE_LEN)
+         data = data.decode()
+ 
+diff --git a/src/services/syssentry/utils.py b/src/services/syssentry/utils.py
+index a6dc338..25752df 100644
+--- a/src/services/syssentry/utils.py
++++ b/src/services/syssentry/utils.py
+@@ -51,9 +51,10 @@ def recv_all(sock: socket.socket, length: int) -> bytes:
+     received or the connection is closed / an error occurs.
+ 
+     Returns the received data as bytes.
+-    Raises OSError on socket errors.
+     Raises ConnectionError if the peer closes the connection before all
+     bytes are received.
++    Raises OSError (propagated from sock.recv()) on other socket errors,
++    e.g. timeout or connection reset.
+     """
+     if length <= 0:
+         return b""
+-- 
+2.45.0.windows.1
+

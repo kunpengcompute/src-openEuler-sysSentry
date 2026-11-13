@@ -1,0 +1,29 @@
+From 6a8e7295951d6c28b5c1d79a46c3879be75f6487 Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Mon, 21 Sep 2026 11:02:38 +0800
+Subject: [PATCH] delete unnecessary import modules
+
+---
+ src/services/xalarm/xalarm_transfer.py | 5 +----
+ 1 file changed, 1 insertion(+), 4 deletions(-)
+
+diff --git a/src/services/xalarm/xalarm_transfer.py b/src/services/xalarm/xalarm_transfer.py
+index d9ff07ceb0ef..3589a42ebef9 100644
+--- a/src/services/xalarm/xalarm_transfer.py
++++ b/src/services/xalarm/xalarm_transfer.py
+@@ -22,11 +22,8 @@ from time import sleep
+ 
+ from .xalarm_events import (
+     unregister_client_events,
+-    register_client_events,
+     handle_client_event,
+-    fd_to_events,
+-    SENTRY_REPORTER_MODULE_EVENT_ID_LIST,
+-    SENTRY_REMOTE_REPORTER_MODULE_EVENT_ID_LIST
++    fd_to_events
+ )
+ 
+ MIN_ID_NUMBER = 1001
+-- 
+2.43.0
+

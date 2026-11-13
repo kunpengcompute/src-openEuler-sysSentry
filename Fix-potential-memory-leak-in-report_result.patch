@@ -1,0 +1,25 @@
+From d7d184615e8464fa4f556c72159f04e78554fb3b Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Mon, 27 Jul 2026 16:08:45 +0800
+Subject: [PATCH 7/9] Fix potential memory leak in report_result
+
+---
+ src/libs/libxalarm/register_xalarm.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/libs/libxalarm/register_xalarm.c b/src/libs/libxalarm/register_xalarm.c
+index e8f2b8d65f77..cc7b70c583fd 100644
+--- a/src/libs/libxalarm/register_xalarm.c
++++ b/src/libs/libxalarm/register_xalarm.c
+@@ -657,7 +657,7 @@ int report_result(const char *task_name, enum RESULT_LEVEL result_level, const c
+                 "%s%04d%s", RESULT_INFO_HEAD_MAGIC, send_data_len, result_json_string);
+     if (result_msg_len < 0 || result_msg_len >= RESULT_INFO_HEAD_LEN + send_data_len + 1) {
+         fprintf(stderr, "%s: failed to format message\n", __func__);
+-        goto free_json;
++        goto free_msg;
+     }
+     if (send_data_to_socket(RESULT_REPORT_SOCKET, message)) {
+         fprintf(stderr, "%s: failed to send result message (%s) to sysSentry!\n", __func__, message);
+-- 
+2.43.0
+

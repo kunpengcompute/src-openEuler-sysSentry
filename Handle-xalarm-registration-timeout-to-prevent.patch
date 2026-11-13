@@ -1,0 +1,101 @@
+From 1fd9a6e1a40dafe30d3dc55e300a5777aa11a665 Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Mon, 21 Sep 2026 09:25:09 +0800
+Subject: [PATCH] Handle xalarm registration timeout to prevent legacy client
+ alarm loss
+
+Catch socket.timeout in wait_for_connection before socket.error and keep
+the connection as an alarm-only receiver, instead of treating the timeout
+as a failure and dropping the connection. This fixes silent alarm loss
+for legacy API clients (xalarm_Register) that do not send a registration
+message and previously fell into the error branch.
+
+broadcast_sentry_down (xalarm_transfer.py) sends alarm 1128 with
+tv_sec/tv_usec hard-coded to 0. After current commit kept the
+pyxalarm client connection alive, this alarm started reaching the
+Python client. The zero timestamp then tripped update_alarm_list's
+guard into logging "Retrieve timestamp failed" at every sysSentry
+restart/stop.
+
+- xalarm_transfer.py: add explicit socket.timeout handler that keeps the
+  connection and forwards alarms to it
+- register_xalarm.c: drop the redundant send_event_registration call
+  from xalarm_Register so legacy clients rely on the server-side timeout
+  path
+- alarm.py: mirror the libxalarm C client (register_xalarm.c:710), which
+  special-cases SYSSENTRY_DOWN_ALARM_ID by returning early without touching
+  the timestamp lookup. Do the same in Python: log and return before
+  xalarm_gettime is consulted.
+
+Co-Authored-By: GLM-5.2
+---
+ src/libs/libxalarm/register_xalarm.c   |  7 -------
+ src/services/syssentry/alarm.py        |  4 ++++
+ src/services/xalarm/xalarm_transfer.py | 12 ++++++++++++
+ 3 files changed, 16 insertions(+), 7 deletions(-)
+
+diff --git a/src/libs/libxalarm/register_xalarm.c b/src/libs/libxalarm/register_xalarm.c
+index 3675038275e2..9d13d40acd00 100644
+--- a/src/libs/libxalarm/register_xalarm.c
++++ b/src/libs/libxalarm/register_xalarm.c
+@@ -242,13 +242,6 @@ int xalarm_Register(alarm_callback_func callback, struct alarm_subscription_info
+         return -1;
+     }
+ 
+-    if (send_event_registration(g_register_info.register_fd, id_filter) < 0) {
+-        printf("%s: send_event_registration failed\n", __func__);
+-        (void)close(g_register_info.register_fd);
+-        g_register_info.register_fd = -1;
+-        return -1;
+-    }
+-
+     g_register_info.thread_should_stop = 0;
+     g_register_info.register_tid = create_thread();
+     if (g_register_info.register_tid == ULONG_MAX) {
+diff --git a/src/services/syssentry/alarm.py b/src/services/syssentry/alarm.py
+index 6c0da3b8a413..6aa91d56026c 100644
+--- a/src/services/syssentry/alarm.py
++++ b/src/services/syssentry/alarm.py
+@@ -42,12 +42,16 @@ MILLISECONDS_UNIT_SECONDS = 1000
+ MAX_NUM_OF_ALARM_ID = 128
+ MIN_ALARM_ID = 1001
+ MAX_ALARM_ID = (MIN_ALARM_ID + MAX_NUM_OF_ALARM_ID - 1)
++SYSSENTRY_DOWN_ALARM_ID = 1128
+ 
+ def update_alarm_list(alarm_info: Xalarm):
+     alarm_id = xalarm_getid(alarm_info)
+     if alarm_id < MIN_ALARM_ID or alarm_id > MAX_ALARM_ID:
+         logging.warning(f"Invalid alarm_id {alarm_id}")
+         return
++    if alarm_id == SYSSENTRY_DOWN_ALARM_ID:
++        logging.info("received sysSentry down notification (alarm_id=%d), skip processing", alarm_id)
++        return
+     timestamp = xalarm_gettime(alarm_info)
+     if not timestamp:
+         logging.error("Retrieve timestamp failed")
+diff --git a/src/services/xalarm/xalarm_transfer.py b/src/services/xalarm/xalarm_transfer.py
+index e87b2c0f845d..a876a65cc3b6 100644
+--- a/src/services/xalarm/xalarm_transfer.py
++++ b/src/services/xalarm/xalarm_transfer.py
+@@ -113,6 +113,18 @@ def wait_for_connection(server_sock, epoll, fd_to_socket, conn_thread_should_sto
+                         if reg_data:
+                             handle_client_event(connection.fileno(), reg_data)
+                         connection.setblocking(False)
++                    except socket.timeout:
++                        # client did not send any registration message, it means
++                        # the client does not use xalarm_register_event API
++                        # (eg. sysSentry via pyxalarm), just keep the connection
++                        # and forward alarms to it
++                        logging.warning(
++                                "client fd %d does not send registration message "
++                                "in %s ms, treat it as alarm receiver only",
++                                connection.fileno(),
++                                int(connection.gettimeout() * 1000)
++                        )
++                        connection.setblocking(False)
+                     except socket.error as e:
+                         logging.warning(
+                                 "Failed to receive registration from client: %d, reason is %s",
+-- 
+2.43.0
+

@@ -1,0 +1,295 @@
+From 904b9af6050488e8f79353ed151e259b9da719f3 Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Mon, 21 Sep 2026 09:28:11 +0800
+Subject: [PATCH] Fix typos in variable names, macros, and log messages across
+ src
+
+- Rename PYHS_ADDR_HEX_STR_MAX_LEN to PHYS_ADDR_HEX_STR_MAX_LEN
+  in sentry_msg_monitor
+- Rename TC_RING_ONE_PRAMA_ERR to TC_RING_ONE_PARAM_ERR in tc_ring_one
+- Rename Xalarm attribute timetamp to timestamp (xalarm_api, alarm,
+  register_xalarm)
+- Fix log/comment misspellings: hearbeat_interval, recieve, falied,
+  tescase, abonrmal, ccnfig, xalam
+
+Co-Authored-By: GLM-5.3
+---
+ src/libs/pyxalarm/register_xalarm.py          |  2 +-
+ src/sentryPlugins/avg_block_io/utils.py       |  2 +-
+ .../sentry_msg_monitor/sentry_msg_monitor.c   |  8 ++++----
+ .../soc_ring_sentry/soc_ring_sentry.c         |  2 +-
+ .../soc_ring_sentry/tc_ring_one.c             | 20 +++++++++----------
+ src/services/syssentry/alarm.py               |  2 +-
+ src/services/syssentry/global_values.py       |  2 +-
+ src/services/syssentry/load_mods.py           |  2 +-
+ src/services/xalarm/xalarm_api.py             | 12 +++++------
+ src/services/xalarm/xalarm_server.py          |  2 +-
+ 10 files changed, 27 insertions(+), 27 deletions(-)
+
+diff --git a/src/libs/pyxalarm/register_xalarm.py b/src/libs/pyxalarm/register_xalarm.py
+index 31f143d41548..266f2decd985 100644
+--- a/src/libs/pyxalarm/register_xalarm.py
++++ b/src/libs/pyxalarm/register_xalarm.py
+@@ -187,7 +187,7 @@ def xalarm_gettype(alarm_info: Xalarm) -> int:
+ def xalarm_gettime(alarm_info: Xalarm) -> int:
+     if not alarm_info:
+         return 0
+-    return alarm_info.timetamp.tv_sec * TIME_UNIT_MILLISECONDS + alarm_info.timetamp.tv_usec / TIME_UNIT_MILLISECONDS
++    return alarm_info.timestamp.tv_sec * TIME_UNIT_MILLISECONDS + alarm_info.timestamp.tv_usec / TIME_UNIT_MILLISECONDS
+ 
+ def xalarm_getdesc(alarm_info: Xalarm) -> str:
+     if not alarm_info:
+diff --git a/src/sentryPlugins/avg_block_io/utils.py b/src/sentryPlugins/avg_block_io/utils.py
+index 97266418f0d9..eda77ccd95c1 100644
+--- a/src/sentryPlugins/avg_block_io/utils.py
++++ b/src/sentryPlugins/avg_block_io/utils.py
+@@ -136,7 +136,7 @@ def log_slow_win(msg, reason):
+ 
+ 
+ def update_avg_and_check_abnormal(data, io_key, win_size, io_avg_value, io_data):
+-    """update avg and check abonrmal, return true if win_size full"""
++    """update avg and check abnormal, return true if win_size full"""
+     period_value = get_nested_value(data, io_key)
+     old_avg = get_nested_value(io_avg_value, io_key)
+ 
+diff --git a/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c b/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
+index 32d28bef67a4..d2016e1a501b 100644
+--- a/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
++++ b/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
+@@ -42,7 +42,7 @@
+ #define RETRY_PERIOD 1
+ #define XALARM_GENERAL_MSG_ITEM_CNT 2 // msgid_res
+ #define XALARM_PANIC_MSG_ITEM_CNT 4 // msgid_{cna:cna,eid:eid}_res
+-#define PYHS_ADDR_HEX_STR_MAX_LEN 20
++#define PHYS_ADDR_HEX_STR_MAX_LEN 20
+ 
+ /*
+  * Version policy:
+@@ -280,7 +280,7 @@ static int convert_ub_mem_err_smh_msg_to_str(struct sentry_msg_helper_msg* smh_m
+ {
+     enum ras_err_type raw_err_type = smh_msg->helper_msg_info.ub_mem_info.raw_ubus_mem_err_type;
+     int sentry_err_type = convert_ubus_type_to_sentry_type(raw_err_type);
+-    // return -1 indicates that only logs are recorded, and no alerts are sent to xalam.
++    // return -1 indicates that only logs are recorded, and no alerts are sent to xalarm.
+     if (sentry_err_type == SENTRY_MEM_ERR_NO_REPORT) {
+         logging_info("received kernel event raw_ubus_mem_err_type is %d\n", raw_err_type);
+         return -1;
+@@ -298,7 +298,7 @@ static int convert_ub_mem_err_smh_msg_to_str(struct sentry_msg_helper_msg* smh_m
+     unsigned long obmm_offset;
+     int result = obmm_query_memid_by_pa(pa, &id, &obmm_offset);
+     if (result < 0) {
+-        logging_error("query memid falied, result: %d, errno: %d (%s)\n", result, errno, strerror(errno));
++        logging_error("query memid failed, result: %d, errno: %d (%s)\n", result, errno, strerror(errno));
+         return -1;
+     }
+ 
+@@ -308,7 +308,7 @@ static int convert_ub_mem_err_smh_msg_to_str(struct sentry_msg_helper_msg* smh_m
+         find_and_send_sigbus_to_thread(id, obmm_offset);
+     }
+ 
+-    char hex_str[PYHS_ADDR_HEX_STR_MAX_LEN];
++    char hex_str[PHYS_ADDR_HEX_STR_MAX_LEN];
+     int ret = snprintf(hex_str, sizeof(hex_str), "0x%lx", (long)pa);
+     if (ret < 0) {
+         logging_error("convert pa to string failed\n");
+diff --git a/src/sentryPlugins/soc_ring_sentry/soc_ring_sentry.c b/src/sentryPlugins/soc_ring_sentry/soc_ring_sentry.c
+index d5e615c0aac3..52b03d07dab4 100644
+--- a/src/sentryPlugins/soc_ring_sentry/soc_ring_sentry.c
++++ b/src/sentryPlugins/soc_ring_sentry/soc_ring_sentry.c
+@@ -53,7 +53,7 @@ static void print_opts_help()
+ 
+ static void soc_ring_sentry_case_get()
+ {
+-    printf("1. [soc stl] ring data bit line scan tescase.\n");
++    printf("1. [soc stl] ring data bit line scan testcase.\n");
+ }
+ 
+ static bool soc_ring_sentry_envtoull(char *env, uint64_t *value)
+diff --git a/src/sentryPlugins/soc_ring_sentry/tc_ring_one.c b/src/sentryPlugins/soc_ring_sentry/tc_ring_one.c
+index 4dab30530028..5d546dcd73ee 100755
+--- a/src/sentryPlugins/soc_ring_sentry/tc_ring_one.c
++++ b/src/sentryPlugins/soc_ring_sentry/tc_ring_one.c
+@@ -66,7 +66,7 @@ struct tc_ring_one_config {
+ #define TC_RING_ONE_DATA_UNIT                       128
+ #define TC_RING_ONE_CACHELINE_SIZE                  64
+ 
+-#define TC_RING_ONE_PRAMA_ERR                       -1
++#define TC_RING_ONE_PARAM_ERR                       -1
+ #define TC_RING_ONE_FAIL                            -2
+ #define TC_RING_ONE_SUCCESS                         0
+ 
+@@ -235,7 +235,7 @@ static int tc_ring_one_space_init(void *base, size_t size)
+     // 非对齐的尾部单元若跳过会留下未初始化区域，导致后续扫描误报内存故障，这里直接拒绝
+     if (size % TC_RING_ONE_DATA_UNIT != 0) {
+         logging_error("size %#lx is not aligned to %#x\n", size, TC_RING_ONE_DATA_UNIT);
+-        return TC_RING_ONE_PRAMA_ERR;
++        return TC_RING_ONE_PARAM_ERR;
+     }
+ 
+     for (i = 0; i < size; i += TC_RING_ONE_DATA_UNIT) {
+@@ -264,7 +264,7 @@ static int tc_ring_one_ctrl_var_init(struct tc_ring_one_config *config)
+ 
+     if (pthread_mutexattr_init(&attr) != 0) {
+         logging_error("Failed to initialize mutex attribute\n");
+-        return TC_RING_ONE_PRAMA_ERR;
++        return TC_RING_ONE_PARAM_ERR;
+     }
+ 
+     pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_ERRORCHECK);
+@@ -301,7 +301,7 @@ mutex_init_fail:
+ 
+ mutex_alloc_fail:
+     pthread_mutexattr_destroy(&attr);
+-    return TC_RING_ONE_PRAMA_ERR;
++    return TC_RING_ONE_PARAM_ERR;
+ }
+ 
+ static int tc_ring_one_init(struct tc_ring_one_config *config)
+@@ -311,26 +311,26 @@ static int tc_ring_one_init(struct tc_ring_one_config *config)
+ 
+     if (numa_available() < 0) {
+         logging_error("NUMA is not available on this system\n");
+-        return TC_RING_ONE_PRAMA_ERR;
++        return TC_RING_ONE_PARAM_ERR;
+     }
+ 
+     // 为每个 NUMA 节点分配测试内存空间
+     config->test_space_base = (void **)calloc(config->numa_node, sizeof(void *));
+     if (config->test_space_base == NULL) {
+         logging_error("Failed to allocate memory for test_space_base\n");
+-        return TC_RING_ONE_PRAMA_ERR;
++        return TC_RING_ONE_PARAM_ERR;
+     }
+ 
+     for (i = 0; i < config->numa_node; i++) {
+         ptr = numa_alloc_fallback(config->numa_node, i, config->mem_size);
+         if (ptr == NULL) {
+-            ret = TC_RING_ONE_PRAMA_ERR;
++            ret = TC_RING_ONE_PARAM_ERR;
+             goto numa_alloc_fail;
+         }
+ 
+         if (tc_ring_one_space_init(ptr, config->mem_size) != TC_RING_ONE_SUCCESS) {
+             numa_free(ptr, config->mem_size);
+-            ret = TC_RING_ONE_PRAMA_ERR;
++            ret = TC_RING_ONE_PARAM_ERR;
+             goto numa_alloc_fail;
+         }
+         config->test_space_base[i] = ptr;
+@@ -339,7 +339,7 @@ static int tc_ring_one_init(struct tc_ring_one_config *config)
+     config->node_update_flag = (uint32_t *)calloc(config->numa_node, sizeof(uint32_t));
+     if (config->node_update_flag == NULL) {
+         logging_error("Failed to allocate memory for node_update_flag\n");
+-        ret = TC_RING_ONE_PRAMA_ERR;
++        ret = TC_RING_ONE_PARAM_ERR;
+         goto numa_alloc_fail;
+     }
+ 
+@@ -402,7 +402,7 @@ static int bind_thread_to_core(pthread_t thread, int core_id)
+     ret = pthread_setaffinity_np(thread, sizeof(cpu_set_t), &cpuset);
+     if (ret != 0) {
+         logging_error("pthread_setaffinity_np failed\n");
+-        ret = TC_RING_ONE_PRAMA_ERR;
++        ret = TC_RING_ONE_PARAM_ERR;
+     }
+ 
+     return ret;
+diff --git a/src/services/syssentry/alarm.py b/src/services/syssentry/alarm.py
+index 6aa91d56026c..9b95d92a585c 100644
+--- a/src/services/syssentry/alarm.py
++++ b/src/services/syssentry/alarm.py
+@@ -172,7 +172,7 @@ def get_alarm_result(task_name: str, time_range: int, detailed: bool):
+         logging.debug("get_alarm_result: final alarm_list of %s has %d elements", alarm_id, len(alarm_list))
+ 
+         def xalarm_to_dict(alarm_info: Xalarm) -> dict:
+-            timestamp = alarm_info.timetamp.tv_sec + alarm_info.timetamp.tv_usec / 1000000
++            timestamp = alarm_info.timestamp.tv_sec + alarm_info.timestamp.tv_usec / 1000000
+             dt_object = datetime.fromtimestamp(int(timestamp))
+             return {
+                 'alarm_id': xalarm_getid(alarm_info),
+diff --git a/src/services/syssentry/global_values.py b/src/services/syssentry/global_values.py
+index 7b1e6acfe80e..1c9c62a402a1 100644
+--- a/src/services/syssentry/global_values.py
++++ b/src/services/syssentry/global_values.py
+@@ -80,7 +80,7 @@ class InspectTask:
+         }
+         # pull task
+         self.onstart = False
+-        # ccnfig env_file
++        # config env_file
+         self.env_file = ""
+         # env conf to popen arg
+         self.environ_conf = None
+diff --git a/src/services/syssentry/load_mods.py b/src/services/syssentry/load_mods.py
+index 53460c18376b..db78ac4a596d 100644
+--- a/src/services/syssentry/load_mods.py
++++ b/src/services/syssentry/load_mods.py
+@@ -131,7 +131,7 @@ def parse_heartbeat_conf(mod_conf):
+         heartbeat_interval = -1
+ 
+     if heartbeat_interval < 60:
+-        logging.warning("hearbeat_interval cannot be less than 60, set to 60")
++        logging.warning("heartbeat_interval cannot be less than 60, set to 60")
+         heartbeat_interval = 60
+ 
+     return heartbeat_interval
+diff --git a/src/services/xalarm/xalarm_api.py b/src/services/xalarm/xalarm_api.py
+index 285608ad0b9c..80171a4430eb 100644
+--- a/src/services/xalarm/xalarm_api.py
++++ b/src/services/xalarm/xalarm_api.py
+@@ -55,7 +55,7 @@ class Xalarm:
+         self._alarm_id = alarm_id
+         self._alarm_type = alarm_type
+         self._alarm_level = alarm_level
+-        self.timetamp = TimevalStu(tv_sec, tv_usec)
++        self.timestamp = TimevalStu(tv_sec, tv_usec)
+         self._msg1 = msg1
+ 
+     @property
+@@ -124,8 +124,8 @@ def alarm_bin2stu(bin_data):
+     alarm_info.alarm_id = struct_data[0]
+     alarm_info.alarm_level = struct_data[1]
+     alarm_info.alarm_type = struct_data[2]
+-    alarm_info.timetamp.tv_sec = struct_data[3]
+-    alarm_info.timetamp.tv_usec = struct_data[4]
++    alarm_info.timestamp.tv_sec = struct_data[3]
++    alarm_info.timestamp.tv_usec = struct_data[4]
+     alarm_info.msg1 = struct_data[5]
+ 
+     return alarm_info
+@@ -141,8 +141,8 @@ def alarm_stu2bin(alarm_info: Xalarm):
+         alarm_info.alarm_id,
+         alarm_info.alarm_level,
+         alarm_info.alarm_type,
+-        alarm_info.timetamp.tv_sec,
+-        alarm_info.timetamp.tv_usec,
++        alarm_info.timestamp.tv_sec,
++        alarm_info.timestamp.tv_usec,
+         alarm_msg.encode('utf-8'))
+ 
+ 
+@@ -153,7 +153,7 @@ def alarm_stu2str(alarm_info: Xalarm):
+     alarm_id = alarm_info.alarm_id
+     alarm_level = ALARM_LEVEL_DICT[alarm_info.alarm_level] if alarm_info.alarm_level in ALARM_LEVEL_DICT else "UNKNOWN"
+     alarm_type = ALARM_TYPE_DICT[alarm_info.alarm_type] if alarm_info.alarm_type in ALARM_TYPE_DICT else "UNKNOWN"
+-    alarm_time = alarm_info.timetamp.tv_sec + alarm_info.timetamp.tv_usec / TIME_UNIT_MILLISECONDS
++    alarm_time = alarm_info.timestamp.tv_sec + alarm_info.timestamp.tv_usec / TIME_UNIT_MILLISECONDS
+     try:
+         alarm_msg = alarm_info.msg1.rstrip(b'\x00').decode('utf-8')
+     except (AttributeError, UnicodeDecodeError, TypeError):
+diff --git a/src/services/xalarm/xalarm_server.py b/src/services/xalarm/xalarm_server.py
+index 517922ad4495..a2d7c7bdc1ec 100644
+--- a/src/services/xalarm/xalarm_server.py
++++ b/src/services/xalarm/xalarm_server.py
+@@ -318,7 +318,7 @@ def server_loop(alarm_config):
+                     continue
+                 alarm_info = alarm_bin2stu(data)
+                 alarm_str = alarm_stu2str(alarm_info)
+-                logging.info("server recieve report msg, %s", alarm_str)
++                logging.info("server receive report msg, %s", alarm_str)
+                 if not check_filter(alarm_info, alarm_config):
+                     continue
+                 transmit_alarm(
+-- 
+2.43.0
+

@@ -1,0 +1,38 @@
+From 1e835aa8e7770cb5f21bf9343b372da20d14b856 Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Fri, 4 Sep 2026 17:58:05 +0800
+Subject: [PATCH] Close the accepted client socket in the socket.error branch
+ of cpu_alarm_recv/bmc_recv to fix a resource leak
+
+---
+ src/sentryPlugins/cpu_sentry/cpu_alarm.py | 1 +
+ src/services/syssentry/bmc_alarm.py       | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/src/sentryPlugins/cpu_sentry/cpu_alarm.py b/src/sentryPlugins/cpu_sentry/cpu_alarm.py
+index 7d7dced..48a7ade 100644
+--- a/src/sentryPlugins/cpu_sentry/cpu_alarm.py
++++ b/src/sentryPlugins/cpu_sentry/cpu_alarm.py
+@@ -278,6 +278,7 @@ def cpu_alarm_recv(server_socket: socket.socket):
+         return
+     except socket.error:
+         logging.error("socket error")
++        client_socket.close()
+         return
+     except (ValueError, OSError, TypeError, NotImplementedError):
+         logging.error("server recv cpu alarm msg failed!")
+diff --git a/src/services/syssentry/bmc_alarm.py b/src/services/syssentry/bmc_alarm.py
+index 6a53387..4140cfa 100644
+--- a/src/services/syssentry/bmc_alarm.py
++++ b/src/services/syssentry/bmc_alarm.py
+@@ -156,6 +156,7 @@ def bmc_recv(server_socket: socket.socket):
+ 
+     except socket.error:
+         logging.error("socket error")
++        client_socket.close()
+         return
+     except (ValueError, OSError, TypeError, IndexError, NotImplementedError):
+         logging.error("server recv bmc msg failed!")
+-- 
+2.45.0.windows.1
+
