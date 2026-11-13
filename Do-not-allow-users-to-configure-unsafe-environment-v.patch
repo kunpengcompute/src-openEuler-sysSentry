@@ -1,0 +1,78 @@
+From 7d9d81675381c6a1cdb2f4007180b8483d16b029 Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Mon, 27 Jul 2026 14:29:22 +0800
+Subject: [PATCH 4/9] Do not allow users to configure unsafe environment
+ variables
+
+---
+ src/services/syssentry/global_values.py |  9 ++++++++-
+ src/services/syssentry/utils.py         | 22 ++++++++++++++++++++++
+ 2 files changed, 30 insertions(+), 1 deletion(-)
+
+diff --git a/src/services/syssentry/global_values.py b/src/services/syssentry/global_values.py
+index e8e1c0ea15fa..b215951ad203 100644
+--- a/src/services/syssentry/global_values.py
++++ b/src/services/syssentry/global_values.py
+@@ -20,7 +20,11 @@ import os
+ import shlex
+ 
+ from .result import ResultLevel, RESULT_LEVEL_ERR_MSG_DICT
+-from .utils import get_current_time_string, run_cmd
++from .utils import (
++    get_current_time_string,
++    run_cmd,
++    is_dangerous_env_key
++)
+ from .mod_status import set_runtime_status
+ from .mod_status import RUNNING_STATUS, EXITED_STATUS, NONZERO_EXITED_STATUS, FAILED_STATUS
+ 
+@@ -255,6 +259,9 @@ class InspectTask:
+                 if not key or not value:
+                     logging.error("env_file = %s format is error, use default environ", self.env_file)
+                     return
++                if is_dangerous_env_key(key):
++                    logging.warning("env %s is unsafe and user configuration is forbidden. ignore it", key)
++                    continue
+                 self.environ_conf[key] = value
+                 logging.debug("environ key=%s, value=%s", key, value)
+ 
+diff --git a/src/services/syssentry/utils.py b/src/services/syssentry/utils.py
+index 3c6f0feb25aa..353191d25a10 100644
+--- a/src/services/syssentry/utils.py
++++ b/src/services/syssentry/utils.py
+@@ -21,6 +21,20 @@ from datetime import datetime, timezone, timedelta
+ # Security: Maximum allowed message length to prevent DoS attacks
+ MAX_MSG_LEN = 10 * 1024 * 1024  # 10MB
+ 
++ENV_BLACKLIST_PATTERNS = [
++    r"^LD_",                 # LD_PRELOAD, LD_LIBRARY_PATH 等（可劫持动态链接）
++    r"^BASH_ENV$",           # Bash 自动执行脚本
++    r"^ENV$",                # POSIX sh 自动执行脚本
++    r"^IFS$",                # Shell 内部字段分隔符（可能破坏命令解析）
++    r"^PATH$",               # 危险！可让子进程执行恶意程序
++    r"^PYTHONPATH$",         # 可让Python导入恶意模块
++    r"^NODE_PATH$",          # Node.js 模块路径劫持
++    r"^PERL5LIB$",           # Perl 库路径劫持
++    r"^TMPDIR$",             # 某些场景下可能导致文件覆盖
++    r"^HOME$",               # 可能改变配置文件读取路径
++    r"^HISTFILE$",           # 可能覆盖历史记录
++]
++
+ 
+ def recv_all(sock: socket.socket, length: int) -> bytes:
+     """Receive exactly `length` bytes from the socket.
+@@ -106,3 +120,11 @@ def execute_command(cmd_list):
+         return process.stdout
+     except OSError:
+         logging.error("failed to execute command")
++
++
++def is_dangerous_env_key(env_name):
++    """Check whether the env is in the blacklist."""
++    for pattern in ENV_BLACKLIST_PATTERNS:
++        if re.match(pattern, env_name, re.IGNORECASE):
++            return True
++    return False
+-- 
+2.43.0
+

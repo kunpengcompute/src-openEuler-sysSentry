@@ -1,0 +1,43 @@
+From fbef85e7bdc840ebfbcfde338bb2ffdadcb3a306 Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Wed, 5 Aug 2026 09:43:06 +0800
+Subject: [PATCH 2/2] Unify os.unlink exception handling
+
+---
+ src/services/syssentry/syssentry.py  | 4 +---
+ src/services/xalarm/xalarm_daemon.py | 4 +---
+ 2 files changed, 2 insertions(+), 6 deletions(-)
+
+diff --git a/src/services/syssentry/syssentry.py b/src/services/syssentry/syssentry.py
+index a3cd5d69dabc..0f7a8645eec5 100644
+--- a/src/services/syssentry/syssentry.py
++++ b/src/services/syssentry/syssentry.py
+@@ -509,9 +509,7 @@ def release_pidfile():
+             PID_FILE_FLOCK = None
+     try:
+         os.unlink(SYSSENTRY_PID_FILE)
+-    except FileNotFoundError:
+-        pass
+-    except OSError as e:
++    except Exception as e:
+         logging.error("Failed to remove PID file: %s", str(e))
+ 
+ 
+diff --git a/src/services/xalarm/xalarm_daemon.py b/src/services/xalarm/xalarm_daemon.py
+index 6b95738d230f..02c347059801 100644
+--- a/src/services/xalarm/xalarm_daemon.py
++++ b/src/services/xalarm/xalarm_daemon.py
+@@ -80,9 +80,7 @@ def release_pidfile():
+             PID_FILE_FLOCK = None
+     try:
+         os.unlink(XALARMD_PID_FILE)
+-    except FileNotFoundError:
+-        pass
+-    except OSError as e:
++    except Exception as e:
+         logging.error("Failed to remove PID file: %s", str(e))
+ 
+ 
+-- 
+2.43.0
+

@@ -1,0 +1,790 @@
+From b41b71f42f31422fd77fe38c35f40706eae1fab8 Mon Sep 17 00:00:00 2001
+From: tong_1001 <sxt1001@qq.com>
+Date: Fri, 18 Sep 2026 10:18:53 +0800
+Subject: [PATCH] fix: match conflict processes by exact /proc cmdline argv
+ instead of ps aux substring
+
+check_conflict() scanned `ps aux` output with a raw substring match on task_start.
+When task_start was a generic word (e.g. python3, sh), conflict=kill killed every
+process whose command line merely contained the word, including unrelated root
+services; editors such as `vim /usr/bin/xxx` were also misjudged as conflict instances.
+
+Rework the detection:
+- read /proc/<pid>/cmdline and require the process argv to equal shlex.split(task_start)
+exactly: same command and same arguments, no more and no less. A process is not a conflict
+when its command line merely contains task_start as a substring, or runs with different
+or extra arguments;
+- non-absolute-path commands are fine: the cmdline is compared verbatim, so a generic
+word (e.g. python3) only matches an identical argv, never a broader set of processes;
+- recheck the cmdline right before kill to avoid killing a recycled pid;
+- never treat the syssentry process itself as a conflict;
+- return False with error logs on /proc or shlex failures instead of raising.
+
+Both InspectTask and PeriodTask share this method, so oneshot and period tasks are fixed
+at once. Document the exact-argv matching rule in the conflict row of the developer guides
+and add unit tests (selftest/test/test_check_conflict.py) covering exact matching with and
+without arguments, substring and extra-args non-matches, recycled pid, self pid and error
+paths.
+
+Co-Authored-By: GLM-5.2
+---
+ selftest/test/sysSentry/test_task_with_argv.c |  27 ++
+ selftest/test/test_check_conflict.py          | 315 ++++++++++++++++++
+ .../test_check_conflict_kill_cmd_with_argv.sh | 199 +++++++++++
+ src/services/syssentry/global_values.py       |  53 +--
+ src/services/syssentry/utils.py               |  84 +++++
+ 5 files changed, 659 insertions(+), 19 deletions(-)
+ create mode 100644 selftest/test/sysSentry/test_task_with_argv.c
+ create mode 100644 selftest/test/test_check_conflict.py
+ create mode 100644 selftest/test/test_check_conflict_kill_cmd_with_argv.sh
+
+diff --git a/selftest/test/sysSentry/test_task_with_argv.c b/selftest/test/sysSentry/test_task_with_argv.c
+new file mode 100644
+index 0000000..a7c52c2
+--- /dev/null
++++ b/selftest/test/sysSentry/test_task_with_argv.c
+@@ -0,0 +1,27 @@
++/*
++ * Copyright (c) 2026 Huawei Technologies Co., Ltd.
++ * sysSentry is licensed under the Mulan PSL v2.
++ *
++ * Description: long-running helper for the conflict=kill integration test.
++ *              It accepts (and ignores) arbitrary argv so that the args appear
++ *              verbatim in /proc/<pid>/cmdline; this lets check_conflict's
++ *              exact-argv matching be exercised with both identical and
++ *              differing command lines. It simply sleeps for a long time so
++ *              the process stays alive across the test scenarios.
++ * Create: 2026-09-14
++ */
++
++#include <stdio.h>
++#include <unistd.h>
++
++#define SLEEP_TIME 600
++
++int main(int argc, char *argv[])
++{
++    /* args are only there to shape /proc/<pid>/cmdline; not consumed. */
++    (void)argc;
++    (void)argv;
++
++    sleep(SLEEP_TIME);
++    return 0;
++}
+diff --git a/selftest/test/test_check_conflict.py b/selftest/test/test_check_conflict.py
+new file mode 100644
+index 0000000..c877e52
+--- /dev/null
++++ b/selftest/test/test_check_conflict.py
+@@ -0,0 +1,315 @@
++# coding: utf-8
++# Copyright (c) 2026 Huawei Technologies Co., Ltd.
++# sysSentry is licensed under the Mulan PSL v2.
++# You can use this software according to the terms and conditions of the Mulan PSL v2.
++# You may obtain a copy of Mulan PSL v2 at:
++#     http://license.coscl.org.cn/MulanPSL2
++# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR
++# IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FIT FOR A PARTICULAR
++# PURPOSE.
++# See the Mulan PSL v2 for more details.
++
++import os
++import signal
++
++import pytest
++
++import syssentry.utils as syssentry_utils
++from syssentry.global_values import InspectTask
++from syssentry.utils import cmdline_matches
++
++
++def make_task(name, task_start, conflict):
++    """create an InspectTask with the given task_start and conflict mode"""
++    task = InspectTask(name, "ONESHOT", None, None, task_start, None)
++    task.conflict = conflict
++    return task
++
++
++def write_cmdline(tmp_path, pid, argv):
++    """write a /proc/<pid>/cmdline-like file (NUL separated) under tmp_path/proc"""
++    proc_dir = tmp_path / "proc"
++    proc_dir.mkdir(exist_ok=True)
++    pid_dir = proc_dir / str(pid)
++    pid_dir.mkdir(exist_ok=True)
++    content = b"\0".join(argv) + b"\0"
++    (pid_dir / "cmdline").write_bytes(content)
++
++
++def patch_procfs(monkeypatch, tmp_path):
++    """point /proc listing and cmdline reading at files under tmp_path/proc"""
++    real_listdir = os.listdir
++    proc_dir = tmp_path / "proc"
++    proc_dir.mkdir(exist_ok=True)
++    monkeypatch.setattr(os, "listdir", lambda _p: real_listdir(proc_dir))
++    monkeypatch.setattr(syssentry_utils, "cmdline_path",
++                        lambda pid: str(proc_dir / str(pid) / "cmdline"))
++
++
++def record_kills(monkeypatch, tmp_path):
++    """patch os.kill to record signals and simulate process exit (remove cmdline
++    file after any signal so wait_exit sees the process as gone)
++    """
++    sent = []
++    proc_dir = tmp_path / "proc"
++
++    def fake_kill(pid, sig):
++        sent.append((pid, sig))
++        cmdline_file = proc_dir / str(pid) / "cmdline"
++        cmdline_file.unlink(missing_ok=True)
++
++    monkeypatch.setattr(os, "kill", fake_kill)
++    return sent
++
++
++class TestCmdlineMatches:
++    """Test cases for syssentry.utils.cmdline_matches"""
++
++    @staticmethod
++    def test_exact_argv_match(tmp_path, monkeypatch):
++        write_cmdline(tmp_path, 100, [b"/usr/bin/cpu_sentry"])
++        patch_procfs(monkeypatch, tmp_path)
++        assert cmdline_matches(100, ["/usr/bin/cpu_sentry"]) is True
++
++    @staticmethod
++    def test_prefix_match_with_extra_args(tmp_path, monkeypatch):
++        """a process with extra trailing arguments must not match: the whole
++        argv (command and every argument) has to be exactly the same
++        """
++        write_cmdline(tmp_path, 100, [b"/usr/bin/python3", b"/usr/bin/ai_block_io", b"--verbose"])
++        patch_procfs(monkeypatch, tmp_path)
++        assert cmdline_matches(
++            100, ["/usr/bin/python3", "/usr/bin/ai_block_io"]) is False
++
++    @staticmethod
++    def test_exact_match_with_args(tmp_path, monkeypatch):
++        write_cmdline(tmp_path, 100, [b"/usr/bin/cpu_sentry", b"--verbose"])
++        patch_procfs(monkeypatch, tmp_path)
++        assert cmdline_matches(
++            100, ["/usr/bin/cpu_sentry", "--verbose"]) is True
++
++    @staticmethod
++    def test_substring_not_matched(tmp_path, monkeypatch):
++        """a process whose cmdline merely contains the target as substring must not match"""
++        # editor opened on the plugin path, and a longer binary name
++        write_cmdline(tmp_path, 100, [b"/usr/bin/vim", b"/usr/bin/cpu_sentry"])
++        write_cmdline(tmp_path, 101, [b"/usr/bin/cpu_sentry_backup"])
++        patch_procfs(monkeypatch, tmp_path)
++        assert cmdline_matches(100, ["/usr/bin/cpu_sentry"]) is False
++        assert cmdline_matches(101, ["/usr/bin/cpu_sentry"]) is False
++
++    @staticmethod
++    def test_generic_command_not_matched(tmp_path, monkeypatch):
++        """task_start=python3 must not match a python3 interpreter running another script"""
++        write_cmdline(tmp_path, 100, [b"/usr/bin/python3", b"/usr/bin/some_service.py"])
++        patch_procfs(monkeypatch, tmp_path)
++        assert cmdline_matches(100, ["python3", "/usr/bin/ai_block_io"]) is False
++
++    @staticmethod
++    def test_exact_argv_match_for_generic_command(tmp_path, monkeypatch):
++        """matching is token-exact: an interpreter running the same script is still found"""
++        write_cmdline(tmp_path, 100, [b"python3", b"/usr/bin/ai_block_io"])
++        patch_procfs(monkeypatch, tmp_path)
++        assert cmdline_matches(100, ["python3", "/usr/bin/ai_block_io"]) is True
++        # a differently-resolved interpreter path is a different command line
++        assert cmdline_matches(100, ["/usr/bin/python3", "/usr/bin/ai_block_io"]) is False
++
++    @staticmethod
++    def test_shorter_cmdline_not_matched(tmp_path, monkeypatch):
++        write_cmdline(tmp_path, 100, [b"/usr/bin/cpu_sentry"])
++        patch_procfs(monkeypatch, tmp_path)
++        assert cmdline_matches(
++            100, ["/usr/bin/cpu_sentry", "--verbose", "--debug"]) is False
++
++    @staticmethod
++    def test_missing_cmdline_file(tmp_path, monkeypatch):
++        """a vanished process (no /proc entry) does not match"""
++        patch_procfs(monkeypatch, tmp_path)
++        assert cmdline_matches(999, ["/usr/bin/cpu_sentry"]) is False
++
++    @staticmethod
++    def test_empty_cmdline_file(tmp_path, monkeypatch):
++        write_cmdline(tmp_path, 100, [])
++        patch_procfs(monkeypatch, tmp_path)
++        assert cmdline_matches(100, ["/usr/bin/cpu_sentry"]) is False
++
++
++class TestCheckConflict:
++    """Test cases for InspectTask.check_conflict"""
++
++    @staticmethod
++    def test_kill_mode_kills_only_matching_processes(tmp_path, monkeypatch):
++        task = make_task("test_kill", "/usr/bin/test_task --flag", "kill")
++        # the process with exactly the same argv plus unrelated processes
++        # sharing substrings or running with different arguments
++        write_cmdline(tmp_path, 100, [b"/usr/bin/test_task", b"--flag"])
++        write_cmdline(tmp_path, 101, [b"/usr/bin/vim", b"/usr/bin/test_task"])
++        write_cmdline(tmp_path, 102, [b"/usr/bin/test_task_helper"])
++        write_cmdline(tmp_path, 103, [b"/usr/bin/test_task", b"--other-flag"])
++        write_cmdline(tmp_path, 104, [b"/usr/bin/test_task"])
++        patch_procfs(monkeypatch, tmp_path)
++        killed = record_kills(monkeypatch, tmp_path)
++        assert task.check_conflict() is True
++        assert killed == [(100, signal.SIGTERM)]
++
++    @staticmethod
++    def test_kill_mode_generic_command_not_refused_by_check_conflict(tmp_path, monkeypatch):
++        """the absolute-path guard moved to config load (load_mods); check_conflict
++        no longer refuses a generic command, it proceeds and kills the exact-argv
++        match only
++        """
++        task = make_task("test_kill_generic", "python3 /usr/bin/ai_block_io", "kill")
++        write_cmdline(tmp_path, 100, [b"python3", b"/usr/bin/ai_block_io"])
++        patch_procfs(monkeypatch, tmp_path)
++        killed = record_kills(monkeypatch, tmp_path)
++        assert task.check_conflict() is True
++        assert killed == [(100, signal.SIGTERM)]
++
++    @staticmethod
++    def test_kill_mode_allows_absolute_path_command(tmp_path, monkeypatch):
++        task = make_task("test_kill", "/usr/bin/test_task", "kill")
++        patch_procfs(monkeypatch, tmp_path)
++        assert task.check_conflict() is True
++
++    @staticmethod
++    def test_kill_mode_no_conflict_process(tmp_path, monkeypatch):
++        task = make_task("test_kill", "/usr/bin/test_task", "kill")
++        write_cmdline(tmp_path, 100, [b"/usr/bin/other_task"])
++        patch_procfs(monkeypatch, tmp_path)
++        killed = record_kills(monkeypatch, tmp_path)
++        assert task.check_conflict() is True
++        assert not killed 
++
++    @staticmethod
++    def test_down_mode_rejects_start_on_conflict(tmp_path, monkeypatch):
++        task = make_task("test_down", "/usr/bin/test_task", "down")
++        write_cmdline(tmp_path, 100, [b"/usr/bin/test_task"])
++        patch_procfs(monkeypatch, tmp_path)
++        assert task.check_conflict() is False
++
++    @staticmethod
++    def test_down_mode_allows_start_without_conflict(monkeypatch):
++        task = make_task("test_down", "/usr/bin/test_task", "down")
++        monkeypatch.setattr(os, "listdir", lambda _p: [])
++        assert task.check_conflict() is True
++
++    @staticmethod
++    def test_self_pid_never_matches(tmp_path, monkeypatch):
++        """the syssentry process itself must not be treated as a conflict"""
++        task = make_task("test_self", "/usr/bin/test_task", "kill")
++        self_pid = os.getpid()
++        # craft a cmdline that equals task_start, attributed to our own pid
++        write_cmdline(tmp_path, self_pid, [b"/usr/bin/test_task"])
++        patch_procfs(monkeypatch, tmp_path)
++        killed = record_kills(monkeypatch, tmp_path)
++        monkeypatch.setattr(os, "getpid", lambda: self_pid)
++        assert task.check_conflict() is True
++        assert not killed 
++
++    @staticmethod
++    def test_kill_mode_recheck_skips_recycled_pid(tmp_path, monkeypatch):
++        """a pid whose cmdline vanishes between scan and kill must not be killed"""
++        task = make_task("test_kill", "/usr/bin/test_task", "kill")
++        write_cmdline(tmp_path, 100, [b"/usr/bin/test_task"])
++        real_listdir = os.listdir
++        proc_dir = tmp_path / "proc"
++
++        calls = {"n": 0}
++
++        def flakycmdline_path(pid):
++            # first probe (scan) sees the cmdline, later probes (recheck) do not
++            calls["n"] += 1
++            if calls["n"] == 1:
++                return str(proc_dir / str(pid) / "cmdline")
++            return str(proc_dir / "missing" / "cmdline")
++
++        monkeypatch.setattr(os, "listdir", lambda _p: real_listdir(proc_dir))
++        monkeypatch.setattr(syssentry_utils, "cmdline_path", flakycmdline_path)
++        killed = record_kills(monkeypatch, tmp_path)
++        assert task.check_conflict() is True
++        assert not killed 
++
++    @staticmethod
++    def test_invalid_task_start_returns_false():
++        task = make_task("test_bad", "unmatched 'quote", "kill")
++        assert task.check_conflict() is False
++
++    @staticmethod
++    def test_empty_task_start_returns_false():
++        task = make_task("test_empty", "", "kill")
++        assert task.check_conflict() is False
++
++    @staticmethod
++    def test_proc_listdir_failure_returns_false(monkeypatch):
++        task = make_task("test_kill", "/usr/bin/test_task", "kill")
++
++        def boom(_p):
++            raise OSError("procfs unavailable")
++
++        monkeypatch.setattr(os, "listdir", boom)
++        assert task.check_conflict() is False
++
++    @staticmethod
++    def test_kill_permission_denied_returns_false(tmp_path, monkeypatch):
++        """EPERM from os.kill must be detected; check_conflict refuses to start"""
++        task = make_task("test_kill", "/usr/bin/test_task", "kill")
++        write_cmdline(tmp_path, 100, [b"/usr/bin/test_task"])
++        patch_procfs(monkeypatch, tmp_path)
++
++        def deny_kill(pid, sig):
++            raise PermissionError("not allowed")
++
++        monkeypatch.setattr(os, "kill", deny_kill)
++        assert task.check_conflict() is False
++
++    @staticmethod
++    def test_kill_process_already_gone(tmp_path, monkeypatch):
++        """ProcessLookupError means the process already exited; treat as success"""
++        task = make_task("test_kill", "/usr/bin/test_task", "kill")
++        write_cmdline(tmp_path, 100, [b"/usr/bin/test_task"])
++        patch_procfs(monkeypatch, tmp_path)
++        proc_dir = tmp_path / "proc"
++
++        def kill_gone(pid, sig):
++            (proc_dir / str(pid) / "cmdline").unlink(missing_ok=True)
++            raise ProcessLookupError("no such process")
++
++        monkeypatch.setattr(os, "kill", kill_gone)
++        assert task.check_conflict() is True
++
++    @staticmethod
++    def test_sigterm_ignored_then_sigkill_escalation(tmp_path, monkeypatch):
++        """if SIGTERM does not make the process exit, escalate to SIGKILL"""
++        task = make_task("test_kill", "/usr/bin/test_task", "kill")
++        write_cmdline(tmp_path, 100, [b"/usr/bin/test_task"])
++        patch_procfs(monkeypatch, tmp_path)
++        monkeypatch.setattr("syssentry.utils.KILL_VERIFY_TIMEOUT", 0.1)
++        monkeypatch.setattr("syssentry.utils.KILL_POLL_INTERVAL", 0.01)
++
++        proc_dir = tmp_path / "proc"
++        sent = []
++
++        def stubborn_kill(pid, sig):
++            sent.append((pid, sig))
++            if sig == signal.SIGKILL:
++                (proc_dir / str(pid) / "cmdline").unlink(missing_ok=True)
++
++        monkeypatch.setattr(os, "kill", stubborn_kill)
++        assert task.check_conflict() is True
++        assert (100, signal.SIGTERM) in sent
++        assert (100, signal.SIGKILL) in sent
++
++    @staticmethod
++    def test_kill_failure_refuses_start(tmp_path, monkeypatch):
++        """when a conflict process cannot be killed, check_conflict returns False"""
++        task = make_task("test_kill", "/usr/bin/test_task", "kill")
++        write_cmdline(tmp_path, 100, [b"/usr/bin/test_task"])
++        patch_procfs(monkeypatch, tmp_path)
++        monkeypatch.setattr("syssentry.utils.KILL_VERIFY_TIMEOUT", 0.1)
++        monkeypatch.setattr("syssentry.utils.KILL_POLL_INTERVAL", 0.01)
++
++        def immune_kill(pid, sig):
++            raise PermissionError("immune")
++
++        monkeypatch.setattr(os, "kill", immune_kill)
++        assert task.check_conflict() is False
+diff --git a/selftest/test/test_check_conflict_kill_cmd_with_argv.sh b/selftest/test/test_check_conflict_kill_cmd_with_argv.sh
+new file mode 100644
+index 0000000..f84eb33
+--- /dev/null
++++ b/selftest/test/test_check_conflict_kill_cmd_with_argv.sh
+@@ -0,0 +1,199 @@
++#!/bin/bash
++# Copyright (c), 2026, Huawei Tech. Co., Ltd.
++#
++# It exercises the real sysSentry service's conflict=kill path against real
++# processes. check_conflict() must:
++#   - kill only processes whose /proc/<pid>/cmdline argv equals
++#     shlex.split(task_start) exactly (same command + same args, no more, no
++#     less);
++#   - leave alone processes whose cmdline merely contains task_start as a
++#     substring, or that run with different / extra arguments;
++#   - when two tasks share an identical task_start, starting the second kills
++#     the conflict left by the first.
++#
++# `pgrep -afx "<cmd> <args>"` performs the same full-cmdline exact match the
++# Python cmdline_matches() relies on, so it is used to assert which processes
++# survive / die.
++
++source "libs/expect.sh"
++source "libs/lib.sh"
++source "libs/common.sh"
++set +e
++
++tmp_log="tmp_log"
++
++# test program (long-running, accepts ignored argv so args show up in cmdline)
++test_bin="test_task_with_argv"
++test_src="test/sysSentry/${test_bin}.c"
++
++# Several inspection tasks, including two with an identical task_start and
++# others with different arguments / a bare generic word.
++mod_same="conflict_kill_same"        # task_start with args: ... --tag same
++mod_same2="conflict_kill_same2"      # identical task_start to mod_same
++mod_diff="conflict_kill_diff"        # different args:        ... --tag diff
++mod_short="conflict_kill_short"      # bare generic word task_start (no path/args)
++
++all_mods=("$mod_same" "$mod_same2" "$mod_diff" "$mod_short")
++
++start_with_args="/usr/bin/${test_bin} --tag same"
++start_diff_args="/usr/bin/${test_bin} --tag diff"
++start_short="${test_bin}"
++
++function rm_mod_files() {
++    for mod in "${all_mods[@]}"; do
++        rm -rf "/etc/sysSentry/tasks/${mod}.mod"
++    done
++}
++
++# Write a single oneshot task config with conflict=kill and task_stop=kill $pid
++# (the $pid sentinel is substituted by sysSentry; "kill $pid" is whitelisted so
++# each task's stop only kills its own child and never cross-interferes).
++function write_conflict_config() {
++    local mod_name="$1"
++    local task_start="$2"
++    local config_file="/etc/sysSentry/tasks/${mod_name}.mod"
++
++    touch "$config_file"
++    echo "[common]" > "$config_file"
++    echo "enabled=yes" >> "$config_file"
++    echo "task_start=${task_start}" >> "$config_file"
++    echo "task_stop=kill \$pid" >> "$config_file"
++    echo "type=oneshot" >> "$config_file"
++    echo "conflict=kill" >> "$config_file"
++}
++
++function pre_test() {
++    kill -9 `ps aux | grep syssentry | grep -v grep | awk '{print $2}'` 2>/dev/null
++    kill -9 `ps aux | grep ${test_bin} | grep -v grep | awk '{print $2}'` 2>/dev/null
++
++    rm_mod_files
++
++    gcc "${test_src}" -o "test/sysSentry/${test_bin}"
++    cp "test/sysSentry/${test_bin}" "/usr/bin/${test_bin}"
++
++    write_conflict_config "$mod_same" "$start_with_args"
++    write_conflict_config "$mod_same2" "$start_with_args"
++    write_conflict_config "$mod_diff" "$start_diff_args"
++    write_conflict_config "$mod_short" "$start_short"
++
++    systemctl start xalarmd.socket xalarmd.service
++    systemctl start sysSentry.socket sysSentry.service
++    sleep 2
++}
++
++# Number of processes whose full cmdline equals <argv> exactly. Mirrors the
++# Python cmdline_matches() rule (no substring, no extra args).
++function count_exact() {
++    pgrep -afx "$1" 2>/dev/null | wc -l
++}
++
++# True (0) if pid is still alive.
++function pid_alive() {
++    kill -0 "$1" 2>/dev/null
++}
++
++function do_test() {
++    expect_service_status_eq sysSentry active
++    expect_service_status_eq xalarmd active
++
++    # --- Scenario 1: identical argv already running is killed on start ------
++    # Pre-launch a process with the exact task_start argv of mod_same.
++    $start_with_args &
++    same_pid=$!
++    sleep 1
++    expect_eq "$(count_exact "$start_with_args")" 1 "pre-launch left one exact-argv process"
++    pid_alive "$same_pid"
++    expect_eq $? 0 "pre-launch process is alive"
++
++    sentryctl start "$mod_same"
++    expect_eq $? 0
++    sleep 1
++    expect_task_status_eq "$mod_same" "RUNNING"
++
++    # The manually launched conflict must have been killed (exact argv match);
++    # but the task itself spawns a child with the identical argv, so exactly
++    # one such process must remain (the task's own child).
++    expect_false "pid_alive $same_pid" "manual conflict process was killed"
++    expect_eq "$(count_exact "$start_with_args")" 1 "exactly one exact-argv process remains (task child)"
++
++    # --- Scenario 2: different argv is NOT killed (cross-task exact match) --
++    # Launch a process with a different argv (--tag diff) and start mod_diff.
++    # mod_diff's check_conflict kills its identical-argv conflict (the manual
++    # one), while mod_same's still-running --tag same child must survive.
++    $start_diff_args &
++    diff_pid=$!
++    sleep 1
++    same_child_pid=$(pgrep -afx "$start_with_args" 2>/dev/null | head -1)
++
++    sentryctl start "$mod_diff"
++    expect_eq $? 0
++    sleep 1
++    expect_task_status_eq "$mod_diff" "RUNNING"
++
++    expect_false "pid_alive $diff_pid" "different-argv manual process was killed (exact match on its own argv)"
++    expect_true "pid_alive $same_child_pid" "mod_same child with different argv was NOT killed"
++    # one --tag same (mod_same) + one --tag diff (mod_diff child)
++    expect_eq "$(count_exact "$start_with_args")" 1 "mod_same child still alive"
++    expect_eq "$(count_exact "$start_diff_args")" 1 "mod_diff child running"
++
++    # --- Scenario 3: substring / extra args must NOT be killed ------------
++    # task_start of mod_short is the bare word "test_task_with_argv". Under the
++    # old substring code, ANY process whose cmdline contained that word
++    # (including "test_task_with_argv --tag same/diff") would be killed. With
++    # exact-argv matching, only a process with the bare single-token argv
++    # matches, so the extra-args processes must all survive.
++    "$test_bin" --tag extra &
++    extra_pid=$!
++    sleep 1
++
++    sentryctl start "$mod_short"
++    expect_eq $? 0
++    sleep 1
++    expect_task_status_eq "$mod_short" "RUNNING"
++
++    # The substring-bearing processes (extra args) must survive: exact argv
++    # never matches a cmdline that merely contains task_start.
++    expect_true "pid_alive $extra_pid" "extra-args process survived (no substring kill)"
++    expect_true "pid_alive $same_child_pid" "mod_same --tag same survived substring check"
++    expect_eq "$(count_exact "$start_with_args")" 1 "mod_same child still alive after mod_short start"
++
++    # --- Scenario 4: two tasks sharing an identical task_start -------------
++    # Start mod_same2, whose task_start is identical to mod_same. Its
++    # check_conflict must kill the --tag same process left by mod_same, then
++    # start its own, leaving exactly one --tag same process overall.
++    sentryctl start "$mod_same2"
++    expect_eq $? 0
++    sleep 1
++    expect_task_status_eq "$mod_same2" "RUNNING"
++
++    expect_eq "$(count_exact "$start_with_args")" 1 "single --tag same process after identical-argv task start"
++    expect_eq "$(count_exact "$start_diff_args")" 1 "mod_diff child unaffected by same2"
++    expect_true "pid_alive $extra_pid" "extra-args process still alive"
++
++    # --- cleanup: stop tasks (kill $pid stops only each task's own child) ---
++    for mod in "${all_mods[@]}"; do
++        sentryctl stop "$mod" >/dev/null 2>&1
++    done
++    sleep 2
++
++    # After stopping, no exact-argv conflict processes remain.
++    expect_eq "$(count_exact "$start_with_args")" 0 "no --tag same process after stop"
++    expect_eq "$(count_exact "$start_diff_args")" 0 "no --tag diff process after stop"
++    # the extra-args process was never owned by a task; kill it explicitly
++    pid_alive "$extra_pid" && kill -9 "$extra_pid" 2>/dev/null
++}
++
++function post_test() {
++    for mod in "${all_mods[@]}"; do
++        sentryctl stop "$mod" >/dev/null 2>&1
++    done
++
++    systemctl stop sysSentry.socket sysSentry.service 2>/dev/null
++    systemctl stop xalarmd.socket xalarmd.service 2>/dev/null
++
++    kill -9 `pgrep -x "${test_bin}"` 2>/dev/null
++    rm -rf "${tmp_log}" "test/sysSentry/${test_bin}" "/usr/bin/${test_bin}"
++    rm_mod_files
++}
++
++run_testcase
+diff --git a/src/services/syssentry/global_values.py b/src/services/syssentry/global_values.py
+index cd87bb9..3130f69 100644
+--- a/src/services/syssentry/global_values.py
++++ b/src/services/syssentry/global_values.py
+@@ -24,7 +24,9 @@ from .utils import (
+     get_current_time_string,
+     run_cmd,
+     is_dangerous_env_key,
+-    validate_command_string
++    validate_command_string,
++    cmdline_matches,
++    kill_and_verify,
+ )
+ from .mod_status import set_runtime_status
+ from .mod_status import RUNNING_STATUS, EXITED_STATUS, NONZERO_EXITED_STATUS, FAILED_STATUS
+@@ -259,32 +261,45 @@ class InspectTask:
+         return True
+ 
+     def check_conflict(self):
+-        logging.debug("load_env_file detail, task_name: %s, conflict: %s, env_file: %s",
+-                      self.name, self.conflict, self.env_file)
+-        pid_list = []
+-        check_cmd = ["ps", "aux"]
++        logging.debug("check conflict, task_name: %s, conflict: %s", self.name, self.conflict)
+         try:
+-            result = subprocess.run(check_cmd, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+-        except subprocess.CalledProcessError as e:
+-            raise Exception(f"failed with return code {e.returncode}")
++            target_argv = shlex.split(self.task_start)
++        except ValueError as e:
++            logging.error("task %s failed to parse task_start: %s", self.name, str(e))
++            return False
++        if not target_argv:
++            logging.error("task %s: task_start is empty", self.name)
++            return False
+ 
+-        output_lines = result.stdout.decode("utf-8").splitlines()
+-        for line in output_lines:
+-            if self.task_start not in line:
++        pid_list = []
++        self_pid = os.getpid()
++        try:
++            proc_entries = os.listdir("/proc")
++        except OSError as e:
++            logging.error("task %s failed to list /proc: %s", self.name, str(e))
++            return False
++        for entry in proc_entries:
++            if not entry.isdigit():
+                 continue
+-            try:
+-                pid = int(line.split()[1])
+-            except (IndexError, ValueError) as e:
+-                logging.error("task %s failed to parse pid from ps line: %s; error: %s",
+-                              self.name, line, str(e))
++            pid = int(entry)
++            # never treat the syssentry process itself as a conflict
++            if pid == self_pid:
+                 continue
+-            pid_list.append(pid)
++            if cmdline_matches(pid, target_argv):
++                pid_list.append(pid)
+         logging.debug("current pid_list = %s", pid_list)
+ 
+         if self.conflict == "kill" and pid_list:
++            kill_failed = False
+             for pid in pid_list:
+-                subprocess.run(["/usr/bin/kill", str(pid)], shell=False)
+-                logging.debug("the program is killed, pid=%d", pid)
++                if not cmdline_matches(pid, target_argv):
++                    continue
++                if not kill_and_verify(pid, target_argv, self.name):
++                    kill_failed = True
++            if kill_failed:
++                logging.error("task %s: failed to kill some conflict processes, refuse to start",
++                              self.name)
++                return False
+         elif self.conflict == "down" and pid_list:
+             logging.warning("the conflict field is set to down, so program = [%s] is exited!", self.name)
+             return False
+diff --git a/src/services/syssentry/utils.py b/src/services/syssentry/utils.py
+index 766d40e..8c3b236 100644
+--- a/src/services/syssentry/utils.py
++++ b/src/services/syssentry/utils.py
+@@ -13,16 +13,23 @@
+ some common function
+ """
+ import logging
++import os
++import signal
+ import socket
+ import subprocess
+ import shlex
+ import re
++import time
+ 
+ from datetime import datetime, timezone, timedelta
+ 
+ # Security: Maximum allowed message length to prevent DoS attacks
+ MAX_MSG_LEN = 10 * 1024 * 1024  # 10MB
+ 
++# Timeouts used when killing a conflicting process and verifying it has exited.
++KILL_VERIFY_TIMEOUT = 2.0
++KILL_POLL_INTERVAL = 0.05
++
+ ENV_BLACKLIST_PATTERNS = [
+     r"^LD_",                 # LD_PRELOAD, LD_LIBRARY_PATH 等（可劫持动态链接）
+     r"^MALLOC_",             # 一系列控制堆内存分配行为的变量，可能被用于触发非预期状态或拒绝服务
+@@ -209,3 +216,80 @@ def is_dangerous_env_key(env_name):
+         if re.match(pattern, env_name, re.IGNORECASE):
+             return True
+     return False
++
++
++def cmdline_path(pid):
++    """get the path of the /proc cmdline file of process pid"""
++    return "/proc/%d/cmdline" % pid
++
++
++def cmdline_matches(pid, target_argv):
++    """check whether the command line of process pid equals target_argv exactly.
++
++    A process is a conflict only when its argv (command and every argument) is
++    identical to target_argv: no more and no fewer tokens. An empty target_argv
++    never matches, so processes with no arguments are never reported.
++    """
++    if not target_argv:
++        return False
++    try:
++        with open(cmdline_path(pid), "rb") as cmdline_file:
++            raw = cmdline_file.read()
++    except OSError:
++        return False
++    argv = [token.decode("utf-8", "replace") for token in raw.split(b"\0") if token]
++    return argv == target_argv
++
++
++def send_signal(pid, sig, task_name=""):
++    """send signal to pid. Returns True on success or when the process is
++    already gone; False on failure (permission denied or other error).
++
++    task_name is only used for logging context.
++    """
++    try:
++        os.kill(pid, sig)
++    except ProcessLookupError:
++        return True
++    except PermissionError as e:
++        logging.error("task %s: permission denied to signal pid %d: %s",
++                      task_name, pid, str(e))
++        return False
++    except OSError as e:
++        logging.error("task %s: failed to signal pid %d: %s",
++                      task_name, pid, str(e))
++        return False
++    return True
++
++
++def wait_exit(pid, target_argv):
++    """poll until pid's cmdline no longer matches target_argv or the
++    KILL_VERIFY_TIMEOUT deadline is reached.
++
++    Returns True if the process is gone (exited/zombie/recycled),
++    False on timeout.
++    """
++    deadline = time.monotonic() + KILL_VERIFY_TIMEOUT
++    while time.monotonic() < deadline:
++        if not cmdline_matches(pid, target_argv):
++            return True
++        time.sleep(KILL_POLL_INTERVAL)
++    return False
++
++
++def kill_and_verify(pid, target_argv, task_name=""):
++    """send SIGTERM, verify the process exits, escalate to SIGKILL if needed.
++
++    Returns True if the process is gone; False on failure.
++
++    task_name is only used for logging context.
++    """
++    if not send_signal(pid, signal.SIGTERM, task_name):
++        return False
++    if wait_exit(pid, target_argv):
++        return True
++    logging.warning("task %s: pid %d did not exit after SIGTERM, escalating to SIGKILL",
++                    task_name, pid)
++    if not send_signal(pid, signal.SIGKILL, task_name):
++        return False
++    return wait_exit(pid, target_argv)
+-- 
+2.45.0.windows.1
+

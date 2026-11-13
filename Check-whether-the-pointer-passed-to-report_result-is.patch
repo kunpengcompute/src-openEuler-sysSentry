@@ -1,0 +1,29 @@
+From 3b6fe33de7f80b3c60053d1fbbdf465655f436a5 Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Mon, 27 Jul 2026 16:07:23 +0800
+Subject: [PATCH 6/9] Check whether the pointer passed to report_result is NULL
+
+---
+ src/libs/libxalarm/register_xalarm.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/libs/libxalarm/register_xalarm.c b/src/libs/libxalarm/register_xalarm.c
+index a8a0c32793c1..e8f2b8d65f77 100644
+--- a/src/libs/libxalarm/register_xalarm.c
++++ b/src/libs/libxalarm/register_xalarm.c
+@@ -611,6 +611,12 @@ static bool is_valid_task_name(const char *task_name)
+ int report_result(const char *task_name, enum RESULT_LEVEL result_level, const char *report_data)
+ {
+     int ret = RETURN_CODE_FAIL, result_msg_len;
++
++    if (task_name == NULL || report_data == NULL) {
++        fprintf(stderr, "%s: task_name or report_data is NULL\n", __func__);
++        return ret;
++    }
++
+     if (result_level < 0 || result_level >= RESULT_LEVEL_NUM) {
+         fprintf(stderr, "result_level (%d) is invalid, it must be in [0-5]\n", result_level);
+         return ret;
+-- 
+2.43.0
+

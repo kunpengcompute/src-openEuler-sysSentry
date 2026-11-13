@@ -1,0 +1,139 @@
+From 0e92880f7b3c362388569312d957b585745711f9 Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Thu, 23 Jul 2026 19:09:10 +0800
+Subject: [PATCH 5/6] improve error handling
+
+---
+ src/services/syssentry/alarm.py     | 30 ++++++++++++++++++++++-------
+ src/services/syssentry/callbacks.py |  5 ++++-
+ src/services/syssentry/syssentry.py | 11 ++++++-----
+ 3 files changed, 33 insertions(+), 13 deletions(-)
+
+diff --git a/src/services/syssentry/alarm.py b/src/services/syssentry/alarm.py
+index a0220a06a7ff..1f87fe7523cd 100644
+--- a/src/services/syssentry/alarm.py
++++ b/src/services/syssentry/alarm.py
+@@ -22,7 +22,6 @@ import sys
+ from xalarm.register_xalarm import xalarm_register,xalarm_getid,xalarm_getlevel,xalarm_gettype,xalarm_gettime,xalarm_getdesc
+ from xalarm.xalarm_api import Xalarm
+ 
+-from .global_values import InspectTask
+ from .task_map import TasksMap
+ 
+ # 告警ID映射字典，key为插件名，value为告警ID（类型为数字）
+@@ -112,7 +111,7 @@ def alarm_register():
+             task.alarm_clear_time = int(task.alarm_clear_time)
+             alarm_id = task.alarm_id
+             alarm_clear_time = task.alarm_clear_time
+-            
++
+             alarm_list_dict[alarm_id] = []
+             task_alarm_id_dict[task_name] = alarm_id
+             if alarm_id not in alarm_id_clear_time_dict:
+@@ -129,7 +128,18 @@ def alarm_register():
+     logging.info('register xalarm: success')
+     return clientId
+ 
+-def get_alarm_result(task_name: str, time_range: int, detailed: bool) -> List[Dict]:
++
++def get_alarm_result(task_name: str, time_range: int, detailed: bool):
++    """
++    get task alarm result
++
++    Returns
++    -------
++    list or None
++        - Return a list of alarm info if get alarm result success
++        - Return an empty list [] if alarm info are not found
++        - Return None if an exception or error occurred during the operation
++    """
+     alarm_list_lock.acquire()
+     try:
+         if task_name not in task_alarm_id_dict:
+@@ -187,21 +197,27 @@ def get_alarm_result(task_name: str, time_range: int, detailed: bool) -> List[Di
+             alarm['alarm_info'] = alarm_info
+         alarm_list = [alarm for alarm in alarm_list if 'alarm_source' in alarm['alarm_info'] and alarm['alarm_info']['alarm_source'] == task_name]
+ 
+-        alarm_level_mapping = { 
++        alarm_level_mapping = {
+                 1: 'MINOR_ALM',
+                 2: 'MAJOR_ALM',
+                 3: 'CRITICAL_ALM'
+-                }   
++                }
+ 
+-        alarm_type_mapping = { 
++        alarm_type_mapping = {
+                 1: 'ALARM_TYPE_OCCUR',
+                 2: 'ALARM_TYPE_RECOVER'
+-                }   
++                }
+ 
+         for alarm in alarm_list:
+             alarm['alarm_level'] = alarm_level_mapping.get(alarm['alarm_level'], 'UNKNOWN_LEVEL')
+             alarm['alarm_type'] = alarm_type_mapping.get(alarm['alarm_type'], 'UNKNOWN_TYPE')
+         return alarm_list
+ 
++    except json.JSONDecodeError:
++        logging.error("get_alarm_result: json decode error")
++        return None
++    except (IndexError, KeyError, TypeError) as e:
++        logging.error("get_alarm_result failed, error msg is: %s", str(e))
++        return None
+     finally:
+         alarm_list_lock.release()
+diff --git a/src/services/syssentry/callbacks.py b/src/services/syssentry/callbacks.py
+index 537868d924c3..42ee710d9c05 100644
+--- a/src/services/syssentry/callbacks.py
++++ b/src/services/syssentry/callbacks.py
+@@ -70,7 +70,10 @@ def task_get_alarm(data):
+     if not task.load_enabled:
+         return "failed", f"mod {task_name} is not enabled"
+ 
+-    return "success", get_alarm_result(task_name, time_range, detailed)
++    alarm_info = get_alarm_result(task_name, time_range, detailed)
++    if alarm_info is None:
++        return "failed", f"cannot get valid alarm msg for task {task_name}"
++    return "success", alarm_info
+ 
+ def task_stop(mod_name):
+     """stop by mod name"""
+diff --git a/src/services/syssentry/syssentry.py b/src/services/syssentry/syssentry.py
+index 0b2df4a1677c..99acc1cb2408 100644
+--- a/src/services/syssentry/syssentry.py
++++ b/src/services/syssentry/syssentry.py
+@@ -476,8 +476,8 @@ def main_loop():
+                 else:
+                     continue
+ 
+-        except socket.error:
+-            pass
++        except socket.error as e:
++            logging.error("epoll socket error: %s", str(e))
+ 
+         # handle period task
+         period_tasks_handle()
+@@ -539,7 +539,8 @@ def sigchld_handler(signum, _f):
+                 else:
+                     set_runtime_status(task.name, FAILED_STATUS)
+             task.result_info["end_time"] = get_current_time_string()
+-        except:
++        except Exception as e:
++            logging.error("Error in sigchld processing: %s", str(e))
+             break
+ 
+ 
+@@ -616,8 +617,8 @@ def main():
+         client_id = alarm_register()
+         main_loop()
+ 
+-    except Exception as e:
+-        logging.error(traceback.format_exc())
++    except Exception:
++        logging.error("Error occurred in the main function of sysSentry service: %s", traceback.format_exc())
+     finally:
+         if client_id != -1:
+             xalarm_unregister(client_id)
+-- 
+2.43.0
+

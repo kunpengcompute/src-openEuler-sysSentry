@@ -1,0 +1,37 @@
+From d225833171d4f96e920a9556e2602a85fbbe80e3 Mon Sep 17 00:00:00 2001
+From: tong_1001 <sxt1001@qq.com>
+Date: Mon, 3 Aug 2026 09:37:43 +0800
+Subject: [PATCH 3/8] fix: use ln -snf instead of ln -sf for symlink creation
+ in CMakeLists.txt
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+ln -sf创建符号链接时，若目标路径已被替换为指向敏感文件的
+符号链接，-f会解引用并覆盖该目标文件（ symlink race）。
+添加-n选项（--no-dereference），使ln不跟随已有符号链接，
+而是直接替换符号链接本身，消除TOCTOU竞态风险。
+---
+ src/sentryPlugins/cpu_sentry/catlib/CMakeLists.txt | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/sentryPlugins/cpu_sentry/catlib/CMakeLists.txt b/src/sentryPlugins/cpu_sentry/catlib/CMakeLists.txt
+index 7fd15fd13a3d..17763f7aed44 100644
+--- a/src/sentryPlugins/cpu_sentry/catlib/CMakeLists.txt
++++ b/src/sentryPlugins/cpu_sentry/catlib/CMakeLists.txt
+@@ -31,9 +31,9 @@ install(TARGETS cat-cli
+         )
+ install(TARGETS cpu_patrol LIBRARY DESTINATION lib)
+ 
+-# 创建软链接
+-install(CODE "execute_process(COMMAND ln -sf ${CMAKE_INSTALL_PREFIX}/bin/cat-cli /usr/local/bin/cat-cli)")
+-install(CODE "execute_process(COMMAND ln -sf ${CMAKE_INSTALL_PREFIX}/lib/libcpu_patrol.so /lib64/libcpu_patrol.so)")
++# 创建软链接（使用-nf防止解引用已有符号链接，避免TOCTOU竞态替换）
++install(CODE "execute_process(COMMAND ln -snf ${CMAKE_INSTALL_PREFIX}/bin/cat-cli /usr/local/bin/cat-cli)")
++install(CODE "execute_process(COMMAND ln -snf ${CMAKE_INSTALL_PREFIX}/lib/libcpu_patrol.so /lib64/libcpu_patrol.so)")
+ 
+ # 成功安装信息
+ install(CODE "MESSAGE(\"[INFO] install successfully, run 'cat-cli -h' to test\")")
+-- 
+2.43.0
+

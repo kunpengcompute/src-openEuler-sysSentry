@@ -1,0 +1,77 @@
+From 7e943a802fb1fb9d0c0a4c28e8eb7ea80de61425 Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Mon, 27 Jul 2026 19:42:42 +0800
+Subject: [PATCH 2/9] Enable CMAKE_VERBOSE_MAKEFILE to show detailed
+ compilation logs
+
+---
+ src/libs/CMakeLists.txt                            | 2 +-
+ src/libsentry/c/io/CMakeLists.txt                  | 1 +
+ src/libsentry/c/log/CMakeLists.txt                 | 1 +
+ src/sentryPlugins/bmc_ras_sentry/CMakeLists.txt    | 1 +
+ src/sentryPlugins/cpu_sentry/catlib/CMakeLists.txt | 2 ++
+ 5 files changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/libs/CMakeLists.txt b/src/libs/CMakeLists.txt
+index cbc23464606e..c9091c0b5301 100644
+--- a/src/libs/CMakeLists.txt
++++ b/src/libs/CMakeLists.txt
+@@ -4,7 +4,7 @@
+ cmake_minimum_required(VERSION 3.12.1)
+ project(libxalarm)
+  
+-SET(CMAKE_VERBOSE_MAKEFILE OFF)
++SET(CMAKE_VERBOSE_MAKEFILE ON)
+ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g")
+ 
+ add_subdirectory(libxalarm)
+diff --git a/src/libsentry/c/io/CMakeLists.txt b/src/libsentry/c/io/CMakeLists.txt
+index 6a49a8d61d66..a6c672ad127c 100644
+--- a/src/libsentry/c/io/CMakeLists.txt
++++ b/src/libsentry/c/io/CMakeLists.txt
+@@ -3,5 +3,6 @@
+ cmake_minimum_required(VERSION 3.22)
+ project(sentry_io)
+ add_library(sentry_io SHARED io_utils.c)
++set(CMAKE_VERBOSE_MAKEFILE ON)
+ set_target_properties(sentry_io PROPERTIES LINK_FLAGS "-Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack")
+ set_target_properties(sentry_io PROPERTIES COMPILE_FLAGS "-shared -fPIC -fstack-protector-strong -D_FORTIFY_SOURCE=2 -O2 -Wall -Werror -Wtrampolines -g")
+diff --git a/src/libsentry/c/log/CMakeLists.txt b/src/libsentry/c/log/CMakeLists.txt
+index 494ff0dfd11d..8208f723dbf1 100644
+--- a/src/libsentry/c/log/CMakeLists.txt
++++ b/src/libsentry/c/log/CMakeLists.txt
+@@ -3,5 +3,6 @@
+ cmake_minimum_required(VERSION 3.22)
+ project(sentry_log)
+ add_library(sentry_log SHARED log_utils.c)
++set(CMAKE_VERBOSE_MAKEFILE ON)
+ set_target_properties(sentry_log PROPERTIES LINK_FLAGS "-Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack -Wtrampolines")
+ set_target_properties(sentry_log PROPERTIES CMAKE_C_FLAGS "-shared -fPIC -fstack-protector-strong -D_FORTIFY_SOURCE=2 -O2 -Wall -Werror -g")
+diff --git a/src/sentryPlugins/bmc_ras_sentry/CMakeLists.txt b/src/sentryPlugins/bmc_ras_sentry/CMakeLists.txt
+index 94fbb9d0c09c..035dbb7982da 100644
+--- a/src/sentryPlugins/bmc_ras_sentry/CMakeLists.txt
++++ b/src/sentryPlugins/bmc_ras_sentry/CMakeLists.txt
+@@ -1,6 +1,7 @@
+ cmake_minimum_required (VERSION 3.12)
+ project(bmc_ras_sentry)
+ 
++set(CMAKE_VERBOSE_MAKEFILE ON)
+ set(CMAKE_CXX_STANDARD 14)
+ set(CMAKE_CXX_STANDARD_REQUIRED ON)
+ 
+diff --git a/src/sentryPlugins/cpu_sentry/catlib/CMakeLists.txt b/src/sentryPlugins/cpu_sentry/catlib/CMakeLists.txt
+index 9440b471a7d4..e2a002d44854 100644
+--- a/src/sentryPlugins/cpu_sentry/catlib/CMakeLists.txt
++++ b/src/sentryPlugins/cpu_sentry/catlib/CMakeLists.txt
+@@ -4,6 +4,8 @@ set(CMAKE_C_STANDARD 11)
+ set(CMAKE_CXX_STANDARD_REQUIRED OFF)
+ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g")
+ set(CMAKE_SKIP_RPATH TRUE)
++SET(CMAKE_VERBOSE_MAKEFILE ON)
++
+ # 父子模块都可以直接<include>如下路径下的头文件
+ include_directories(PUBLIC
+         ${PROJECT_SOURCE_DIR}
+-- 
+2.43.0
+

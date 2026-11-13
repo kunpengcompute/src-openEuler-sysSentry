@@ -1,0 +1,32 @@
+From a9a119a8144fe2bb7fe42b5035d77673fb5a2995 Mon Sep 17 00:00:00 2001
+From: tong_1001 <sxt1001@qq.com>
+Date: Mon, 3 Aug 2026 09:34:36 +0800
+Subject: [PATCH 2/8] fix: check config->black_list NULL pointer in
+ tc_ring_one.c
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+is_core_invalid()直接解引用config->black_list，但blacklist
+由调用者传入tc_ring_one_main()，可能为NULL。
+添加NULL检查，black_list为NULL时视为无黑名单，避免段错误。
+---
+ src/sentryPlugins/soc_ring_sentry/tc_ring_one.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/sentryPlugins/soc_ring_sentry/tc_ring_one.c b/src/sentryPlugins/soc_ring_sentry/tc_ring_one.c
+index 542d27483a00..50451902a3d9 100755
+--- a/src/sentryPlugins/soc_ring_sentry/tc_ring_one.c
++++ b/src/sentryPlugins/soc_ring_sentry/tc_ring_one.c
+@@ -235,7 +235,7 @@ static void tc_ring_one_space_init(void *base, size_t size)
+ 
+ static bool is_core_invalid(struct tc_ring_one_config *config, int core_id)
+ {
+-    return config->black_list[core_id] || !is_cpu_online(core_id);
++    return (config->black_list && config->black_list[core_id]) || !is_cpu_online(core_id);
+ }
+ 
+ static int tc_ring_one_ctrl_var_init(struct tc_ring_one_config *config)
+-- 
+2.43.0
+

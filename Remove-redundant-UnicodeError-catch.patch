@@ -1,0 +1,26 @@
+From 124f6301e6aabe71de412aba3cc44fab9a603a2c Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Thu, 3 Sep 2026 15:05:48 +0800
+Subject: [PATCH] Remove redundant UnicodeError catch
+
+UnicodeError is a subclass of ValueError, so the explicit catch is redundant.
+---
+ src/sentryPlugins/cpu_sentry/cpu_alarm.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/sentryPlugins/cpu_sentry/cpu_alarm.py b/src/sentryPlugins/cpu_sentry/cpu_alarm.py
+index 548e1b6..211060f 100644
+--- a/src/sentryPlugins/cpu_sentry/cpu_alarm.py
++++ b/src/sentryPlugins/cpu_sentry/cpu_alarm.py
+@@ -272,7 +272,7 @@ def cpu_alarm_recv(server_socket: socket.socket):
+     except socket.error:
+         logging.error("socket error")
+         return
+-    except (ValueError, OSError, UnicodeError, TypeError, NotImplementedError):
++    except (ValueError, OSError, TypeError, NotImplementedError):
+         logging.error("server recv cpu alarm msg failed!")
+         client_socket.close()
+         return
+-- 
+2.45.0.windows.1
+

@@ -1,0 +1,37 @@
+From 59eb33bfd0b83ad5ea00e3ae58082d5e62cef86e Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Sat, 5 Sep 2026 10:32:53 +0800
+Subject: [PATCH] Add explicit guard for core id bitmap capacity in upload_bmc
+
+The core-id bitmap construction relies on the implicit invariant
+core_id < core_id_array_capacity, which is guaranteed only by the
+interaction of get_cpu_interval and get_core_id. If that invariant is
+ever broken, zfill becomes a no-op and the low bits of the bitmap are
+silently truncated, sending a wrong core mask to the BMC. Fail loudly
+instead.
+
+Co-Authored-By: GLM-5.3
+---
+ src/sentryPlugins/cpu_sentry/cpu_alarm.py | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/sentryPlugins/cpu_sentry/cpu_alarm.py b/src/sentryPlugins/cpu_sentry/cpu_alarm.py
+index 4a755c7..2913741 100644
+--- a/src/sentryPlugins/cpu_sentry/cpu_alarm.py
++++ b/src/sentryPlugins/cpu_sentry/cpu_alarm.py
+@@ -194,6 +194,12 @@ def upload_bmc(_type, module, command, event_type, socket_id, core_id_logical):
+         if cpu_num_per_group > DEFAULT_CORE_ID_ARRAY_CAPACITY:
+             core_id_array_capacity = math.ceil(cpu_num_per_group / 8) * 8
+ 
++        if core_id + 1 > core_id_array_capacity:
++            logging.error(
++                "core id %d exceeds bitmap capacity %d", core_id, core_id_array_capacity
++            )
++            return
++
+         core_id_bin_str = bin(1 << core_id)[BIN_PREFIX_LEN:].zfill(
+             core_id_array_capacity
+         )
+-- 
+2.45.0.windows.1
+

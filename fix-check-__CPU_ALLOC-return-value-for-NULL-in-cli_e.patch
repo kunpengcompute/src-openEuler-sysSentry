@@ -1,0 +1,34 @@
+From f0615e343f4ba38a3eb10e00296036ed2f02037c Mon Sep 17 00:00:00 2001
+From: tong_1001 <sxt1001@qq.com>
+Date: Mon, 3 Aug 2026 09:33:58 +0800
+Subject: [PATCH 1/8] fix: check __CPU_ALLOC return value for NULL in
+ cli_executor.c
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+__CPU_ALLOC(MAX_CPU_LOGIC_CORE)在内存不足时返回NULL，
+后续__CPU_ZERO_S和__CPU_COUNT_S会解引用空指针导致段错误。
+添加NULL检查，失败时返回CAT_ERR并打印错误信息。
+---
+ src/sentryPlugins/cpu_sentry/catlib/cli_executor.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/sentryPlugins/cpu_sentry/catlib/cli_executor.c b/src/sentryPlugins/cpu_sentry/catlib/cli_executor.c
+index afafe38bf09e..907ea803f8d1 100644
+--- a/src/sentryPlugins/cpu_sentry/catlib/cli_executor.c
++++ b/src/sentryPlugins/cpu_sentry/catlib/cli_executor.c
+@@ -46,6 +46,10 @@ int execute_request(struct catcli_request_body *request_body)
+     cat_patrol_module module = request_body->patrol_module;
+     if (module == CAT_PATROL_CPU) {
+         cpu_set_t *cpu_set = __CPU_ALLOC(MAX_CPU_LOGIC_CORE);
++        if (cpu_set == NULL) {
++            printf("cpu patrol execute failed, out of memory\n");
++            return CAT_ERR;
++        }
+         ssize_t size = __CPU_ALLOC_SIZE(MAX_CPU_LOGIC_CORE);
+         __CPU_ZERO_S(size, cpu_set);
+         int ret = lib_cpu_patrol_start(request_body->module_params, request_body->cpu_utility,
+-- 
+2.43.0
+

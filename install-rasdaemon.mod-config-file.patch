@@ -1,0 +1,26 @@
+From 61d996637d7b8ea1b55d919ec910ffc918dae0be Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Wed, 29 Jul 2026 14:33:38 +0800
+Subject: [PATCH] install rasdaemon.mod config file
+
+---
+ Makefile | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/Makefile b/Makefile
+index fd0d600f706e..af8534e50922 100644
+--- a/Makefile
++++ b/Makefile
+@@ -130,6 +130,9 @@ isentry:
+ 		install -m 550 $(CURSRCDIR)/services/sentryCollector/ebpf_collector/ebpf_collector $(BINDIR); \
+ 	fi
+ 
++	# rasdaemon
++	install -m 600 $(CURCONFIGDIR)/tasks/rasdaemon.mod $(ETCDIR)/sysSentry/tasks/
++
+ 	# avg_block_io
+ 	install -d -m 755 $(PYDIR)/sentryPlugins/avg_block_io
+ 	install -d -m 755 $(PYDIR)/sentryPlugins/avg_block_io/__pycache__
+-- 
+2.43.0
+

@@ -1,0 +1,50 @@
+From 40f979b13225f681f74babd0de7d2bcbb94c6d38 Mon Sep 17 00:00:00 2001
+From: tong_1001 <sxt1001@qq.com>
+Date: Thu, 27 Aug 2026 11:42:34 +0800
+Subject: [PATCH 2/2] Fix NULL deref and memory leak in print_map_res
+
+find_device_name() may return NULL when no matching block device is
+found. The subsequent debug logMessage() passed this potentially-NULL
+pointer directly to a "%s" format specifier, which is undefined
+behavior and can crash on a NULL-pointer dereference. Guard the value
+by printing "(null)" when device_name is NULL.
+
+Additionally, free(device_name) was only called inside the
+"if (device_name && io_type)" branch, so when device_name was non-NULL
+but io_type was '\0', the strdup()'d string was never freed, leaking
+memory on every iteration. Move free(device_name) out of the conditional
+so the allocation is released on all paths.
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+---
+ src/services/sentryCollector/ebpf_collector/ebpf_collector.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/services/sentryCollector/ebpf_collector/ebpf_collector.c b/src/services/sentryCollector/ebpf_collector/ebpf_collector.c
+index 3a2f4e1d9c5d..1e23d8b87611 100644
+--- a/src/services/sentryCollector/ebpf_collector/ebpf_collector.c
++++ b/src/services/sentryCollector/ebpf_collector/ebpf_collector.c
+@@ -198,7 +198,8 @@ static int print_map_res(int fd, char *stage, int map_size, int *io_dump)
+         int first_minor = counter.first_minor;
+         dev_t dev = makedev(major, first_minor);    
+         char *device_name = find_device_name(dev);
+-        logMessage(LOG_LEVEL_DEBUG, "device_name: %s, stage: %s, io_type: %c\n", device_name, stage, io_type);
++        logMessage(LOG_LEVEL_DEBUG, "device_name: %s, stage: %s, io_type: %c\n",
++                   device_name ? device_name : "(null)", stage, io_type);
+         if (device_name && io_type) {
+             printf("%-7s %10llu %10llu %d %c %s\n",
+                 stage, 
+@@ -208,9 +209,9 @@ static int print_map_res(int fd, char *stage, int map_size, int *io_dump)
+                 io_type,
+                 device_name
+             );
+-            free(device_name);
+             fflush(stdout);
+         }
++        free(device_name);
+     }
+ 
+     return 0; 
+-- 
+2.43.0
+

@@ -1,0 +1,24 @@
+From e5caa36d0305a53902b9750455e39f30c5344228 Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Tue, 28 Apr 2026 09:34:27 +0800
+Subject: [PATCH] add usleep backoff in receiver_thread loop
+
+---
+ src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c b/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
+index a9b4a89375c7..7b68c38860db 100644
+--- a/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
++++ b/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
+@@ -562,6 +562,7 @@ re_register:
+     rcd.register_info = &register_info;
+ 
+     while (1) {
++        usleep(1);
+         ret = xalarm_get_event(al_msg, register_info);
+         if (ret == -ENOTCONN || ret == -ECONNRESET || ret == -EBADF) {
+             logging_warn("Failed to get msg: (%d) Xalarmd service exception, try to re-register\n", ret);
+-- 
+2.43.0
+

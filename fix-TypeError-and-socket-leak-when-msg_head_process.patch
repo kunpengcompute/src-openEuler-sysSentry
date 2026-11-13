@@ -1,0 +1,28 @@
+From 202932e7ee454ebce6e4fb274d4695a3f5f44edb Mon Sep 17 00:00:00 2001
+From: liuying03 <liuying03@kylinos.cn>
+Date: Fri, 11 Sep 2026 11:11:24 +0800
+Subject: [PATCH] fix:TypeError and socket leak when msg_head_process returns
+ None
+
+---
+ src/services/sentryCollector/collect_server.py | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/services/sentryCollector/collect_server.py b/src/services/sentryCollector/collect_server.py
+index 483402d..b608191 100644
+--- a/src/services/sentryCollector/collect_server.py
++++ b/src/services/sentryCollector/collect_server.py
+@@ -206,6 +206,10 @@ class CollectServer():
+             logging.error("server recv HEAD failed")
+             return
+ 
++        if head_info is None:
++            client_socket.close()
++            logging.error("msg head parse failed")
++            return
+         protocol_id = head_info[0]
+         data_len = head_info[1]
+         logging.debug("msg protocol id: %d, data length: %d", protocol_id, data_len)
+-- 
+2.45.0.windows.1
+

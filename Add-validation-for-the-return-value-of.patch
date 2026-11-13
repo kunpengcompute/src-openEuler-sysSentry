@@ -1,0 +1,30 @@
+From 6eda0941caa86d18d28505c6befc54f76e622e09 Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Sat, 5 Sep 2026 09:24:35 +0800
+Subject: [PATCH] Add validation for the return value of execute_command in the
+ parse_hbmc_report function
+
+---
+ src/services/syssentry/bmc_alarm.py | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/services/syssentry/bmc_alarm.py b/src/services/syssentry/bmc_alarm.py
+index 4140cfa..0c2c5a3 100644
+--- a/src/services/syssentry/bmc_alarm.py
++++ b/src/services/syssentry/bmc_alarm.py
+@@ -114,8 +114,11 @@ def parse_hbmc_report(data: str):
+     logging.info(f"Send bmc alarm command is {cmd_list}")
+ 
+     ret = execute_command(cmd_list)
++    if ret is None:
++        logging.error("execute ipmitool failed")
++        raise ValueError
+     if HBMC_SEND_SUCCESS_CODE not in ret:
+-        logging.warning(f"Send bmc alarm failed, error code is {ret}")
++        logging.warning("Send bmc alarm failed, error code is %s", ret)
+         raise ValueError
+     logging.debug("Send bmc alarm success")
+ 
+-- 
+2.45.0.windows.1
+

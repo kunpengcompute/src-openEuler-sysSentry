@@ -1,0 +1,46 @@
+From e9bfa18d55017f095f851b9f1c6010313cc0c810 Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Thu, 3 Sep 2026 14:32:43 +0800
+Subject: [PATCH] Use isinstance instead of type comparison for type checking
+
+Fix G.TYP.08 in cpu_sentry plugins:
+- cpu_sentry.py: replace `type(cpu_input_i) != str` with
+  `not isinstance(cpu_input_i, str)`
+- cpu_alarm.py: replace `type(expect) == type(Enum)` with
+  `isinstance(expect, type) and issubclass(expect, Enum)`
+
+Co-Authored-By: GLM-5.3
+---
+ src/sentryPlugins/cpu_sentry/cpu_alarm.py  | 2 +-
+ src/sentryPlugins/cpu_sentry/cpu_sentry.py | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/sentryPlugins/cpu_sentry/cpu_alarm.py b/src/sentryPlugins/cpu_sentry/cpu_alarm.py
+index 9ffd816..548e1b6 100644
+--- a/src/sentryPlugins/cpu_sentry/cpu_alarm.py
++++ b/src/sentryPlugins/cpu_sentry/cpu_alarm.py
+@@ -227,7 +227,7 @@ def check_fixed_param(data, expect):
+         if not expect[0] <= int(data) <= expect[1]:
+             raise ValueError("expected number range param is not in specified range")
+         return int(data)
+-    elif type(expect) == type(Enum):
++    elif isinstance(expect, type) and issubclass(expect, Enum):
+         if not is_valid_enum_value(expect, int(data)):
+             raise ValueError("expected enum value param is not valid")
+         return int(data)
+diff --git a/src/sentryPlugins/cpu_sentry/cpu_sentry.py b/src/sentryPlugins/cpu_sentry/cpu_sentry.py
+index 35d6ce0..3335544 100644
+--- a/src/sentryPlugins/cpu_sentry/cpu_sentry.py
++++ b/src/sentryPlugins/cpu_sentry/cpu_sentry.py
+@@ -50,7 +50,7 @@ class CpuSentry:
+         if "," in cpu_input:
+             cpu_input_list = cpu_input.split(",")
+         for cpu_input_i in cpu_input_list:
+-            if type(cpu_input_i) != str:
++            if not isinstance(cpu_input_i, str):
+                 return []
+             cpu_input_i = cpu_input_i.strip()
+             if cpu_input_i.isdigit():
+-- 
+2.45.0.windows.1
+

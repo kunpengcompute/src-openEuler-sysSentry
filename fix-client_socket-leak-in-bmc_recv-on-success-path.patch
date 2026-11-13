@@ -1,0 +1,28 @@
+From a4cf59132098a09efedf992017a24a28135700a7 Mon Sep 17 00:00:00 2001
+From: liuying03 <liuying03@kylinos.cn>
+Date: Fri, 11 Sep 2026 11:03:39 +0800
+Subject: [PATCH] fix:client_socket leak in bmc_recv on success path
+
+---
+ src/services/syssentry/bmc_alarm.py | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/services/syssentry/bmc_alarm.py b/src/services/syssentry/bmc_alarm.py
+index 0c2c5a3..5f13ea3 100644
+--- a/src/services/syssentry/bmc_alarm.py
++++ b/src/services/syssentry/bmc_alarm.py
+@@ -159,9 +159,9 @@ def bmc_recv(server_socket: socket.socket):
+ 
+     except socket.error:
+         logging.error("socket error")
+-        client_socket.close()
+         return
+     except (ValueError, OSError, TypeError, IndexError, NotImplementedError):
+         logging.error("server recv bmc msg failed!")
+-        client_socket.close()
+         return
++    finally:
++        client_socket.close()
+-- 
+2.45.0.windows.1
+

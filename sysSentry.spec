@@ -4,7 +4,7 @@
 Summary: System Inspection Framework
 Name: sysSentry
 Version: 1.0.3
-Release: 1%{?dist}
+Release: 55%{?dist}
 License: Mulan PSL v2
 Group: System Environment/Daemons
 ExclusiveArch: x86_64 aarch64
@@ -139,6 +139,101 @@ Patch109:  fix-build-warning-for-catlib.patch
 Patch110:  fix-keep-critical-events-enabled-during-service-shut.patch
 # PR-336
 Patch111:  xalarm-auto-load-driver-when-proc-not-found.patch
+# PR-337
+Patch112:  fix-xalarm-fix-service-stop-timeout-and-PID-lock-rel.patch
+Patch113:  fix-xalarm-add-graceful-shutdown-for-GLib-main-loop-.patch
+Patch114:  update-bmc_ras_sentry-plugin.patch
+Patch115:  fix-sysSentry-service-restart-issues-PID-lock-releas.patch
+Patch116:  feat-add-link-event-alarm-reporting.patch
+Patch117:  fix-event-switch-invalidation-after-sysSentry-servic.patch
+Patch118:  verify-event-switch-state-by-reading-proc-file-befor.patch
+Patch119:  feat-sentry_msg_monitor-add-kernel-driver-version-co.patch
+Patch120:  fix-script-check-if-driver-exists-before-removing-it.patch
+Patch121:  cleanup-uninstall-log_utils.h-file.patch
+Patch122:  fix-PYNAME-define.patch
+Patch123:  fix-security-build-options-bug-for-ebpf_collector.patch
+Patch124:  Fix-the-issue-of-missing-security-compilation-option.patch
+Patch125:  fix-bmc_ras_sentry-compile-failed-on-old-gcc.patch
+Patch126:  fix-potential-overflow-in-xalarm_report_event.patch
+Patch127:  Fix-CTL-message-length-overflow-when-data-exceeds-3-.patch
+Patch128:  Fix-partial-send-recv-write-in-socket-communication.patch
+Patch129:  fix-build-warning-v2.patch
+Patch130:  Remove-unnecessary-operations-for-creating-var-run-s.patch
+Patch131:  Create-the-socket-object-only-after-checking-if-the-.patch
+Patch132:  add-validation-to-prevent-path-traversal-attacks.patch
+Patch133:  fix-codecheck-warning.patch
+Patch134:  improve-error-handling.patch
+Patch135:  check-sock-value-in-create_unix_socket.patch
+Patch136:  install-rasdaemon.mod-config-file.patch
+Patch137:  delete-the-RPATH-from-libxalarm.so.patch
+Patch138:  Enable-CMAKE_VERBOSE_MAKEFILE-to-show-detailed-compi.patch
+Patch139:  Correct-the-misuse-of-compilation-options.patch
+Patch140:  Do-not-allow-users-to-configure-unsafe-environment-v.patch
+Patch141:  add-lock-to-protect-ALARM_REGISTER_INFO.patch
+Patch142:  Check-whether-the-pointer-passed-to-report_result-is.patch
+Patch143:  Fix-potential-memory-leak-in-report_result.patch
+Patch144:  Return-failure-when-an-exception-occurs-while-parsin.patch
+Patch145:  add-command-string-validation-to-prevent-command-inj.patch
+Patch146:  enable-test_cpu_sentry.patch
+Patch147:  cpu_sentry-lifts-the-runtime-dependency-on-libxalarm.patch
+Patch148:  fix-check-__CPU_ALLOC-return-value-for-NULL-in-cli_e.patch
+Patch149:  fix-check-config-black_list-NULL-pointer-in-tc_ring_.patch
+Patch150:  fix-use-ln-snf-instead-of-ln-sf-for-symlink-creation.patch
+Patch151:  fix-strlen-buf-1-underflow-on-empty-line-in-non-stan.patch
+Patch152:  fix-check-strtok_r-NULL-return-in-catlib-plugins.patch
+Patch153:  fix-set-restrictive-umask-0o077-instead-of-umask-0-i.patch
+Patch154:  fix-resolve-PID-file-TOCTOU-race-conditions.patch
+Patch155:  fix-verify-D-Bus-signal-sender-in-xalarm_server.py.patch
+Patch156:  Add-exception-handling-for-sentryctl-exec-func-to-pr.patch
+Patch157:  Unify-os.unlink-exception-handling.patch
+Patch158:  Fix-security-issues-in-monitor_sentry_service-functi.patch
+Patch159:  use-SignalMatch.remove-instead-of-bus.remove_signal_.patch
+Patch160:  Add-test-cases-to-verify-whether-there-are-ERROR-lev.patch
+Patch161:  Fix-type-mismatch-warning-and-add-I-O-size-limit-in-.patch
+Patch162:  Fix-uninitialized-memory-read-in-string_to_ascii_hex.patch
+Patch163:  Fix-NULL-deref-and-memory-leak-in-print_map_res.patch
+Patch164:  Add-missing-blank-lines-to-improve-code-readability.patch
+Patch165:  Add-copyright-information-to-cpu_alarm.py.patch
+Patch166:  Use-isinstance-instead-of-type-comparison-for-type.patch
+Patch167:  Avoid-sys.exit-outside-the-main-entry-in-cpu_sentry.patch
+Patch168:  Remove-redundant-UnicodeError-catch.patch
+Patch169:  Replace-sys.stderr.write-with-logging-in-pyxalarm.patch
+Patch170:  Use-lazy-formatting-in-logging-calls.patch
+Patch171:  Wrap-long-lines-to-keep-line-length-within-120-chars.patch
+Patch172:  Handle-KeyError-when-collecting-data-detector.patch
+Patch173:  Add-validation-for-the-return-value-of-regcomp-in.patch
+Patch174:  Ensure-null-termination-of-error-strings-in.patch
+Patch175:  Fix-block-device-check-logic-in-ebpf_collector.patch
+Patch176:  Simplify-io_type-extraction-in-print_map_res.patch
+Patch177:  Use-recv_all-to-prevent-partial-socket-data.patch
+Patch178:  Close-the-accepted-client-socket-in-the.patch
+Patch179:  Pass-the-absolute-path-to-the-external-command-call.patch
+Patch180:  Add-more-insecure-environment-variables-to-the.patch
+Patch181:  Add-validation-for-the-return-value-of.patch
+Patch182:  Harden-string_to_ascii_hex-against-uninitialized.patch
+Patch183:  Add-command-timeout-and-improve-error-reporting-in.patch
+Patch184:  Add-explicit-guard-for-core-id-bitmap-capacity-in.patch
+Patch185:  Reject-unaligned-size-in-tc_ring_one_space_init.patch
+Patch186:  Validate-raid-tool-output-before-building-shell.patch
+Patch187:  Harden-HexAsciiToChar-against-untrusted-ipmitool.patch
+Patch188:  Fix-uint8_t-column-index-wraparound-hang-in.patch
+Patch189:  Fix-out-of-bounds-read-in-ebpf_collector-when-log.patch
+Patch190:  Fix-uncaught-exceptions-in-check_conflict-when.patch
+Patch191:  Fix-uncaught-exceptions-in-check_conflict-when-ad50a6cf.patch
+Patch192:  Handle-xalarm-registration-timeout-to-prevent.patch
+Patch193:  Reduce-xalarmd-registration-timeout-from-500ms-to.patch
+Patch194:  fix-client_socket-leak-in-bmc_recv-on-success-path.patch
+Patch195:  fix-TypeError-and-socket-leak-when-msg_head_process.patch
+Patch196:  Fix-typos-in-variable-names-macros-and-log-messages.patch
+Patch197:  Remove-unregister_events-action-to-protect-kernel.patch
+Patch198:  Use-RecvAll-in-alarm_recv-to-handle-partial-stream.patch
+Patch199:  fix-match-conflict-processes-by-exact-proc-cmdline.patch
+Patch200:  fix-xalarm_UnRegister-hangs-when-alarm_recv-blocks.patch
+Patch201:  delete-unnecessary-import-modules.patch
+Patch202:  add-usleep-backoff-in-receiver_thread-loop.patch
+Patch203:  add-check-for-alarm_id-alarm_clear_time-env_file-con.patch
+Patch204:  Fix-build-warnings-in-the-sentry_msg_monitor-plugin.patch
+Patch205:  xalarm-fix-subscriber-alarm-loss-from-stream-desync.patch
 
 BuildRequires: cmake gcc-c++
 BuildRequires: python3 python3-setuptools
@@ -298,6 +393,8 @@ This package provides soc_ring_sentry for the sysSentry.
 %attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/inspect.conf
 %attr(-,root,root) %{_unitdir}/sysSentry.service
 %attr(-,root,root) %{_unitdir}/sysSentry.socket
+%attr(-,root,root) %{_libdir}/libsentry_log.so
+%attr(-,root,root) %{_libdir}/libsentry_io.so
 
 # pysentry_collect
 %exclude %{python3_sitelib}/sentryCollector/collect_plugin.py
@@ -334,7 +431,6 @@ This package provides soc_ring_sentry for the sysSentry.
 %attr(-,root,root) %{_bindir}/sentryCollector
 %attr(-,root,root) %{_sysconfdir}/sysSentry/collector.conf
 %attr(-,root,root) %{_unitdir}/sentryCollector.service
-%attr(-,root,root) %{_libdir}/libsentry_log.so
 
 %exclude %{_includedir}/libsentry/log_utils.h
 %exclude %{_sysconfdir}/sysSentry/tasks/hbm_online_repair.mod
@@ -412,6 +508,10 @@ This package provides soc_ring_sentry for the sysSentry.
 %attr(-,root,root) %config(noreplace) %{_sysconfdir}/sysSentry/tasks/soc_ring_sentry.mod
 
 %changelog
+* Fri Nov 13 2026 Zhou Haoran <zhouhaoran30@huawei.com> - 1.0.3-55
+- [Type] sync
+- [DESC] synchronize version to opencloudos repository
+
 * Mon Jul 13 2026 shenyangyang <1014938109@qq.com> - 1.0.3-1
 - [Type] sync
 - [DESC] Package init

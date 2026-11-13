@@ -1,0 +1,40 @@
+From d65ee0526c678a1d49e480d0f7111e6f72003042 Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Thu, 3 Sep 2026 11:59:49 +0800
+Subject: [PATCH] Add missing blank lines to improve code readability
+
+---
+ src/sentryPlugins/cpu_sentry/cpu_sentry.py | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/sentryPlugins/cpu_sentry/cpu_sentry.py b/src/sentryPlugins/cpu_sentry/cpu_sentry.py
+index 8aa99da..35d6ce0 100644
+--- a/src/sentryPlugins/cpu_sentry/cpu_sentry.py
++++ b/src/sentryPlugins/cpu_sentry/cpu_sentry.py
+@@ -30,6 +30,7 @@ LOW_LEVEL_INSPECT_CMD = "cat-cli"
+ # max length of msg in details
+ DETAILS_LOG_MSG_MAX_LEN = 255
+ 
++
+ class CpuSentry:
+     """
+     cpu sentry script
+@@ -163,6 +164,7 @@ class CpuSentry:
+         report_result(task_name, result_level, details)
+         self.init_send_result()
+ 
++
+ def kill_process(signum, _f, cpu_sentry_obj):
+     """kill process by 'pkill -9'"""
+     run_cmd(f"pkill -9 {LOW_LEVEL_INSPECT_CMD}")
+@@ -172,6 +174,7 @@ def kill_process(signum, _f, cpu_sentry_obj):
+     cpu_sentry_obj.cpu_report_result()
+     sys.exit(1)
+ 
++
+ def main():
+     """main function"""
+     log_level = get_log_level(filename=CPU_SENTRY_PARAM_CONFIG)
+-- 
+2.45.0.windows.1
+

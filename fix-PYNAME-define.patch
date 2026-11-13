@@ -1,0 +1,30 @@
+From 523f0d995d9b10728befef3897e351d3423ef006 Mon Sep 17 00:00:00 2001
+From: tong_1001 <sxt1001@qq.com>
+Date: Thu, 9 Jul 2026 14:36:28 +0800
+Subject: [PATCH] fix PYNAME define
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+当环境中同时安装了多个python3版本（eg. python3.10和python3.11)，如果PYNAME对应的
+python版本和/usr/bin/python3指向的python版本不一致，则sysSentry安装会有问题。
+---
+ Makefile | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/Makefile b/Makefile
+index 27ab709ab2a0..f369228017c5 100644
+--- a/Makefile
++++ b/Makefile
+@@ -20,7 +20,7 @@ CURTESTDIR      = $(CURDIR)/selftest
+ CURCONFIGDIR    = $(CURDIR)/config
+ 
+ PYBIN   = $(shell which python3)
+-PYNAME  = $(shell ls /usr/lib |grep -E '^python'| sort -V | tail -n1)
++PYNAME  = $(shell $(PYBIN) -c "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}')")
+ PYDIR   = $(DESTDIR)$(PREFIX)/lib/$(PYNAME)/site-packages
+ 
+ PYTHON_VERSION := $(shell $(PYBIN) --version 2>&1 | awk '{print $$2}' | cut -d '.' -f 1,2)
+-- 
+2.43.0
+

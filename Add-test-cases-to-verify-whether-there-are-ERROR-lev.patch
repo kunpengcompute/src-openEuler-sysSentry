@@ -1,0 +1,103 @@
+From 9a3929e94bfa3c7eac50502d8b0803a0d8543823 Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Thu, 13 Aug 2026 16:24:00 +0800
+Subject: [PATCH] Add test cases to verify whether there are ERROR-level logs
+ after the sysSentry/xalarmd service is started and stopped
+
+---
+ .../test/test_service_log_no_error_log.sh     | 50 +++++++++++++++++++
+ src/services/syssentry/global_values.py       |  4 +-
+ src/services/syssentry/syssentry.py           |  5 ++
+ 3 files changed, 57 insertions(+), 2 deletions(-)
+ create mode 100644 selftest/test/test_service_log_no_error_log.sh
+
+diff --git a/selftest/test/test_service_log_no_error_log.sh b/selftest/test/test_service_log_no_error_log.sh
+new file mode 100644
+index 000000000000..149f9e5dc9da
+--- /dev/null
++++ b/selftest/test/test_service_log_no_error_log.sh
+@@ -0,0 +1,50 @@
++#!/bin/bash
++# Copyright (c), 2026, Huawei Tech. Co., Ltd.
++
++source "libs/expect.sh"
++source "libs/lib.sh"
++source "libs/common.sh"
++
++set +e
++
++
++function pre_test() {
++    # 如果环境中有启动ubse服务，需要关闭，否则一些版本中会影响该用例
++    systemctl stop ubse
++
++    systemctl stop sysSentry.socket sysSentry.service 2>/dev/null
++    systemctl stop xalarmd.socket xalarmd.service 2>/dev/null
++
++    echo > /var/log/sysSentry/sysSentry.log
++    echo > /var/log/sysSentry/xalarm.log
++
++    systemctl start xalarmd.socket sysSentry.socket
++    systemctl start sysSentry
++    sleep 2
++}
++
++function do_test() {
++    expect_service_status_eq sysSentry active
++    expect_service_status_eq xalarmd active
++
++    # 服务运行一段时间
++    sleep 30
++
++    # 检测sysSentry服务和xalarmd服务的日志中无ERROR级别的日志
++    expect_false "grep -E -- '- ERROR -' /var/log/sysSentry/xalarm.log"
++    expect_false "grep -E -- '- ERROR -' /var/log/sysSentry/sysSentry.log"
++
++    systemctl stop sysSentry.socket sysSentry.service 2>/dev/null
++    systemctl stop xalarmd.socket xalarmd.service 2>/dev/null
++
++    # 停止服务后，再次检测是否有ERROR级别的日志
++    expect_false "grep -E -- '- ERROR -' /var/log/sysSentry/xalarm.log"
++    expect_false "grep -E -- '- ERROR -' /var/log/sysSentry/sysSentry.log"
++}
++
++function post_test() {
++    systemctl stop sysSentry.socket sysSentry.service 2>/dev/null
++    systemctl stop xalarmd.socket xalarmd.service 2>/dev/null
++}
++
++run_testcase
+diff --git a/src/services/syssentry/global_values.py b/src/services/syssentry/global_values.py
+index 91f416ce3e6a..949987176a0b 100644
+--- a/src/services/syssentry/global_values.py
++++ b/src/services/syssentry/global_values.py
+@@ -296,8 +296,8 @@ class InspectTask:
+                 key, value = line.split("=", 1)
+                 value = value.strip('"')
+                 if not key or not value:
+-                    logging.error("env_file = %s format is error, use default environ", self.env_file)
+-                    return
++                    logging.warning("env_file = %s format is error, use default environ", self.env_file)
++                    continue
+                 if is_dangerous_env_key(key):
+                     logging.warning("env %s is unsafe and user configuration is forbidden. ignore it", key)
+                     continue
+diff --git a/src/services/syssentry/syssentry.py b/src/services/syssentry/syssentry.py
+index 0f7a8645eec5..bbd9ccffc43f 100644
+--- a/src/services/syssentry/syssentry.py
++++ b/src/services/syssentry/syssentry.py
+@@ -519,6 +519,11 @@ def sigchld_handler(signum, _f):
+     while True:
+         try:
+             child_pid, child_status = os.waitpid(-1, os.WNOHANG)
++        except ChildProcessError:
++            logging.info("No child process left to wait for - all have been reaped")
++            break
++
++        try:
+             logging.debug("sigchld pid :%d", child_pid)
+             task = get_task_by_pid(child_pid)
+             if not task:
+-- 
+2.43.0
+

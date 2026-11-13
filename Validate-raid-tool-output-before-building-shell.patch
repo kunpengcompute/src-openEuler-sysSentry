@@ -1,0 +1,225 @@
+From 8ac7867b329204477a47dfe4cdf0e32abc4275ac Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Sat, 5 Sep 2026 14:31:33 +0800
+Subject: [PATCH] Validate raid tool output before building shell commands in
+ bmc_ras_sentry
+
+storcli64/hiraidadm output is parsed into ctrlId/VDId/encId/slotId/VDName
+fields, re-assembled into commands via format_string, and executed through
+popen() as root - a maliciously crafted tool output (compromised tool
+binary, hijacked firmware, or tampered enclosure data) could inject
+arbitrary shell commands.
+
+- add IsValidSafeToken(): whitelist of alphanumerics plus : / - _ (no
+  shell metacharacters); empty string, NA and N/A placeholders are also
+  accepted
+- validate every tainted field at each command construction site and at
+  the parsing sources (VD LIST, EID:Slt, Enc/Slot columns), rejecting
+  unsafe values with a warning log
+- guard SplitString().back() on an empty result for the VD name in both
+  storcli and hiraidadm paths: an empty "OS Drive Name" field would hit
+  undefined behavior on an empty vector and crash the root daemon before
+  the token check could run
+
+hiraidadm ctrlId/VDId values are int-typed through json_type_int checks
+and formatted with %d, so they cannot carry injection payloads and need
+no token validation.
+
+Co-Authored-By: GLM-5.3
+---
+ .../bmc_ras_sentry/include/common.h           |  1 +
+ .../bmc_ras_sentry/src/cbmcrassentry.cpp      | 48 ++++++++++++++++
+ .../bmc_ras_sentry/src/common.cpp             | 55 +++++++++++++++++++
+ 3 files changed, 104 insertions(+)
+
+diff --git a/src/sentryPlugins/bmc_ras_sentry/include/common.h b/src/sentryPlugins/bmc_ras_sentry/include/common.h
+index 5e75daf..a855945 100644
+--- a/src/sentryPlugins/bmc_ras_sentry/include/common.h
++++ b/src/sentryPlugins/bmc_ras_sentry/include/common.h
+@@ -44,6 +44,7 @@ std::string ByteToHex(uint8_t byte);
+ bool HexAsciiToChar(const std::string& hexStr, std::string& asciiStr);
+ std::vector<std::string> SplitString(const std::string& str, const std::string& split);
+ std::vector<std::string> SplitBySpace(const std::string& str);
++bool IsValidSafeToken(const std::string& str);
+ std::map<std::string, std::vector<std::string> > ParseStorcliCmd(const std::string& cmd);
+ std::pair<std::map<std::string, uint8_t>, std::vector<std::vector<std::string> > > ParseCmdMap(
+     const std::vector<std::string>& inputVec);
+diff --git a/src/sentryPlugins/bmc_ras_sentry/src/cbmcrassentry.cpp b/src/sentryPlugins/bmc_ras_sentry/src/cbmcrassentry.cpp
+index 7f251dc..a8e874a 100644
+--- a/src/sentryPlugins/bmc_ras_sentry/src/cbmcrassentry.cpp
++++ b/src/sentryPlugins/bmc_ras_sentry/src/cbmcrassentry.cpp
+@@ -155,6 +155,11 @@ std::pair<std::string, std::vector<PhysicalDiskAddress> > CBMCRasSentry::GetStor
+     std::vector<PhysicalDiskAddress> PDAddresses;
+     std::string VDName;
+ 
++    if (!IsValidSafeToken(ctrlId) || !IsValidSafeToken(VDId)) {
++        BMC_LOG_WARNING << "unsafe ctrlId or VDId rejected, ctrlId: " << ctrlId << ", VDId: " << VDId;
++        return {"", {}};
++    }
++
+     auto getVDInfoCmd = format_string(STORCLI_GET_VD_INFO_CMD, ctrlId.c_str(), VDId.c_str());
+     auto VDInfo = ParseStorcliCmd(getVDInfoCmd);
+     auto PDListHead = format_string(STORCLI_PD_LIST, VDId.c_str());
+@@ -178,7 +183,15 @@ std::pair<std::string, std::vector<PhysicalDiskAddress> > CBMCRasSentry::GetStor
+         return {"", {}};
+     }
+     auto VDNameResult = SplitString(VDNameIt->second, "/");
++    if (VDNameResult.empty()) {
++        BMC_LOG_WARNING << "parse " << STORCLI_VD_DRIVE_NAME << " value failed, cmd: " << getVDInfoCmd;
++        return {"", {}};
++    }
+     VDName = VDNameResult.back();
++    if (!IsValidSafeToken(VDName)) {
++        BMC_LOG_WARNING << "unsafe " << STORCLI_VD_DRIVE_NAME << " value rejected, cmd: " << getVDInfoCmd;
++        return {"", {}};
++    }
+ 
+     auto PDMap = ParseCmdMap(PDListIt->second);
+     auto PDMapHead = PDMap.first;
+@@ -200,6 +213,10 @@ std::pair<std::string, std::vector<PhysicalDiskAddress> > CBMCRasSentry::GetStor
+             BMC_LOG_WARNING << "parse " << STORCLI_ENC_SLOT << " value failed, cmd: " << getVDInfoCmd;
+             continue;
+         }
++        if (!IsValidSafeToken(EncSlotResult[0]) || !IsValidSafeToken(EncSlotResult[1])) {
++            BMC_LOG_WARNING << "unsafe " << STORCLI_ENC_SLOT << " value rejected, cmd: " << getVDInfoCmd;
++            continue;
++        }
+         PhysicalDiskAddress PDAddress;
+         PDAddress.encId = EncSlotResult[0];
+         PDAddress.slotId = EncSlotResult[1];
+@@ -214,6 +231,11 @@ std::vector<std::string> CBMCRasSentry::GetStorcliPDSN(
+ {
+     std::vector<std::string> PDSNs;
+ 
++    if (!IsValidSafeToken(ctrlId)) {
++        BMC_LOG_WARNING << "unsafe ctrlId rejected, ctrlId: " << ctrlId;
++        return PDSNs;
++    }
++
+     for (const auto& PDAddress : PDAddresses) {
+         auto getPDInfoCmd = format_string(STORCLI_GET_PD_INFO_CMD,
+             ctrlId.c_str(), PDAddress.encId.c_str(), PDAddress.slotId.c_str());
+@@ -239,6 +261,11 @@ std::vector<std::string> CBMCRasSentry::GetStorcliPDSN(
+ 
+ std::string CBMCRasSentry::GetStorcliCtrlSN(const std::string& ctrlId)
+ {
++    if (!IsValidSafeToken(ctrlId)) {
++        BMC_LOG_WARNING << "unsafe ctrlId rejected, ctrlId: " << ctrlId;
++        return "";
++    }
++
+     auto getCtrlDetailsCmd = format_string(STORCLI_GET_CTRL_DETAILS_CMD, ctrlId.c_str());
+     auto ctrlDetails = ParseStorcliCmd(getCtrlDetailsCmd);
+     auto headMessageIt = ctrlDetails.find(STORCLI_HEAD_MESSAGE);
+@@ -296,6 +323,12 @@ void CBMCRasSentry::GetStorcliRaidInfo()
+             continue;
+         }
+ 
++        if (!IsValidSafeToken(ctrlVDResult[0]) || !IsValidSafeToken(ctrlVDResult[1])) {
++            BMC_LOG_WARNING << "unsafe " << STORCLI_CTRL_VD << " value rejected, value: " << ctrlVDId
++                            << ", cmd: " << STORCLI_GET_CTRL_INFO_CMD;
++            continue;
++        }
++
+         auto ctrlInfoIt = ctrlInfoMap.find(ctrlVDResult[0]);
+         if (ctrlInfoIt == ctrlInfoMap.end()) {
+             ctrlInfoMap[ctrlVDResult[0]] = {ctrlVDResult[1]};
+@@ -345,7 +378,17 @@ std::pair<std::string, std::vector<PhysicalDiskAddress> > CBMCRasSentry::GetHira
+         return {"", {}};
+     }
+     auto VDNameResult = SplitString(json_object_get_string(VDNameObj), "/");
++    if (VDNameResult.empty()) {
++        BMC_LOG_WARNING << "parse " << HIRAIDADM_VD_NAME << " value failed, cmd: " << getVdInfoCmd;
++        json_object_put(VDInfoDataObj);
++        return {"", {}};
++    }
+     VDName = VDNameResult.back();
++    if (!IsValidSafeToken(VDName)) {
++        BMC_LOG_WARNING << "unsafe " << HIRAIDADM_VD_NAME << " value rejected, cmd: " << getVdInfoCmd;
++        json_object_put(VDInfoDataObj);
++        return {"", {}};
++    }
+     json_object_put(VDInfoDataObj);
+ 
+     auto getPDListCmd = format_string(HIRAIDADM_GET_PD_LIST_CMD, ctrlId, VDId);
+@@ -375,6 +418,11 @@ std::pair<std::string, std::vector<PhysicalDiskAddress> > CBMCRasSentry::GetHira
+         PhysicalDiskAddress PDAddress;
+         PDAddress.encId = pdsLine[encNum];
+         PDAddress.slotId = pdsLine[slotNum];
++        if (!IsValidSafeToken(PDAddress.encId) || !IsValidSafeToken(PDAddress.slotId)) {
++            BMC_LOG_WARNING << "unsafe PD address rejected, encId: " << PDAddress.encId
++                            << ", slotId: " << PDAddress.slotId << ", cmd: " << getPDListCmd;
++            continue;
++        }
+         PDAddresses.push_back(PDAddress);
+     }
+ 
+diff --git a/src/sentryPlugins/bmc_ras_sentry/src/common.cpp b/src/sentryPlugins/bmc_ras_sentry/src/common.cpp
+index 5627603..94b9c83 100644
+--- a/src/sentryPlugins/bmc_ras_sentry/src/common.cpp
++++ b/src/sentryPlugins/bmc_ras_sentry/src/common.cpp
+@@ -284,6 +284,61 @@ std::vector<std::string> SplitBySpace(const std::string& str)
+     return result;
+ }
+ 
++/**
++ * IsValidSafeToken - 校验外部工具输出中解析出的字符串是否只含安全字符
++ *
++ * 使用场景(为什么需要本函数):
++ *   本插件以root权限运行, 会解析raid卡管理工具(storcli64/hiraidadm)的输出,
++ *   从中提取 ctrlId/VDId/encId/slotId/VDName 等字段, 再经 format_string 拼接成
++ *   新的命令字符串, 最终由 ExecCommand() -> popen() 以shell方式执行。
++ *   若上述工具的输出被恶意构造(如raid卡固件被劫持、盘柜背板数据被篡改,
++ *   或工具二进制被替换), 字段中携带 "; rm -rf /" 之类的shell元字符即可
++ *   注入任意命令。因此所有取自外部工具输出、将要拼入命令的字符串,
++ *   必须先通过本函数校验。
++ *
++ * 校验规则(白名单):
++ *   - 字母、数字          : 编号、盘名、序列号的主体字符
++ *   - ':'                 : storcli EID:Slt 字段分隔符, 如 "259:0"
++ *   - '/'                 : 设备路径与 DG/VD 字段分隔符, 如 "/dev/sda"、"0/0"
++ *   - '-'                 : 设备名连字符, 如 "nvme0n1-e1"; 也是 "N/A" 的组成部分
++ *   - '_'                 : 设备名下划线, 如部分厂商的RAID VD名, 无shell语义
++ *   - 空串                : 合法。工具输出中字段可能为空(如直通盘无VD名称),
++ *                          空值不会注入任何内容, 拼入命令后只是一个空参数位置
++ *   - "NA" / "N/A"        : 合法。raid工具对无值字段的惯用占位符(不适用/未检出),
++ *                          仅含字母与斜杠, 无注入风险
++ *   - 其余任何字符均拒绝  : 包括但不限于 ; | & ` $ ( ) < > " ' \ 空白符和控制字符,
++ *                          这些是shell语法字符或可破坏命令语义的字符
++ *
++ * 使用约定:
++ *   - 新增解析外部输出的字段时, 若该字段会拼入命令, 必须先经本函数校验;
++ *     仅进入JSON上报的字段也建议校验, 防止告警内容注入
++ *   - 需要放行新字符时, 先确认该字符无shell语义(参考POSIX shell语法中的
++ *     特殊字符表), 且当前 storcli/hiraidadm 版本的真实输出确实包含该字符,
++ *     再添加到白名单
++ *
++ * 注意: 本函数是纵深防御的一层, 根治方案是 ExecCommand 改用 execvp 直接
++ *   执行(argv数组, 不经shell解析), 若后续改造请同步评估本函数的保留价值
++ */
++bool IsValidSafeToken(const std::string& str)
++{
++    // 空串与raid工具的惯用占位符均为合法输入
++    if (str.empty() || str == "NA" || str == "N/A") {
++        return true;
++    }
++
++    for (const auto& ch : str) {
++        if (std::isalnum(static_cast<unsigned char>(ch))) {
++            continue;
++        }
++        if (ch == ':' || ch == '/' || ch == '-' || ch == '_') {
++            continue;
++        }
++        return false;
++    }
++
++    return true;
++}
++
+ std::map<std::string, std::vector<std::string> > ParseStorcliCmd(const std::string& cmd)
+ {
+     std::vector<std::string> cmdOut;
+-- 
+2.45.0.windows.1
+

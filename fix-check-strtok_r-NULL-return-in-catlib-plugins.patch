@@ -1,0 +1,57 @@
+From bb8624d8c0b547370726611aee5718ab68bb71fc Mon Sep 17 00:00:00 2001
+From: tong_1001 <sxt1001@qq.com>
+Date: Mon, 3 Aug 2026 09:41:04 +0800
+Subject: [PATCH 5/8] fix: check strtok_r NULL return in catlib plugins
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+cli_param_checker.c和cpu_patrol_result.c中，内层strtok_r
+按'-'切割后返回值直接传给strtol，若输入格式异常（如
+以'-'开头或连续'-'），strtok_r返回NULL，strtol解引用
+空指针导致段错误。
+
+cli_param_checker.c: subSplit为NULL时设置cpulist_err错误信息并return，
+与该函数其他错误处理风格一致。
+cpu_patrol_result.c: subSplit为NULL时CAT_LOG_E打印错误信息并返回CAT_ERR，
+而非break后继续循环最终返回CAT_OK。
+---
+ src/sentryPlugins/cpu_sentry/catlib/cli_param_checker.c     | 6 ++++++
+ .../cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol_result.c | 4 ++++
+ 2 files changed, 10 insertions(+)
+
+diff --git a/src/sentryPlugins/cpu_sentry/catlib/cli_param_checker.c b/src/sentryPlugins/cpu_sentry/catlib/cli_param_checker.c
+index 92feba74dcf3..ac8ad5f096e0 100644
+--- a/src/sentryPlugins/cpu_sentry/catlib/cli_param_checker.c
++++ b/src/sentryPlugins/cpu_sentry/catlib/cli_param_checker.c
+@@ -48,6 +48,12 @@ void checkset_cpulist(char *getopt_optarg, catcli_request_body *p_request_body,
+             }
+             char *subSavePtr = NULL;
+             char *subSplit = strtok_r(split, "-", &subSavePtr);
++            if (subSplit == NULL) {
++                strncpy(errs->cpulist_err,
++                    "\"cpulist\" format error: unexpected '-' delimiter, correct \"-l, --cpulist\"\n",
++                    MAX_ERR_LEN);
++                return;
++            }
+             long coreid_before = strtol(subSplit, NULL, DECIMAL);
+             long coreid_after = -1;
+             if (subSavePtr) {
+diff --git a/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol_result.c b/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol_result.c
+index b2ceff6d2485..ecf1ee8709d1 100644
+--- a/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol_result.c
++++ b/src/sentryPlugins/cpu_sentry/catlib/plugin/cpu_patrol/cpu_patrol_result.c
+@@ -79,6 +79,10 @@ static cat_return_t parse_patrol_result(char *buf, core_list_st *fault_list)
+         }
+         char *sub_save_ptr = NULL;
+         char *subSplit = strtok_r(split, line_split, &sub_save_ptr);
++        if (subSplit == NULL) {
++            CAT_LOG_E("invalid cpu info: strtok_r returned NULL for segment '%s'\n", split);
++            return CAT_ERR;
++        }
+         int coreid_before = (int) strtol(subSplit, NULL, number_base);
+         int coreid_after = -1;
+         if (sub_save_ptr) {
+-- 
+2.43.0
+

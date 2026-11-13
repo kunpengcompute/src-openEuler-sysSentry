@@ -1,0 +1,63 @@
+From 5b53b168c8bf19d5554f4f51925075a99bb11b84 Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Thu, 23 Jul 2026 16:33:39 +0800
+Subject: [PATCH 2/6] Create the socket object only after checking if the
+ '/var/run/xalarm' directory exists
+
+---
+ src/libs/libxalarm/register_xalarm.c | 10 +++++-----
+ src/libs/pyxalarm/register_xalarm.py |  7 +++----
+ 2 files changed, 8 insertions(+), 9 deletions(-)
+
+diff --git a/src/libs/libxalarm/register_xalarm.c b/src/libs/libxalarm/register_xalarm.c
+index e4f2cb3cb3d8..a8a0c32793c1 100644
+--- a/src/libs/libxalarm/register_xalarm.c
++++ b/src/libs/libxalarm/register_xalarm.c
+@@ -90,6 +90,11 @@ static int create_unix_socket(const char *path)
+         return -1;
+     }
+ 
++    if (access(DIR_XALARM, F_OK) == -1) {
++        printf("xalarm directory access failed\n");
++        return -1;
++    }
++
+     fd = socket(AF_UNIX, SOCK_STREAM, 0);
+     if (fd < 0) {
+         printf("socket failed:%s\n", strerror(errno));
+@@ -102,11 +107,6 @@ static int create_unix_socket(const char *path)
+         goto release_socket;
+     }
+ 
+-    if (access(DIR_XALARM, F_OK) == -1) {
+-        printf("xalarm directory %s does not exist, service may not be started\n", DIR_XALARM);
+-        goto release_socket;
+-    }
+-
+     memset(&alarm_addr, 0, sizeof(alarm_addr));
+     alarm_addr.sun_family = AF_UNIX;
+ 
+diff --git a/src/libs/pyxalarm/register_xalarm.py b/src/libs/pyxalarm/register_xalarm.py
+index 38c96be353b8..30f2af428278 100644
+--- a/src/libs/pyxalarm/register_xalarm.py
++++ b/src/libs/pyxalarm/register_xalarm.py
+@@ -64,13 +64,12 @@ class AlarmRegister:
+ 
+     def create_unix_socket(self) -> socket.socket:
+         try:
+-            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+-            sock.setblocking(False)
+-
+             if not os.access(DIR_XALARM, os.F_OK):
+-                sys.stderr.write(f"xalarm directory {DIR_XALARM} does not exist, service may not be started\n")
++                sys.stderr.write("xalarm directory access failed\n")
+                 return None
+ 
++            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
++            sock.setblocking(False)
+             sock.connect(PATH_REG_ALARM)
+             return sock
+         except (IOError, OSError, FileNotFoundError) as e:
+-- 
+2.43.0
+

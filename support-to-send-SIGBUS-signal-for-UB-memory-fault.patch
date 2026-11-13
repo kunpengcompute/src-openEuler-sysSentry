@@ -1,7 +1,7 @@
-From 7290595e4bd5728dbe7e1c8c215e026eb0f84cbd Mon Sep 17 00:00:00 2001
+From c1ed548f555689d26736a6f6093dfd532c322f92 Mon Sep 17 00:00:00 2001
 From: shixuantong <shixuantong1@huawei.com>
 Date: Mon, 10 Nov 2025 17:37:02 +0800
-Subject: [PATCH 12/16] support to send SIGBUS signal for UB memory fault
+Subject: [PATCH] support to send SIGBUS signal for UB memory fault
 
 Feature issue:
 https://gitee.com/openeuler/release-management/issues/ID45WQ
@@ -18,7 +18,7 @@ https://gitee.com/openeuler/release-management/issues/ID45WQ
  create mode 100644 src/sentryPlugins/sentry_msg_monitor/ub_fault_lib.h
 
 diff --git a/src/libsentry/c/log/log_utils.h b/src/libsentry/c/log/log_utils.h
-index 2cd74e2..774fa97 100644
+index 2cd74e2e54bb..774fa970ebaf 100644
 --- a/src/libsentry/c/log/log_utils.h
 +++ b/src/libsentry/c/log/log_utils.h
 @@ -31,20 +31,23 @@ typedef enum {
@@ -51,7 +51,7 @@ index 2cd74e2..774fa97 100644
  // configure Env for log 
  #define LOG_LEVEL_ENV "LOG_LEVEL"
 diff --git a/src/sentryPlugins/sentry_msg_monitor/Makefile b/src/sentryPlugins/sentry_msg_monitor/Makefile
-index c74ee07..82e0d6e 100644
+index c74ee0798dfb..82e0d6eacf3b 100644
 --- a/src/sentryPlugins/sentry_msg_monitor/Makefile
 +++ b/src/sentryPlugins/sentry_msg_monitor/Makefile
 @@ -15,7 +15,7 @@
@@ -64,7 +64,7 @@ index c74ee07..82e0d6e 100644
  clean:
  	rm -f sentry_msg_monitor
 diff --git a/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c b/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
-index 5a08078..6b2bfd7 100644
+index 5a0807815cda..6b2bfd7108b1 100644
 --- a/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
 +++ b/src/sentryPlugins/sentry_msg_monitor/sentry_msg_monitor.c
 @@ -29,6 +29,7 @@
@@ -141,7 +141,7 @@ index 5a08078..6b2bfd7 100644
      return ret;
  }
 diff --git a/src/sentryPlugins/sentry_msg_monitor/smh_common_type.h b/src/sentryPlugins/sentry_msg_monitor/smh_common_type.h
-index 8035231..31cd352 100644
+index 8035231b1d1b..31cd3529f2d3 100644
 --- a/src/sentryPlugins/sentry_msg_monitor/smh_common_type.h
 +++ b/src/sentryPlugins/sentry_msg_monitor/smh_common_type.h
 @@ -69,6 +69,7 @@ enum sentry_msg_helper_msg_type {
@@ -166,7 +166,7 @@ index 8035231..31cd352 100644
      } helper_msg_info;
 diff --git a/src/sentryPlugins/sentry_msg_monitor/ub_fault_lib.c b/src/sentryPlugins/sentry_msg_monitor/ub_fault_lib.c
 new file mode 100644
-index 0000000..7d96b62
+index 000000000000..54f7e2dac557
 --- /dev/null
 +++ b/src/sentryPlugins/sentry_msg_monitor/ub_fault_lib.c
 @@ -0,0 +1,252 @@
@@ -289,7 +289,7 @@ index 0000000..7d96b62
 +        }
 +
 +        // parse maps line
-+        if (sscanf(line, "%lx-%lx %7s %lx %1024s",
++        if (sscanf(line, "%lx-%lx %7s %lx %1023s",
 +                   &start, &end, perms, &offset, other_maps_line) < 5) {
 +            logging_error("parse [%s] failed.\n", line);
 +            continue;
@@ -424,7 +424,7 @@ index 0000000..7d96b62
 +}
 diff --git a/src/sentryPlugins/sentry_msg_monitor/ub_fault_lib.h b/src/sentryPlugins/sentry_msg_monitor/ub_fault_lib.h
 new file mode 100644
-index 0000000..eece608
+index 000000000000..eece6087403b
 --- /dev/null
 +++ b/src/sentryPlugins/sentry_msg_monitor/ub_fault_lib.h
 @@ -0,0 +1,27 @@
@@ -456,7 +456,7 @@ index 0000000..eece608
 +int find_and_send_sigbus_to_thread(mem_id memid, unsigned long obmm_offset);
 +#endif
 diff --git a/src/services/syssentry/sentryctl b/src/services/syssentry/sentryctl
-index d94a044..ec683b7 100644
+index d94a044c8f3c..ec683b733063 100644
 --- a/src/services/syssentry/sentryctl
 +++ b/src/services/syssentry/sentryctl
 @@ -61,6 +61,9 @@ def write_proc_file(proc_dir, proc_name, proc_value):
@@ -490,5 +490,5 @@ index d94a044..ec683b7 100644
      else:
          parser.print_help()
 -- 
-2.27.0
+2.43.0
 

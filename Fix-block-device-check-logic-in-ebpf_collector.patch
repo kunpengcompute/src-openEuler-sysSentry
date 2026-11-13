@@ -1,0 +1,33 @@
+From ab975b33ee2ed030cd214b98f61191b8554393f7 Mon Sep 17 00:00:00 2001
+From: shixuantong <sxt1001@qq.com>
+Date: Fri, 4 Sep 2026 15:07:19 +0800
+Subject: [PATCH] Fix block device check logic in ebpf_collector
+
+The old condition `lstat() != 0 && !S_ISBLK()` failed to skip
+non-block devices and checked an uninitialized statbuf when lstat
+failed. Split it into two separate checks with error logs
+---
+ .../sentryCollector/ebpf_collector/ebpf_collector.c        | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/services/sentryCollector/ebpf_collector/ebpf_collector.c b/src/services/sentryCollector/ebpf_collector/ebpf_collector.c
+index 1e23d8b..50fff12 100644
+--- a/src/services/sentryCollector/ebpf_collector/ebpf_collector.c
++++ b/src/services/sentryCollector/ebpf_collector/ebpf_collector.c
+@@ -381,7 +381,12 @@ int main(int argc, char **argv) {
+         }
+         snprintf(path, sizeof(path), "/dev/%s", entry->d_name);
+         struct stat statbuf;
+-        if (lstat(path, &statbuf) != 0 && !S_ISBLK(statbuf.st_mode)) {
++        if (lstat(path, &statbuf) != 0) {
++            logMessage(LOG_LEVEL_ERROR, "lstat %s failed, skip.\n", path);
++            continue;
++        }
++        if (!S_ISBLK(statbuf.st_mode)) {
++            logMessage(LOG_LEVEL_ERROR, "S_ISBLK failed, skip.\n", path);
+             continue;
+         }
+         if (!strncmp(entry->d_name, "dm-", 3) || !strncmp(entry->d_name, "loop", 4) ||
+-- 
+2.45.0.windows.1
+

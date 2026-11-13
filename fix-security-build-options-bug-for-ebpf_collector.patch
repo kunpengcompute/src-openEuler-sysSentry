@@ -1,0 +1,25 @@
+From 6f12519bae29552f04d535e98e7cd8c30613e805 Mon Sep 17 00:00:00 2001
+From: shixuantong <shixuantong1@huawei.com>
+Date: Wed, 6 Aug 2025 10:41:27 +0800
+Subject: [PATCH] fix security build options bug for ebpf_collector
+
+---
+ src/services/sentryCollector/ebpf_collector/Makefile | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/services/sentryCollector/ebpf_collector/Makefile b/src/services/sentryCollector/ebpf_collector/Makefile
+index a89835010103..413d366447bd 100644
+--- a/src/services/sentryCollector/ebpf_collector/Makefile
++++ b/src/services/sentryCollector/ebpf_collector/Makefile
+@@ -7,7 +7,7 @@ ARCH := $(shell uname -m | sed 's/x86_64/x86/' | sed 's/aarch64/arm64/' | sed 's
+ KERNEL_CFLAGS = -O2 -g -target bpf -D__TARGET_ARCH_$(ARCH)
+ 
+ # 定义用户态编译选项
+-USER_CFLAGS = -g -lbpf
++USER_CFLAGS = -g -fstack-protector-strong -D_FORTIFY_SOURCE=2 -O2 -Wl,-z,relro,-z,now -lbpf
+ 
+ # 定义目标文件
+ KERNEL_TARGET = ebpf_collector.bpf.o
+-- 
+2.43.0
+
